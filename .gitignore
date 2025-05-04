@@ -5,6 +5,13 @@ __pycache__/
 
 # C extensions
 *.so
+# Project Related stuff
+code
+browser
+images
+gmail_token.json
+client_secret.json
+
 
 # Distribution / packaging
 .Python
