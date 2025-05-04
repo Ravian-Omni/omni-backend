@@ -38,7 +38,6 @@ class Post(BaseModel):
     caption: str
     post_url: str
 
-
 class Posts(BaseModel):
     posts: List[Post]
 
@@ -170,12 +169,6 @@ easy_question = AssistantAgent(
     "easy_question",
     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
     llm_config=llm_config,
-    description="""
-        When this agent will be called upon --> THIS AGENT WILL ASK QUESTIONS TO BETTER UNDERSTAND THE GIVEN SCENARIO
-        What this agent will do --> This agent will ask as many question as it can to better understand the situation.
-        If the agents are repeating same information and doesnt know how to proceed call this agent .
-        If the situation is not clear and for better understanding we need to ask some self exploratory questions then call this agent.
-        """,
     system_message=prompts.easy_question,
 )
 
@@ -183,12 +176,6 @@ normal_question = AssistantAgent(
     "normal_question",
     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
     llm_config=llm_config,
-    description="""
-        When this agent will be called upon --> THIS AGENT WILL ASK QUESTIONS TO BETTER UNDERSTAND THE GIVEN SCENARIO
-        What this agent will do --> This agent will ask as many question as it can to better understand the situation.
-        If the agents are repeating same information and doesnt know how to proceed call this agent .
-        If the situation is not clear and for better understanding we need to ask some self exploratory questions then call this agent.
-        """,
     system_message=prompts.normal_question,
 )
 
@@ -196,12 +183,6 @@ tough_question = AssistantAgent(
     "tough_question",
     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
     llm_config=llm_config,
-    description="""
-        When this agent will be called upon --> THIS AGENT WILL ASK QUESTIONS TO BETTER UNDERSTAND THE GIVEN SCENARIO
-        What this agent will do --> This agent will ask as many question as it can to better understand the situation.
-        If the agents are repeating same information and doesnt know how to proceed call this agent .
-        If the situation is not clear and for better understanding we need to ask some self exploratory questions then call this agent.
-        """,
     system_message=prompts.tough_question,
 )
 
@@ -209,12 +190,6 @@ complex_question = AssistantAgent(
     "complex_question",
     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
     llm_config=llm_config,
-    description="""
-        When this agent will be called upon --> THIS AGENT WILL ASK QUESTIONS TO BETTER UNDERSTAND THE GIVEN SCENARIO
-        What this agent will do --> This agent will ask as many question as it can to better understand the situation.
-        If the agents are repeating same information and doesnt know how to proceed call this agent .
-        If the situation is not clear and for better understanding we need to ask some self exploratory questions then call this agent.
-        """,
     system_message=prompts.complex_question,
 )
 

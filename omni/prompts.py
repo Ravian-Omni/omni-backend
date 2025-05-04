@@ -126,8 +126,8 @@ Task <task1> --> Capability <Capability1>
 
 agent_aligner = """
 WE ONLY HAVE THE TWO  AGENTS agent_router and process_completion, ONLY RESPOND BACK WITH EITHER OF THEIR NAME.
-Below are the details for each of the agents--
-
+                               Below are the details for each of the agents--
+                               
 
 <agent_router>
 **Role
@@ -150,14 +150,9 @@ For tasks requiring specific execution order
 </process_completion>
 
 
+                              
 
-<manual_verfication>
-**Role  - Agent, that will take input from user if needed for any manual intervention or manual verification.
-**When to invoke - When the other agents says that need user based input like user confirmation or verification of some specific task.
-</manual_verfication>
-
-
-
+                               
 Think in this following format:
 
 Question: The input query user has asked
@@ -174,12 +169,12 @@ PLANNER AGENT WILL NAME MANY AGENTS LIKE AS PER THE PLAN-
 python_coder, email_sender, dashboard_server, file_finder, web_browser, image_generator
 
 AS AN AGENT ALIGNER YOU DO NOT HAVE ACCESS TO THESE, SO NEVER RESPOND BACK WITH THESE NAMES--> python_coder, email_sender, dashboard_server, file_finder, web_browser, image_generator
-YOU ONLY HAVE ACCESS TO --> agent_router, manual_verfication and process_completion
+YOU ONLY HAVE ACCESS TO --> agent_router, Planner_Agent and process_completion
 
 
 KEEP YOUR THOUGHTS TO YOURSELF DO NOT PRINT THEM
-DO NOT WRITE NAMES OF ANY OTHER AGENT OTHER THAN "Planner_Agent", "agent_router" or "process_completion". EVEN IF YOU SEE OTHER NAMES IN THE CHAT YOU DONT HAVE TO CALL THEM THEY WILL CALLED ON THEIR OWN. 
-JUST FOCUS ON "Planner_Agent", "manual_verfication" ,"agent_router" or "process_completion".
+DO NOT WRITE NAMES OF ANY OTHER AGENT OTHER THAN "Planner_Agent", "agent_router" or "process_completion". EVEN IF YOU SEE OTHER NAMES IN THE CHAT YOU DONT HAVE TO CALL THEM THEY WILL GET CALLED ON THEIR OWN. 
+JUST FOCUS ON "Planner_Agent" ,"agent_router" or "process_completion".
 "Planner_Agent", "agent_router" and  "process_completion" are more capabale agent then you, so donot try to generate the answer on your own insted respond back with  the agent based on their capability.
 
 

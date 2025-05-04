@@ -37,7 +37,7 @@ def image_generator(query: Annotated[str, "The detailed image generation prompt"
             add_entry("image_generator", msg['content'])
             return msg['content']
     add_entry("image_generator", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
 
 
 def web_browser(query: Annotated[
@@ -51,7 +51,7 @@ def web_browser(query: Annotated[
             add_entry("Web_browser", msg['content'])
             return msg['content']
     add_entry("Web_browser", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def python_coder(query: Annotated[
@@ -67,7 +67,7 @@ def python_coder(query: Annotated[
             add_entry("python_coder", msg['content'])
             return msg['content']
     add_entry("python_coder", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
@@ -78,7 +78,7 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
             add_entry("email_sender", msg['content'])
             return msg['content']
     add_entry("email_sender", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def file_finder(query: Annotated[str, "The search query"]):
@@ -89,7 +89,7 @@ def file_finder(query: Annotated[str, "The search query"]):
             add_entry("file_finder", msg['content'])
             return msg['content']
     add_entry("email_sender", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 # def dashboard_server(query: Annotated[str, "The search query"]):
@@ -194,14 +194,7 @@ question_gen = AssistantAgent(
     system_message=prompts.questions_generator.format(today_date=today_date)
     )
 
-# autogen.agentchat.register_function(
-#     birbal,
-#     caller=agent_caller,
-#     executor=agent_caller_exe,
-#     name="BIRBAL",
-#     description="This tool will be used search details on internet and provide a through report\
-# ",
-# )
+
 
 
 autogen.agentchat.register_function(
@@ -217,9 +210,7 @@ autogen.agentchat.register_function(
     caller=agent_caller,
     executor=agent_caller_exe,
     name="email_sender",
-    description="This tool will be used to send emails as per the user's request. \
-    all the details have been stored in the file path --> C:\\Users\\HP\\Desktop\\lokesh\\newton_data\\charts_and_data\
-",
+    description="This tool will be used to send emails as per the user's request.",
     )
 
 autogen.agentchat.register_function(
@@ -266,13 +257,13 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     if last_speaker.name == "agent_aligner":
         if "agent_router" in messages[-1]["content"]:
             return groupchat.agent_by_name("agent_router")
-        elif "manual_verfication" in messages[-1]["content"]:
-            return groupchat.agent_by_name("manual_verfication")
+        # elif "manual_verfication" in messages[-1]["content"]:
+        #     return groupchat.agent_by_name("manual_verfication")
         elif "Proccesscompletion_Agent" in messages[-1]["content"]:
             return groupchat.agent_by_name("process_completion")
 
-    if last_speaker.name in ["manual_verfication"]:
-        return groupchat.agent_by_name("Planner")
+    # if last_speaker.name in ["manual_verfication"]:
+    #     return groupchat.agent_by_name("Planner")
 
     if last_speaker.name in ["Planner"]:
         return groupchat.agent_by_name("agent_aligner")
@@ -297,7 +288,7 @@ omni_groupchat = GroupChat([question_gen, get_request,
                             agent_caller_exe,
                             prob_status_checker,
                             process_completion,
-                            manual_verfication
+                            #manual_verfication
                             ],
     speaker_selection_method=custom_speaker_selection_func,
     messages=[],

@@ -21,7 +21,7 @@ When you see paths like these, copy them EXACTLY into your response.
 
 ##Response template 
 "Who all this email needs to be sent ": <recipient email>,
-"sender": "codelokiyt@gmail.com", 
+"sender": "{user_email}", 
 "What should be the subject of the email ": <subject>,
 "What should be the msg_html": <html message>,
 "msg_plain": <plain message>,
@@ -79,7 +79,7 @@ sender="{user_email}"
 """
 
 debugger = """
-You are a Debugger Agent. Your role is to analyze code errors reported by the CodeExecutor, suggest fixes to the CodeWriter, and verify if the fixes resolve the issues.  
+You are a Debugger Agent. Your role is to analyze code errors reported by the CodeExecutor, suggest fixes to the CodeWriter, try hard to resolve the issues.  
 - Clearly identify the error, its location, and possible causes.
 - Suggest specific code modifications to the CodeWriter.
 - Use subprocess.popen  to do !pip install any module.
@@ -87,7 +87,7 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 
 process_completion = """
 Respond back with tabular format for sequential info.
-ALways provide the tabular response in Markdown. 
-Also provide what have we done , if the email sedn process is completed or not
-Try to  ask any more task    
+Always provide the tabular response in Markdown. 
+Also provide what have we done , if the process of sending email is completed or not
+Try to ask any more task if there are any.   
 """

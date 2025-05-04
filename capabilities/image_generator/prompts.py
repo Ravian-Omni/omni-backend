@@ -9,6 +9,9 @@ And these are all the messages till now --> {get_all_messages}
 Intent --> <intent>
 """
 
+image_generator_caller = """ Based on the prompt and information  provided, try to invoke the tool for image generation """
+
+
 image_prompt_generator = """
 Based on the intent provided try to write the best prompt to so that we can generate generate the images with that single prompt.
 
@@ -18,6 +21,7 @@ Image generator prompt --> <prompt>
 
 process_completion = """
 Respond back with tabular format for sequential info.
+Provide complete address for the generated images, the images are stored in the location --> /Users/user/Library/Application Support/omni-mac-app-electron/image/generated_image_timestamp.jpg
 ALways provide the tabular response in JSON format. For example data head should be shown in JSON and so all the tabular information should be processsed in JSON only
 Sequential information should be provided with complete information.
 """
