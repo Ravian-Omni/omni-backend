@@ -21,7 +21,7 @@ When you see paths like these, copy them EXACTLY into your response.
 
 ##Response template 
 "Who all this email needs to be sent ": <recipient email>,
-"sender": "{user_email}", 
+"sender": "<user_email>", 
 "What should be the subject of the email ": <subject>,
 "What should be the msg_html": <html message>,
 "msg_plain": <plain message>,

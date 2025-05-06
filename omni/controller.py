@@ -3,7 +3,7 @@ import pandas as pd
 import autogen
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from autogen import config_list_from_json
-import os
+import os,json
 from typing import List, Dict, Any
 from typing import Annotated, List, Dict
 from datetime import datetime
@@ -17,7 +17,7 @@ from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
 from capabilities.email_manager.controller import es_groupchat, es_manager
 # from omni_dashboarding import dash_groupchat, dash_manager
 from capabilities.browser_manager.controller import browser_gc, browser_manager
-from utilities.external_memory import shared_df, add_entry, get_last_entry, get_all_messages
+from utilities.external_memory import shared_df, add_entry, get_last_entry, get_all_messages,get_raw_dataframe,get_context
 
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
@@ -30,6 +30,8 @@ llm_config = LLMConfigManager.get_config("gpt4o")
 
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = ig_manager.initiate_chat(ig_manager, message=query)
     messages = ig_groupchat.messages
     for msg in reversed(messages):
@@ -44,6 +46,8 @@ def web_browser(query: Annotated[
     str, "The complete search query with all the details like subject relationship with the message"]) -> \
         Annotated[
             str, "The complete search query with all the details like subject relationship with the message"]:
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = browser_manager.initiate_chat(browser_manager, message=query)
     messages = browser_gc.messages
     for msg in reversed(messages):
@@ -58,6 +62,8 @@ def python_coder(query: Annotated[
     str, "The complete search query with all the details what work we have to do and what we have to return for other agents to work on"]) -> \
         Annotated[str, "The results"]:
     # Initiate the chat
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = pcw_manager.initiate_chat(pcw_manager, message=query)
     # Get messages directly from cs_groupchat
     messages = pcw_groupchat.messages
@@ -71,6 +77,8 @@ def python_coder(query: Annotated[
 
 
 def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = es_manager.initiate_chat(es_manager, message=(query))
     messages = es_groupchat.messages
     for msg in reversed(messages):
@@ -82,6 +90,8 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
 
 
 def file_finder(query: Annotated[str, "The search query"]):
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = ff_manager.initiate_chat(ff_manager, message=query)
     messages = ff_groupchat.messages
     for msg in reversed(messages):
