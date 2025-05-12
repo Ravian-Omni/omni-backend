@@ -254,8 +254,9 @@ register_function(search_files_with_agent,
     description="This tool will be used to search for any files in the system",
     )
 
-ff_groupchat = autogen.GroupChat(agents=[file_finder_planner, file_finder, user_proxy,
-                                         prob_status_checker, process_completion],
+agents= [file_finder_planner, file_finder, user_proxy,prob_status_checker, process_completion]
+
+ff_groupchat = autogen.GroupChat(agents=agents,
     messages=[],
     speaker_selection_method=custom_speaker_selection_func,
     max_round=50

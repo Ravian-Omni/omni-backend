@@ -58,7 +58,7 @@ def flux_image_generator(prompt: Annotated[str, "The image generation prompt"]):
         timestamp = int(time.time())
         filename = f"/Users/user/Library/Application Support/omni-mac-app-electron/image/generated_image_{timestamp}.jpg"
         img.save(filename)
-        return f"Image successfully generated and saved as {filename}"
+        return f"Image successfully generated and saved at {filename}"
 
     except Exception as e:
         error_message = f"Error generating image: {str(e)}"
@@ -80,6 +80,13 @@ image_prompt_generator = AssistantAgent(
     llm_config=llm_config
     )
 
+image_generator_caller = AssistantAgent(
+        name="image_generator_caller",
+        system_message = prompts.image_generator_caller,
+        llm_config=llm_config
+)
+    
+
 image_generator = UserProxyAgent(
     name="image_generator",
     human_input_mode="NEVER",
@@ -94,23 +101,20 @@ process_completion = AssistantAgent(
     system_message=prompts.process_completion
     )
 
-register_function(flux_image_generator,
-    caller=image_prompt_generator,
-    executor=image_generator,
-    name="image_generator",
-    description="This tool will be used to generate images based on the information.",
-    )
+
 
 
 def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     messages = groupchat.messages
-    # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
+    #file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
 
     if len(messages) == 1:
         return groupchat.agent_by_name("user_intent")
     if last_speaker.name == "user_intent":
         return groupchat.agent_by_name("image_prompt_generator")
     if last_speaker.name == "image_prompt_generator":
+        return groupchat.agent_by_name("image_generator_caller")
+    if last_speaker.name == "image_generator_caller":
         return groupchat.agent_by_name("image_generator")
     if last_speaker.name == "image_generator":
         if "error".lower() in messages[-1]["content"]:
@@ -120,15 +124,24 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     return None
 
 
+
+register_function(flux_image_generator,
+    caller=image_prompt_generator,
+    executor=image_generator,
+    name="image_generator",
+    description="This tool will be used to generate images based on the information.",
+    )
+
 ig_groupchat = GroupChat([user_intent,
                           image_prompt_generator,
+                          image_generator_caller,
                           image_generator,
                           process_completion,
-                          ],
-    speaker_selection_method=custom_speaker_selection_func,
-    messages=[],
-    max_round=20
-    )
+                           ],
+                          speaker_selection_method=custom_speaker_selection_func,
+                           messages=[],
+                           max_round=20
+                           )
 
 ig_manager = GroupChatManager(ig_groupchat, llm_config=llm_config)
 

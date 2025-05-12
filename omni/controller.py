@@ -3,7 +3,7 @@ import pandas as pd
 import autogen
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from autogen import config_list_from_json
-import os
+import os,json
 from typing import List, Dict, Any
 from typing import Annotated, List, Dict
 from datetime import datetime
@@ -17,7 +17,7 @@ from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
 from capabilities.email_manager.controller import es_groupchat, es_manager
 # from omni_dashboarding import dash_groupchat, dash_manager
 from capabilities.browser_manager.controller import browser_gc, browser_manager
-from utilities.external_memory import shared_df, add_entry, get_last_entry, get_all_messages
+from utilities.external_memory import shared_df, add_entry, get_last_entry, get_all_messages,get_raw_dataframe,get_context
 
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
@@ -30,6 +30,8 @@ llm_config = LLMConfigManager.get_config("gpt4o")
 
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = ig_manager.initiate_chat(ig_manager, message=query)
     messages = ig_groupchat.messages
     for msg in reversed(messages):
@@ -37,13 +39,15 @@ def image_generator(query: Annotated[str, "The detailed image generation prompt"
             add_entry("image_generator", msg['content'])
             return msg['content']
     add_entry("image_generator", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
 
 
 def web_browser(query: Annotated[
     str, "The complete search query with all the details like subject relationship with the message"]) -> \
         Annotated[
             str, "The complete search query with all the details like subject relationship with the message"]:
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = browser_manager.initiate_chat(browser_manager, message=query)
     messages = browser_gc.messages
     for msg in reversed(messages):
@@ -51,13 +55,15 @@ def web_browser(query: Annotated[
             add_entry("Web_browser", msg['content'])
             return msg['content']
     add_entry("Web_browser", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def python_coder(query: Annotated[
     str, "The complete search query with all the details what work we have to do and what we have to return for other agents to work on"]) -> \
         Annotated[str, "The results"]:
     # Initiate the chat
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = pcw_manager.initiate_chat(pcw_manager, message=query)
     # Get messages directly from cs_groupchat
     messages = pcw_groupchat.messages
@@ -67,10 +73,12 @@ def python_coder(query: Annotated[
             add_entry("python_coder", msg['content'])
             return msg['content']
     add_entry("python_coder", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = es_manager.initiate_chat(es_manager, message=(query))
     messages = es_groupchat.messages
     for msg in reversed(messages):
@@ -78,10 +86,12 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
             add_entry("email_sender", msg['content'])
             return msg['content']
     add_entry("email_sender", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def file_finder(query: Annotated[str, "The search query"]):
+    context = get_context()
+    query = json.dumps({"query":query,"context":context})
     response = ff_manager.initiate_chat(ff_manager, message=query)
     messages = ff_groupchat.messages
     for msg in reversed(messages):
@@ -89,7 +99,7 @@ def file_finder(query: Annotated[str, "The search query"]):
             add_entry("file_finder", msg['content'])
             return msg['content']
     add_entry("email_sender", "No completion message found")
-    return "Operation completed without explicit confirmation"
+    return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 # def dashboard_server(query: Annotated[str, "The search query"]):
@@ -194,14 +204,7 @@ question_gen = AssistantAgent(
     system_message=prompts.questions_generator.format(today_date=today_date)
     )
 
-# autogen.agentchat.register_function(
-#     birbal,
-#     caller=agent_caller,
-#     executor=agent_caller_exe,
-#     name="BIRBAL",
-#     description="This tool will be used search details on internet and provide a through report\
-# ",
-# )
+
 
 
 autogen.agentchat.register_function(
@@ -217,9 +220,7 @@ autogen.agentchat.register_function(
     caller=agent_caller,
     executor=agent_caller_exe,
     name="email_sender",
-    description="This tool will be used to send emails as per the user's request. \
-    all the details have been stored in the file path --> C:\\Users\\HP\\Desktop\\lokesh\\newton_data\\charts_and_data\
-",
+    description="This tool will be used to send emails as per the user's request.",
     )
 
 autogen.agentchat.register_function(
@@ -266,13 +267,13 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     if last_speaker.name == "agent_aligner":
         if "agent_router" in messages[-1]["content"]:
             return groupchat.agent_by_name("agent_router")
-        elif "manual_verfication" in messages[-1]["content"]:
-            return groupchat.agent_by_name("manual_verfication")
+        # elif "manual_verfication" in messages[-1]["content"]:
+        #     return groupchat.agent_by_name("manual_verfication")
         elif "Proccesscompletion_Agent" in messages[-1]["content"]:
             return groupchat.agent_by_name("process_completion")
 
-    if last_speaker.name in ["manual_verfication"]:
-        return groupchat.agent_by_name("Planner")
+    # if last_speaker.name in ["manual_verfication"]:
+    #     return groupchat.agent_by_name("Planner")
 
     if last_speaker.name in ["Planner"]:
         return groupchat.agent_by_name("agent_aligner")
@@ -297,7 +298,7 @@ omni_groupchat = GroupChat([question_gen, get_request,
                             agent_caller_exe,
                             prob_status_checker,
                             process_completion,
-                            manual_verfication
+                            #manual_verfication
                             ],
     speaker_selection_method=custom_speaker_selection_func,
     messages=[],

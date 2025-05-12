@@ -18,8 +18,6 @@ from email.mime.base import MIMEBase
 from email import encoders
 import os
 
-# sender_email = "codelokiyt@gmail.com"
-# app_password = "khio xisc nxhv bref"
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from capabilities.email_manager import prompts
