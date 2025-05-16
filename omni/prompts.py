@@ -289,7 +289,7 @@ DECIDE WISELY
 Task <task1> --> Capability <Capability1>
 """
 
-agent_caller_exe = """
+agent_executor = """
 Always search the questions on the web to gain further understanding on the topic. today's date is--> {today_date}
 """
 

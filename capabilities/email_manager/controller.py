@@ -98,7 +98,7 @@ content_writer_email = AssistantAgent(
 code_writer_email = AssistantAgent(
     name="code_writer_email",
     llm_config=llm_config,
-    system_message=prompts.code_writer.format(get_last_entry=get_last_entry,get_all_messages=get_all_messages,user_email=settings.USER_EMAIL)
+    system_message=prompts.email_caller.format(get_last_entry=get_last_entry,get_all_messages=get_all_messages,user_email=settings.USER_EMAIL)
     )
 code_executor_email = UserProxyAgent(
     name="code_executor_email",
@@ -118,14 +118,21 @@ process_completion_email = AssistantAgent(
     system_message=prompts.process_completion
     )
 
+user_proxy = UserProxyAgent(
+    name="user_proxy",
+    human_input_mode="NEVER",
+    # is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+    code_execution_config=False,  # Please set use_docker=True if docker is available to run the generated code. Using docker is safer than running the generated code directly.
+)
 
 def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     messages = groupchat.messages
+    print(len(messages))
+    # Proceed based on the last speaker
     if len(messages) == 1:
         print("Initial query received. Starting with user_proxy.")
         # rint(f"last_agent_msg is --> {get_last_msg()}")
         return groupchat.agent_by_name("planner_email")
-    # Proceed based on the last speaker
     if last_speaker.name == "planner_email":
         return groupchat.agent_by_name("content_writer_email")
     if last_speaker.name == "content_writer_email":
@@ -156,6 +163,7 @@ es_groupchat = GroupChat([planner_email,
                           code_executor_email,
                           debugger_email,
                           process_completion_email,
+                          user_proxy
                           ],
     speaker_selection_method=custom_speaker_selection_func,
     messages=[],

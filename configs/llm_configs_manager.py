@@ -65,7 +65,12 @@ class LLMConfigManager:
                 base_url= "https://newton-ai-123.cognitiveservices.azure.com/",
                 api_version= "2025-01-01-preview",
                 # reasoning_effort="high"
-            )
+            ),
+            "deepseek": LLMConfig(
+                model="deepseek-ai/DeepSeek-V3",
+                api_key="06db08babf63e2c871ca8b7709d82f753728e7144e1e32d22b1469b0238a8331",
+                api_type="together"
+            ),
             # Add other configurations as needed...
         }
         

@@ -82,7 +82,7 @@ def add_entry(agent_name: str, message: str):
     shared_df.loc[len(shared_df)] = new_row
     # response=llm.invoke(f"Summarize the message in a very short, crisp and clear way  for user to understand it  what has been achieved so far --> {message} ")
     announcement = f"The agent {agent_name}  has a message for you {summary}"
-    speak_with_siri(announcement)
+    # speak_with_siri(announcement)
     return True
 
 def get_last_entry():

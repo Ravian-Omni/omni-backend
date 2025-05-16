@@ -26,7 +26,7 @@ today_date = datetime.now()
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
-llm_config = LLMConfigManager.get_config("gpt4o")
+llm_config = LLMConfigManager.get_config("deepseek")
 
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
@@ -168,7 +168,7 @@ agent_caller_exe = UserProxyAgent(
         This agent will execute the function which are group chat on their own
         """,
     code_execution_config=False,
-    system_message=prompts.agent_caller_exe.format(today_date=today_date),
+    system_message=prompts.agent_executor.format(today_date=today_date),
     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
     )
 
