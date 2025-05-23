@@ -21,12 +21,17 @@ from utilities.external_memory import shared_df, add_entry, get_last_entry, get_
 
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
+from omni.response_format import omni_planner_response_format as oprf
 today_date = datetime.now()
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
 llm_config = LLMConfigManager.get_config("deepseek")
+llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini["response_format"] = oprf
+# llm_config_mini = {**LLMConfigManager.get_config("deepseek"), "response_format": oprf}
+print(llm_config_mini)
 
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
@@ -125,7 +130,7 @@ get_request = AssistantAgent(
 
 Planner = AssistantAgent(
     "Planner",
-    llm_config=llm_config_reason,
+    llm_config=llm_config_mini,
     description="""
    Your main task is to plan the complete problem statement
 
@@ -261,15 +266,15 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
 
     if len(messages) == 1:
-        return groupchat.agent_by_name("question_gen")
-    if last_speaker.name in ["question_gen"]:
+    #     return groupchat.agent_by_name("question_gen")
+    # if last_speaker.name in ["question_gen"]:
         return groupchat.agent_by_name("Planner")
     if last_speaker.name == "agent_aligner":
         if "agent_router" in messages[-1]["content"]:
             return groupchat.agent_by_name("agent_router")
         # elif "manual_verfication" in messages[-1]["content"]:
         #     return groupchat.agent_by_name("manual_verfication")
-        elif "Proccesscompletion_Agent" in messages[-1]["content"]:
+        elif "process_completion" in messages[-1]["content"]:
             return groupchat.agent_by_name("process_completion")
 
     # if last_speaker.name in ["manual_verfication"]:
@@ -284,10 +289,10 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
         return groupchat.agent_by_name("agent_caller_exe")
     if last_speaker.name == "agent_caller_exe":
         return groupchat.agent_by_name("Planner")
-    if last_speaker.name == "process_completion":
-        return "Process Completed"
+    # if last_speaker.name == "process_completion":
+    #     return  groupchat.agent_by_name("process_completion")
 
-    return None
+    #return None
 
 
 omni_groupchat = GroupChat([question_gen, get_request,
@@ -317,4 +322,4 @@ query = sys.argv[1]
 
 print(f"[INFO] Starting agent with query: {query}")
 
-omni_manager.initiate_chat(omni_manager, message=query)
+#omni_manager.initiate_chat(omni_manager, message=query)

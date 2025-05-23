@@ -71,6 +71,11 @@ class LLMConfigManager:
                 api_key="06db08babf63e2c871ca8b7709d82f753728e7144e1e32d22b1469b0238a8331",
                 api_type="together"
             ),
+            "gpt_4_1_mini": LLMConfig(
+                model="gpt-4.1-mini-2025-04-14",
+                api_key=cls._shared_config["openai_api_key"],
+            ),
+        
             # Add other configurations as needed...
         }
         

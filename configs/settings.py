@@ -11,7 +11,7 @@ current_file_path = Path(__file__).resolve()
 class Settings:
     PROJECT_NAME = "OMNI"
     ROOT_DIR = os.path.dirname(current_file_path.parent)
-    USER_EMAIL = "suryapratapsinghrathore@gmail.com"
+    USER_EMAIL = "codelokiyt@gmail.com"
     USER_FILES_PATH = os.getenv("USER_FILES_PATH","/mnt/data")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
