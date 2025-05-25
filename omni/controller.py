@@ -21,17 +21,28 @@ from utilities.external_memory import shared_df, add_entry, get_last_entry, get_
 
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
-from omni.response_format import omni_planner_response_format as oprf
+# from omni.response_format import omni_planner_response_format as oprf
+from omni.response_format import AgentSelectionResponse
+from omni.response_format import PlannerResponse
+from omni.response_format import CapabilityRoutingResponse
 today_date = datetime.now()
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
 llm_config = LLMConfigManager.get_config("deepseek")
+llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_planner["response_format"] = PlannerResponse
+llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_aligner["response_format"] = AgentSelectionResponse
+llm_config_mini_router = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_router["response_format"] = CapabilityRoutingResponse
+
 llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
-llm_config_mini["response_format"] = oprf
+
+# llm_config_mini["response_format"] = oprf
 # llm_config_mini = {**LLMConfigManager.get_config("deepseek"), "response_format": oprf}
-print(llm_config_mini)
+# print(llm_config_mini)
 
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
@@ -84,7 +95,7 @@ def python_coder(query: Annotated[
 def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
     context = get_context()
     query = json.dumps({"query":query,"context":context})
-    response = es_manager.initiate_chat(es_manager, message=(query))
+    response = es_manager.initiate_chat(es_manager, message=query)
     messages = es_groupchat.messages
     for msg in reversed(messages):
         if msg.get('name') == 'process_completion_email':  # Make sure there's no extra space
@@ -130,7 +141,7 @@ get_request = AssistantAgent(
 
 Planner = AssistantAgent(
     "Planner",
-    llm_config=llm_config_mini,
+    llm_config=llm_config_mini_planner,
     description="""
    Your main task is to plan the complete problem statement
 
@@ -139,13 +150,13 @@ Planner = AssistantAgent(
     )
 
 agent_aligner = AssistantAgent(name="agent_aligner",
-    llm_config=llm_config_reason,
+    llm_config=llm_config_mini_aligner,
     description="This agent will align the whole process and will share which agent will work next . ",
     system_message=prompts.agent_aligner)
 
 agent_router = AssistantAgent(
     "agent_router",
-    llm_config=llm_config,
+    llm_config=llm_config_mini_router,
     description="""
    From the initial information route to the capability which will solve the user's question.
 
@@ -158,7 +169,7 @@ agent_router = AssistantAgent(
 
 agent_caller = AssistantAgent(
     "agent_caller",
-    llm_config=llm_config,
+    llm_config=llm_config_mini,
     description="""
    From the initial information route to the capability which will solve the user's question.
 
@@ -182,12 +193,12 @@ prob_status_checker = AssistantAgent(
     description="""call this agent to check if the Task specified by the user has been completed""",
     system_message=prompts.prob_status_checker,
 
-    llm_config=llm_config
+    llm_config=llm_config_mini
     )
 
 manual_verfication = UserProxyAgent(
     name="manual_verfication",
-    llm_config=llm_config,
+    llm_config=llm_config_mini,
     human_input_mode="ALWAYS",
     code_execution_config=False,
     description="You will take input from user if needed for any manual intervention or verification ",
@@ -199,7 +210,7 @@ process_completion = AssistantAgent(
     description="""When this agent will be called upon -->To answer the questions posed by question generator agent
                          What this agent will do --> This agent will try to answer the question""",
     system_message=prompts.process_completion,
-    llm_config=llm_config
+    llm_config=llm_config_mini
     )
 
 question_gen = AssistantAgent(

@@ -150,13 +150,6 @@ class Omni:
             description="This tool will be used to find any file as per the user's request.",
         )
 
-        # autogen.agentchat.register_function(
-        #     dashboard_server,
-        #     caller=self.agent_caller,
-        #     executor=self.agent_executor,
-        #     name="dashboard_server",
-        #     description="This tool will be used to start or spin up the dashboard server.",
-        #     )
 
         autogen.agentchat.register_function(
             web_browser,

@@ -29,11 +29,16 @@ from PIL import Image
 from typing_extensions import Annotated
 from huggingface_hub import InferenceClient
 from capabilities.python_developer import prompts
+from capabilities.python_developer.response_format import ProblemStatusResponse
 from autogen import config_list_from_json
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
-llm_config = LLMConfigManager.get_config("gpt4o")
+
+llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_psc["response_format"] = ProblemStatusResponse
+
+llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 
 file_path = None  # Replace with your data file path
 
@@ -78,7 +83,7 @@ CodeDebugger = AssistantAgent(
 ProblemStatusChecker = AssistantAgent(
     name="ProblemStatusChecker",
     system_message=prompts.prob_status_checker.format(question=question),
-    llm_config=llm_config
+    llm_config=llm_config_psc
     )
 
 ProcessCompletion = AssistantAgent(
