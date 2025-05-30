@@ -32,6 +32,7 @@ from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 
 llm_config = LLMConfigManager.get_config("gpt4o")
+from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
 
 
 class Post(BaseModel):
@@ -40,6 +41,7 @@ class Post(BaseModel):
 
 class Posts(BaseModel):
     posts: List[Post]
+    content: str = "Final response"
 
 
 # vision_llm = ChatOpenAI(model='gpt-4o-2024-08-06',
@@ -48,13 +50,25 @@ class Posts(BaseModel):
 llm_config_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 
 vision_llm = ChatAnthropic(
-    model_name="claude-3-5-sonnet-20241022",
+    model_name="claude-sonnet-4-20250514", #claude-sonnet-4-20250514 claude-3-5-sonnet-20241022
     temperature=0.1,
     api_key=settings.ANTHROPIC_API_KEY,
 )
 
+llm_config_qc = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_qc["response_format"] = QuestionClassification
+
+llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_wc["response_format"] = webprocess_completion
+
+
+
+
+
+
 browser = Browser(
     config=BrowserConfig(
+        headless=True, #put to true for headless mode, this will run the chrome browser in the background
         chrome_instance_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         new_context_config=BrowserContextConfig(highlight_elements=False),
     )
@@ -85,17 +99,32 @@ async def browser_search(task: str) -> str:
     os.makedirs(results_dir, exist_ok=True)
     max_failures = 5
     retry_delay = 3
+    os.makedirs("results", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(results_dir, f"search_result_{timestamp}.json")
+    filename = f"results/search_result_{timestamp}.json"
+    controller = Controller(output_model=Posts)
+    @controller.action("""Ask user for information or manual verification.
+When to Communicate with User - 
+- When encountering environment issues like, couldn't click on some box,
+- When encountering captcha or security 
+- When Asked for input on user's behelf, like login ID or password , filling out any form
+- When critical information cannot be accessed through available resources
+- When requesting permissions or keys from the user """)
+    def ask_human(question: str) -> str:
+        answer = input(f'\n{question}\nInput: ')
+        return ActionResult(extracted_content=answer)
 
     agent = Agent(
         task=task,
-        # browser=browser, uncomment for chrome.
+        browser=browser, #uncomment to browser from chrome browser.
         max_failures=max_failures,
         retry_delay=retry_delay,
+        use_vision=True,
+        generate_gif=True,
         validate_output=True,
         llm=vision_llm,
-        controller=controller,
+        save_conversation_path="./browser/results", # please pass this from the project setup directory.
+        controller=controller
     )
 
     try:
@@ -162,49 +191,100 @@ web_browser_planner = AssistantAgent(
 )
 
 judge_question = AssistantAgent(
-    name="judge_question", llm_config=llm_config, system_message=prompts.judge_question
+    name="judge_question", 
+    llm_config=llm_config_qc, 
+    system_message=prompts.judge_question
 )
 
-easy_question = AssistantAgent(
-    "easy_question",
-    is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-    llm_config=llm_config,
-    system_message=prompts.easy_question,
-)
 
-normal_question = AssistantAgent(
-    "normal_question",
-    is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-    llm_config=llm_config,
-    system_message=prompts.normal_question,
-)
+factual_request = AssistantAgent(
+    "factual_request",
+        is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+        llm_config=llm_config,
+        system_message=prompts.factual_question
+    )
 
-tough_question = AssistantAgent(
-    "tough_question",
-    is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-    llm_config=llm_config,
-    system_message=prompts.tough_question,
-)
 
-complex_question = AssistantAgent(
-    "complex_question",
-    is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-    llm_config=llm_config,
-    system_message=prompts.complex_question,
-)
+exploratoty_request = AssistantAgent(
+    "exploratoty_request",
+        is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+        llm_config=llm_config,
+        system_message=prompts.factual_question
+    )
 
-broswer_reader = AssistantAgent(
-    name="broswer_reader", llm_config=llm_config, system_message=prompts.browser_reader
+
+
+
+# easy_question = AssistantAgent(
+#     "easy_question",
+#     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+#     llm_config=llm_config,
+#     system_message=prompts.easy_question,
+# )
+
+# normal_question = AssistantAgent(
+#     "normal_question",
+#     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+#     llm_config=llm_config,
+#     system_message=prompts.normal_question,
+# )
+
+# tough_question = AssistantAgent(
+#     "tough_question",
+#     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+#     llm_config=llm_config,
+#     system_message=prompts.tough_question,
+# )
+
+# complex_question = AssistantAgent(
+#     "complex_question",
+#     is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+#     llm_config=llm_config,
+#     system_message=prompts.complex_question,
+# )
+
+browser_reader = AssistantAgent(
+    name="browser_reader", llm_config=llm_config, system_message=prompts.browser_reader
 )
 
 process_completion = AssistantAgent(
     name="process_completion",
-    llm_config=llm_config_anth,
+    llm_config=llm_config_wc,
     description="Let group manager know that the process is completed. ",
     system_message=prompts.process_completion,
 )
 
 nest_asyncio.apply()
+
+
+# def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
+#     messages = groupchat.messages
+#     if len(messages) == 1:
+#         return groupchat.agent_by_name("web_browser_planner")
+#     if last_speaker.name == "web_browser_planner":
+#         return groupchat.agent_by_name("judge_question")
+#     if last_speaker.name == "judge_question":
+#         if "easy_question".lower() in messages[-1]["content"]:
+#             return groupchat.agent_by_name("easy_question")
+#         if "normal_question" in messages[-1]["content"]:
+#             return groupchat.agent_by_name("normal_question")
+#         if "tough_question" in messages[-1]["content"]:
+#             return groupchat.agent_by_name("tough_question")
+#         if "complex_question" in messages[-1]["content"]:
+#             return groupchat.agent_by_name("complex_question")
+#     if last_speaker.name == "easy_question":
+#         return groupchat.agent_by_name("broswer_reader")
+#     if last_speaker.name == "normal_question":
+#         return groupchat.agent_by_name("broswer_reader")
+#     if last_speaker.name == "tough_question":
+#         return groupchat.agent_by_name("broswer_reader")
+#     if last_speaker.name == "complex_question":
+#         return groupchat.agent_by_name("broswer_reader")
+#     if last_speaker.name == "broswer_reader":
+#         return groupchat.agent_by_name("browser_searcher")
+#     if last_speaker.name == "browser_searcher":
+#         return groupchat.agent_by_name("process_completion")
+#     return None
 
 
 def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
@@ -214,32 +294,25 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     if last_speaker.name == "web_browser_planner":
         return groupchat.agent_by_name("judge_question")
     if last_speaker.name == "judge_question":
-        if "easy_question".lower() in messages[-1]["content"]:
-            return groupchat.agent_by_name("easy_question")
-        if "normal_question" in messages[-1]["content"]:
-            return groupchat.agent_by_name("normal_question")
-        if "tough_question" in messages[-1]["content"]:
-            return groupchat.agent_by_name("tough_question")
-        if "complex_question" in messages[-1]["content"]:
-            return groupchat.agent_by_name("complex_question")
-    if last_speaker.name == "easy_question":
-        return groupchat.agent_by_name("broswer_reader")
-    if last_speaker.name == "normal_question":
-        return groupchat.agent_by_name("broswer_reader")
-    if last_speaker.name == "tough_question":
-        return groupchat.agent_by_name("broswer_reader")
-    if last_speaker.name == "complex_question":
-        return groupchat.agent_by_name("broswer_reader")
-    if last_speaker.name == "broswer_reader":
+        if "FACTUAL".lower() in messages[-1]["content"]:
+            return groupchat.agent_by_name("factual_request")
+        if "EXPLORATORY".lower() in messages[-1]["content"]:
+            return groupchat.agent_by_name("exploratoty_request")
+    if last_speaker.name == "factual_request":
+        return groupchat.agent_by_name("browser_reader")
+    if last_speaker.name == "exploratoty_request":
+        return groupchat.agent_by_name("browser_reader")
+    if last_speaker.name == "browser_reader":
         return groupchat.agent_by_name("browser_searcher")
     if last_speaker.name == "browser_searcher":
         return groupchat.agent_by_name("process_completion")
     return None
 
 
+
 register_function(
     browser_search,
-    caller=broswer_reader,
+    caller=browser_reader,
     executor=browser_searcher,
     name="web_search_tool",
     description=""" 
@@ -248,22 +321,31 @@ TRY TO ADD AS MANY QUESTIONS AS YOU CAN TO COMBINE COMPLETE CONTEXT OF THE QUEST
 """,
 )
 
-browser_gc = GroupChat(
-    [
-        browser_searcher,
-        judge_question,
-        web_browser_planner,
-        broswer_reader,
-        process_completion,
-        easy_question,
-        normal_question,
-        tough_question,
-        complex_question,
-    ],
-    speaker_selection_method=custom_speaker_selection_func,
-    messages=[],
-    max_round=500,
-)
+# browser_gc = GroupChat(
+#     [
+#         browser_searcher,
+#         judge_question,
+#         web_browser_planner,
+#         browser_reader,
+#         process_completion,
+
+#     ],
+#     speaker_selection_method=custom_speaker_selection_func,
+#     messages=[],
+#     max_round=500,
+# )
+browser_gc = GroupChat([browser_searcher,
+                        judge_question,
+                        web_browser_planner,
+                         browser_reader,
+                         process_completion,
+                         factual_request,
+                         exploratoty_request,
+                           ],
+                           speaker_selection_method=custom_speaker_selection_func,
+                           messages=[],
+                           max_round=500
+                           )
 
 browser_manager = GroupChatManager(
     browser_gc,
