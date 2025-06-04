@@ -191,12 +191,12 @@ prob_status_checker = AssistantAgent(
     name="prob_status_checker",
     description="""call this agent to check if the Task specified by the user has been completed""",
     system_message=prompts.prob_status_checker,
-    llm_config=llm_config
+    llm_config=llm_config_psc
     )
 
 process_completion = AssistantAgent(
     name="process_completion",
-    llm_config=llm_config_psc,
+    llm_config=llm_config,
     description="Let group manager know that the process is completed. ",
     system_message=prompts.process_completion)
 
