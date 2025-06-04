@@ -20,7 +20,13 @@ import time
 from datetime import datetime
 from capabilities.file_finder import prompts
 from configs.llm_configs_manager import LLMConfigManager
-llm_config = LLMConfigManager.get_config("gpt4o")
+llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+
+from capabilities.file_finder.response_format import ProblemStatusResponse
+
+
+llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_psc["response_format"] = ProblemStatusResponse
 
 class FileSearchAgent:
     def __init__(self, root_dir: str = str(Path.home())):
@@ -190,7 +196,7 @@ prob_status_checker = AssistantAgent(
 
 process_completion = AssistantAgent(
     name="process_completion",
-    llm_config=llm_config,
+    llm_config=llm_config_psc,
     description="Let group manager know that the process is completed. ",
     system_message=prompts.process_completion)
 

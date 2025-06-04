@@ -68,7 +68,7 @@ llm_config_wc["response_format"] = webprocess_completion
 
 browser = Browser(
     config=BrowserConfig(
-        headless=True, #put to true for headless mode, this will run the chrome browser in the background
+        #headless=True, #put to true for headless mode, this will run the chrome browser in the background
         chrome_instance_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         new_context_config=BrowserContextConfig(highlight_elements=False),
     )
@@ -116,7 +116,7 @@ When to Communicate with User -
 
     agent = Agent(
         task=task,
-        browser=browser, #uncomment to browser from chrome browser.
+        #browser=browser, #uncomment to browser from chrome browser.
         max_failures=max_failures,
         retry_delay=retry_delay,
         use_vision=True,
