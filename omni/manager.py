@@ -17,7 +17,8 @@ from autogen.agentchat.agent import Agent
 from autogen import register_function
 # from omni_newton import cs_groupchat,cs_manager
 from capabilities.file_finder.controller import ff_groupchat, ff_manager
-from capabilities.image_generator.controller import ig_groupchat, ig_manager
+#from capabilities.image_generator.controller import ig_groupchat, ig_manager
+from capabilities.image_generator.manager import ImageGenerator
 # from omni_birbal import birbal_groupchat, birbal_manager
 from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
 from capabilities.email_manager.manager import EmailManager
@@ -66,10 +67,27 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         except Exception as e:
             logger.error(f"Error {e}, could not queue message from {sender.name}: {content}")
 
+# def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
+#     omni_storage.start_new_iteration("image_generator")
+#     response = ig_manager.initiate_chat(ig_manager, message=query)
+#     messages = ig_groupchat.messages
+#     for msg in reversed(messages):
+#         if msg.get("name") == "process_completion":
+#             # add_entry("image_generator", msg["content"])
+#             return msg["content"]
+#     # add_entry("image_generator", "No completion message found")
+#     return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
+
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
     omni_storage.start_new_iteration("image_generator")
-    response = ig_manager.initiate_chat(ig_manager, message=query)
-    messages = ig_groupchat.messages
+    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+    image_generator = ImageGenerator()
+    response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
+    messages = image_generator.groupchat.messages
     for msg in reversed(messages):
         if msg.get("name") == "process_completion":
             # add_entry("image_generator", msg["content"])
