@@ -474,7 +474,7 @@ judge_question = """
 
 **Step 1: Intent Classification**  
 Analyze the user input and classify as:  
-- `CONVERSATIONAL`: Casual chat, simple facts (<15 words), greetings, or personal questions  
+- `CONVERSATIONAL`: Casual chat or  greetings
 - `TASK-ORIENTED`: Requires ANY of:  
   • Multi-step actions  
   • Tool usage (web/data/image/email)  
