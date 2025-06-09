@@ -61,9 +61,10 @@
 # }
 
 
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Optional
 from enum import Enum
+
 
 
 class Capability(str, Enum):
@@ -73,6 +74,7 @@ class Capability(str, Enum):
     FILE_FINDER = "file_finder"
     DASHBOARD_SERVER = "dashboard_server"
     IMAGE_GENERATOR = "image_generator"
+    MANUAL_VERIFICATION = "manual_verification"
 
 
 class Status(str, Enum):
@@ -162,7 +164,7 @@ class PlannerResponse(BaseModel):
 from pydantic import BaseModel, Field, validator
 from typing import List, Literal
 
-AllowedAgents = Literal["Planner_Agent", "agent_router", "process_completion"]
+AllowedAgents = Literal["Planner_Agent", "agent_router", "process_completion", "manual_verification"]
 
 class Step(BaseModel):
     question: str = Field(..., title="Question")
@@ -175,13 +177,13 @@ class AgentSelectionResponse(BaseModel):
 
     @validator("final_answer")
     def validate_single_agent_final(cls, value):
-        if value not in ("Planner_Agent", "agent_router", "process_completion"):
+        if value not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
             raise ValueError("Final answer must be one of: agent_router, process_completion")
         return value
 
     @validator("steps", each_item=True)
     def validate_single_agent_in_steps(cls, step):
-        if step.action not in ("Planner_Agent", "agent_router", "process_completion"):
+        if step.action not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
             raise ValueError("Each step's action must be one of: agent_router, process_completion")
         return step
     
@@ -252,3 +254,62 @@ class CapabilityRoutingResponse(BaseModel):
 
 
 
+class QuestionType(str, Enum):
+    """Enumeration of question classification types."""
+    CONVERSATION = "conversation"
+    TASK_ORIENTED = "task_oriented"
+
+
+class ConfidenceLevel(str, Enum):
+    """Enumeration of confidence levels for classification."""
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
+
+
+class QuestionClassification(BaseModel):
+    """
+    Pydantic model for question classification results.
+    
+    This model represents the output of a classification agent that
+    determines whether a user question is conversational or task-oriented.
+    """
+    
+    classification: QuestionType = Field(
+        ...,
+        description="The primary classification of the question",
+        example=QuestionType.CONVERSATION
+    )
+    
+    confidence: ConfidenceLevel = Field(
+        ...,
+        description="Confidence level of the classification decision",
+        example=ConfidenceLevel.HIGH
+    )
+    
+    reasoning: str = Field(
+        ...,
+        min_length=10,
+        max_length=500,
+        description="Brief explanation of the classification decision",
+        example="Simple greeting seeking casual interaction"
+    )
+    
+    original_question: str = Field(
+        ...,
+        min_length=1,
+        description="The original user question being classified",
+        example="How are you doing today?"
+    )
+    
+    complexity_score: Optional[int] = Field(
+        None,
+        ge=1,
+        le=10,
+        description="Optional complexity score from 1-10, where 1 is simple and 10 is highly complex"
+    )
+    
+    suggested_response_type: Optional[str] = Field(
+        None,
+        description="Optional suggestion for how to respond to this type of question"
+    )

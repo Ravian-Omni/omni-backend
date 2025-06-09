@@ -30,6 +30,25 @@ from utilities.storage import omni_storage
 import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
+from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
+# from omni.response_format import PlannerResponse
+# from omni.response_format import CapabilityRoutingResponse
+
+# Load configuration
+config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
+llm_config = LLMConfigManager.get_config("deepseek")
+llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_planner["response_format"] = PlannerResponse
+llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_aligner["response_format"] = AgentSelectionResponse
+llm_config_mini_router = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_mini_router["response_format"] = CapabilityRoutingResponse
+
+llm_config_question_class = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_question_class["response_format"] = QuestionClassification
+
+llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):
@@ -120,7 +139,19 @@ def file_finder(query: Annotated[str, "The search query"]):
 
 class Omni:
     def __init__(self):
-        self.llm_config = LLMConfigManager.get_config("gpt4o")
+        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
+        self.llm_config = LLMConfigManager.get_config("deepseek")
+        self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_mini_planner["response_format"] = PlannerResponse
+        self.llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_mini_aligner["response_format"] = AgentSelectionResponse
+        self.llm_config_mini_router = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_mini_router["response_format"] = CapabilityRoutingResponse
+        self.llm_config_question_class = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_question_class["response_format"] = QuestionClassification
+
         self.agents = self.get_agents()
         self.function_registration()
         self.get_chat_manager()
@@ -166,11 +197,25 @@ class Omni:
             name="image_generator",
             description="This tool will be used to generate images form textual input.",
         )
+    def get_judge_question(self):
+        return autogen.AssistantAgent(
+            name="judge_question",
+            llm_config=self.llm_config_question_class,
+            system_message=prompts.judge_question #update the prompt and json output format to judge question and add to speaker selection and all the agents list
+        )
+
+    def get_conversation_agent(self):
+        return autogen.AssistantAgent(
+            name="conversation_agent",
+            llm_config=self.llm_config,
+            system_message=prompts.conversation #update the prompt and json output format to judge question
+        )
+  
 
     def get_planner(self):
         return autogen.AssistantAgent(
             name="planner_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_mini_planner,
             system_message=prompts.planner
         )
 
@@ -186,7 +231,7 @@ class Omni:
     def get_agent_aligner(self):
         return autogen.AssistantAgent(
             name="agent_aligner",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_mini_aligner,
             description="This agent will align the whole process and will share which agent will work next. ",
             system_message=prompts.agent_aligner,
         )
@@ -194,7 +239,7 @@ class Omni:
     def get_agent_router(self):
         return autogen.AssistantAgent(
             name="agent_router",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_mini_router,
             description="""From the initial information route to the capability which will solve the user's question.""",
             system_message=prompts.agent_router,
         )
@@ -225,9 +270,9 @@ class Omni:
             system_message=prompts.prob_status_checker,
         )
 
-    def get_manual_verfication(self):
+    def get_manual_verification(self):
         return autogen.UserProxyAgent(
-            name="manual_verfication",
+            name="manual_verification",
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
             code_execution_config=False,
@@ -254,18 +299,25 @@ class Omni:
         messages = groupchat.messages
         # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
         if len(messages) == 1:
-            #     return groupchat.agent_by_name("questions_generator")
-            # if last_speaker.name in ["questions_generator"]:
-            return groupchat.agent_by_name("planner_agent")
+                return groupchat.agent_by_name("judge_question")
+        if last_speaker.name in ["judge_question"]:
+            if "task_oriented" in messages[-1]["content"]:
+                return groupchat.agent_by_name("planner_agent")
+            if "conversation" in messages[-1]["content"]:
+                return groupchat.agent_by_name("conversation_agent")
+            
         if last_speaker.name == "agent_aligner":
             if "agent_router" in messages[-1]["content"]:
                 return groupchat.agent_by_name("agent_router")
-            # elif "manual_verfication" in messages[-1]["content"]:
-            #     return groupchat.agent_by_name("manual_verfication")
-            elif "process_completion_agent" in messages[-1]["content"]:
+            elif "manual_verification" in messages[-1]["content"]:
+                return groupchat.agent_by_name("manual_verification")
+            elif "process_completion" in messages[-1]["content"]:
                 return groupchat.agent_by_name("process_completion_agent")
 
         if last_speaker.name in ["planner_agent"]:
+            return groupchat.agent_by_name("agent_aligner")
+        
+        if last_speaker.name in ["manual_verification"]:
             return groupchat.agent_by_name("agent_aligner")
 
         if last_speaker.name == "agent_router":
@@ -274,12 +326,14 @@ class Omni:
             return groupchat.agent_by_name("agent_executor")
         if last_speaker.name == "agent_executor":
             return groupchat.agent_by_name("planner_agent")
-        if last_speaker.name == "process_completion_agent":
-            return "Process Completed"
+        # if last_speaker.name == "process_completion_agent":
+        #     return "Process Completed"
 
         return None
 
     def get_agents(self):
+        self.judge_question = self.get_judge_question()
+        self.conversation_agent = self.get_conversation_agent()
         self.planner = self.get_planner()
         self.get_request = self.get_get_request()
         self.agent_aligner = self.get_agent_aligner()
@@ -287,10 +341,12 @@ class Omni:
         self.agent_caller = self.get_agent_caller()
         self.agent_executor = self.get_agent_executor()
         self.problem_status_checker = self.get_problem_status_checker()
-        self.manual_verfication = self.get_manual_verfication()
+        self.manual_verification = self.get_manual_verification()
         self.process_completion = self.get_process_completion()
         self.questions_generator = self.get_questions_generator()
         return [
+            self.judge_question,
+            self.conversation_agent,
             self.planner,
             self.get_request,
             self.agent_aligner,
@@ -298,7 +354,7 @@ class Omni:
             self.agent_caller,
             self.agent_executor,
             self.problem_status_checker,
-            self.manual_verfication,
+            self.manual_verification,
             self.process_completion,
             self.questions_generator
         ]
@@ -315,4 +371,4 @@ class Omni:
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
         )
-        return
+        return self.manager, self.groupchat

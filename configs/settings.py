@@ -13,6 +13,7 @@ class Settings:
     ROOT_DIR = os.path.dirname(current_file_path.parent)
     USER_EMAIL = "codelokiyt@gmail.com"
     USER_FILES_PATH = os.getenv("USER_FILES_PATH","/mnt/data")
+    USER_NAME = os.getenv("USER_NAME","Lokesh")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -24,6 +25,7 @@ class Settings:
     MONGODB_URI = os.getenv("MONGODB_URI","localhost")
     DATABASE_NAME=os.getenv("DATABASE_NAME","user-management")
     CHAT_COLLECTION= os.getenv("CHAT_COLLECTION","chat-history")
+
     
     
     # Redis settings

@@ -19,6 +19,34 @@ from utilities.custom_manager import CustomGroupChatManager
 from simplegmail import Gmail
 
 
+
+from simplegmail import Gmail
+from oauth2client.file import Storage
+from pathlib import Path
+import os
+from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
+from autogen import config_list_from_json
+from typing import Annotated, List, Dict, Any, Union
+from datetime import datetime
+from autogen.agentchat.agent import Agent
+from autogen import register_function
+from autogen.coding import LocalCommandLineCodeExecutor
+
+today_date = datetime.now()
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+
+from utilities.external_memory import get_last_entry, get_all_messages
+from configs.settings import settings
+from capabilities.email_manager import prompts
+from configs.llm_configs_manager import LLMConfigManager
+llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+
+
 token_path = os.path.join(settings.ROOT_DIR,"configs","gmail_token.json") 
 secret_path = os.path.join(settings.ROOT_DIR,"configs","client_secret.json")
 

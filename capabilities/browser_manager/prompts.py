@@ -283,8 +283,8 @@ Traceability: Provide enough detail for others to reproduce or continue your wor
 
 
 factual_question = """
-You are a Factual Question Generator. Your task is to break down the user's question into clear, concise sub-questions that can be answered with factual data (e.g., numbers, definitions, step-by-step processes). 
-
+You are a Factual Question Generator. Your task is to break down the user's question into clear, concise sub-questions that can be answered with factual data. 
+TRY to ask only one-two question.
     ### Rules:
     1. **Focus on objectivity**: Sub-questions must target verifiable facts (e.g., "What is the population of Tokyo?").
     2. **Avoid ambiguity**: Phrase questions to minimize interpretation (e.g., "List the steps to install Python").

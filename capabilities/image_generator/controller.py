@@ -56,7 +56,7 @@ def flux_image_generator(prompt: Annotated[str, "The image generation prompt"]):
 
         img = Image.open(BytesIO(base64.b64decode(output)))
         timestamp = int(time.time())
-        filename = f"/Users/user/Library/Application Support/omni-mac-app-electron/image/generated_image_{timestamp}.jpg"
+        filename = f"/Users/lokesh/Desktop/omni_app/omni_be/omni-backend/results/generated_image_{timestamp}.jpg"
         img.save(filename)
         return f"Image successfully generated and saved at {filename}"
 
@@ -126,7 +126,7 @@ def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
 
 
 register_function(flux_image_generator,
-    caller=image_prompt_generator,
+    caller=image_generator_caller,
     executor=image_generator,
     name="image_generator",
     description="This tool will be used to generate images based on the information.",
@@ -144,4 +144,3 @@ ig_groupchat = GroupChat([user_intent,
                            )
 
 ig_manager = GroupChatManager(ig_groupchat, llm_config=llm_config)
-
