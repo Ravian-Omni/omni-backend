@@ -16,11 +16,13 @@ from datetime import datetime
 from autogen.agentchat.agent import Agent
 from autogen import register_function
 # from omni_newton import cs_groupchat,cs_manager
-from capabilities.file_finder.controller import ff_groupchat, ff_manager
+# from capabilities.file_finder.controller import ff_groupchat, ff_manager
+from capabilities.file_finder.manager import filefinder
 #from capabilities.image_generator.controller import ig_groupchat, ig_manager
 from capabilities.image_generator.manager import ImageGenerator
 # from omni_birbal import birbal_groupchat, birbal_manager
-from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
+# from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
+from capabilities.python_developer.manager import pythondeveloper
 from capabilities.email_manager.manager import EmailManager
 # from omni_dashboarding import dash_groupchat, dash_manager
 from capabilities.browser_manager.controller import browser_gc, browser_manager
@@ -108,15 +110,33 @@ def web_browser(query: Annotated[str,"The complete search query with all the det
     return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
-def python_coder(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
+# def python_coder(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
+#     # Initiate the chat
+#     omni_storage.start_new_iteration("python_code")
+#     response = pcw_manager.initiate_chat(pcw_manager, message=query)
+#     # Get messages directly from cs_groupchat
+#     messages = pcw_groupchat.messages
+#     # Find the last process_completion message
+#     for msg in reversed(messages):
+#         if msg.get("name") == "ProcessCompletion":
+#             # add_entry("python_coder", msg["content"])
+#             return msg["content"]
+#     # add_entry("python_coder", "No completion message found")
+#     return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+def python_coder(query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
     # Initiate the chat
     omni_storage.start_new_iteration("python_code")
-    response = pcw_manager.initiate_chat(pcw_manager, message=query)
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    python_dev= pythondeveloper()
+    response = python_dev.manager.initiate_chat(python_dev.manager, message=query)
     # Get messages directly from cs_groupchat
-    messages = pcw_groupchat.messages
+    messages = python_dev.groupchat.messages
     # Find the last process_completion message
     for msg in reversed(messages):
-        if msg.get("name") == "ProcessCompletion":
+        if msg.get("name") == "process_completion_agent":
             # add_entry("python_coder", msg["content"])
             return msg["content"]
     # add_entry("python_coder", "No completion message found")
@@ -143,10 +163,26 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
     return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
+# def file_finder(query: Annotated[str, "The search query"]):
+#     omni_storage.start_new_iteration("file_finder")
+#     response = ff_manager.initiate_chat(ff_manager, message=query)
+#     messages = ff_groupchat.messages
+#     for msg in reversed(messages):
+#         if msg.get("name") == "process_completion":
+#             # add_entry("file_finder", msg["content"])
+#             return msg["content"]
+#     # add_entry("email_sender", "No completion message found")
+#     return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+
 def file_finder(query: Annotated[str, "The search query"]):
     omni_storage.start_new_iteration("file_finder")
-    response = ff_manager.initiate_chat(ff_manager, message=query)
-    messages = ff_groupchat.messages
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    file_finder = filefinder()
+    response = file_finder.manager.initiate_chat(file_finder.manager, message=query)
+    messages = file_finder.groupchat.messages
     for msg in reversed(messages):
         if msg.get("name") == "process_completion":
             # add_entry("file_finder", msg["content"])
