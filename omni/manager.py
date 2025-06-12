@@ -26,7 +26,7 @@ from capabilities.browser_manager.controller import browser_gc, browser_manager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
 from utilities.logging import logger
-from utilities.storage import omni_storage
+from utilities.storage import omni_storage, update_db
 import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
@@ -52,19 +52,38 @@ llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):
-    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None):
+    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", chat_id=None, queue: Optional[asyncio.Queue] = None):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.queue = queue
+        self.chat_id = chat_id
     
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
         content = message.get("content", "") if isinstance(message, dict) else str(message)
+        db_content = {"role":"user","name":sender.name,"content":content,"raw_message":message}
+        asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
         try:
             omni_storage.add_main_message(role="user",agent_name=sender.name,content=content)
             logger.debug(f"Queued from {sender.name}: {content}")
         except Exception as e:
             logger.error(f"Error {e}, could not queue message from {sender.name}: {content}")
+            
+            
+class CustomUserProxyAgent(UserProxyAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def get_human_input(self, prompt: str) -> str:
+        """Override the default input method to use websocket"""
+        print(f"🔄 Waiting for user input via websocket...")
+        
+        # Send input request to websocket client
+        # self._send_input_request(prompt)
+        
+        # Wait for response from websocket
+        return super().get_human_input(prompt)
+    
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
     omni_storage.start_new_iteration("image_generator")
@@ -138,7 +157,8 @@ def file_finder(query: Annotated[str, "The search query"]):
 
 
 class Omni:
-    def __init__(self):
+    def __init__(self,chat_id):
+        self.chat_id=chat_id
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
@@ -271,7 +291,7 @@ class Omni:
         )
 
     def get_manual_verification(self):
-        return autogen.UserProxyAgent(
+        return CustomUserProxyAgent(
             name="manual_verification",
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
@@ -326,8 +346,8 @@ class Omni:
             return groupchat.agent_by_name("agent_executor")
         if last_speaker.name == "agent_executor":
             return groupchat.agent_by_name("planner_agent")
-        # if last_speaker.name == "process_completion_agent":
-        #     return "Process Completed"
+        if last_speaker.name == "chat_manager":
+            return groupchat.agent_by_name("judge_question")
 
         return None
 
@@ -370,5 +390,6 @@ class Omni:
             groupchat=self.groupchat,
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
+            chat_id=self.chat_id
         )
         return self.manager, self.groupchat

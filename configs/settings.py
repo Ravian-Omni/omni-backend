@@ -11,9 +11,8 @@ current_file_path = Path(__file__).resolve()
 class Settings:
     PROJECT_NAME = "OMNI"
     ROOT_DIR = os.path.dirname(current_file_path.parent)
-    USER_EMAIL = "codelokiyt@gmail.com"
+    USER_EMAIL = os.getenv("USER_EMAIL","omni@ravian.ai")
     USER_FILES_PATH = os.getenv("USER_FILES_PATH","/mnt/data")
-    USER_NAME = os.getenv("USER_NAME","Lokesh")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -23,17 +22,13 @@ class Settings:
     
     # MongoDB settings
     MONGODB_URI = os.getenv("MONGODB_URI","localhost")
-    DATABASE_NAME=os.getenv("DATABASE_NAME","user-management")
-    CHAT_COLLECTION= os.getenv("CHAT_COLLECTION","chat-history")
-
+    DATABASE_NAME=os.getenv("DATABASE_NAME","OMNI-DB")
+    OMNI_COLLECTION= os.getenv("OMNI_COLLECTION","omni")
+    EMAIL_COLLECTION= os.getenv("EMAIL_COLLECTION","email_manager")
+    BROWSER_COLLECTION= os.getenv("BROWSER_COLLECTION","browser_manager")
+    PYTHON_DEV_COLLECTION= os.getenv("PYTHON_DEV_COLLECTION","python_developer")
     
     
-    # Redis settings
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", "redis")
-    REDIS_MAX_CONNECTIONS:int=int(os.getenv("REDIS_MAX_CONNECTIONS",100))
-    REDIS_CHAT_TTL_SECONDS:int = int(os.getenv("REDIS_CHAT_TTL_SECONDS",3600))
     
     class Config:
         env_file = ".env"

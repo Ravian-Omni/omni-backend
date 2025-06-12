@@ -18,21 +18,38 @@ from autogen import (
     GroupChatManager,
     register_function,
 )
-
+from typing import Optional
+import asyncio
 from langchain_openai import ChatOpenAI
 
 from browser_use import Agent, Browser, BrowserConfig, Controller, ActionResult
 from browser_use.browser.context import BrowserContextConfig
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
+import autogen
 load_dotenv()
 from capabilities.browser_manager import prompts
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
-
+from utilities.logging import logger
 llm_config = LLMConfigManager.get_config("gpt4o")
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
+
+
+class BrowserGroupChatManager(autogen.GroupChatManager):
+    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None):
+        super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
+        self.queue = queue
+    
+    def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
+        logger.info(f"Received from {sender.name}: {message}")
+        super()._print_received_message(message, sender)
+        content = message.get("content", "") if isinstance(message, dict) else str(message)
+        try:
+            # omni_storage.add_main_message(role="user",agent_name=sender.name,content=content)
+            logger.debug(f"Queued from {sender.name}: {content}")
+        except Exception as e:
+            logger.error(f"Error {e}, could not queue message from {sender.name}: {content}")
 
 
 class Post(BaseModel):
@@ -347,7 +364,7 @@ browser_gc = GroupChat([browser_searcher,
                            max_round=500
                            )
 
-browser_manager = GroupChatManager(
+browser_manager = BrowserGroupChatManager(
     browser_gc,
     llm_config=llm_config,
 )

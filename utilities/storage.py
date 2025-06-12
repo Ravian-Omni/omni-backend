@@ -1,6 +1,32 @@
 import time
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
+from dependencies import get_mongodb_service
+from datetime import datetime
+from configs.settings import settings
+import asyncio
+from utilities.logging import logger
+
+async def update_db(chat_id, message, capability):
+    mongodb = await get_mongodb_service()
+    raw_message = {k: message[k] for k in ['role', 'name', 'raw_message']}
+    message = {k: message[k] for k in ['role', 'name', 'content']}
+    # Build the push operations conditionally
+    push_operations = {"raw_messages": raw_message}
+
+    # Only add to messages if content is not empty/null
+    if message.get('content'):
+        push_operations["messages"] = message
+
+    mongo_update = {
+        "$push": push_operations,
+        "$set": {
+            "updated_at": datetime.now()
+        }
+    }
+    db_mongo_update = asyncio.create_task(mongodb.update_one(capability,{"chat_id":chat_id},mongo_update))
+    logger.info(f"MongoDB updated for {chat_id} having status {db_mongo_update}")
+    return True
 
 
 class OmniStorage:

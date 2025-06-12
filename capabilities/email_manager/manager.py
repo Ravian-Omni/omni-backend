@@ -15,7 +15,6 @@ from typing import List, Dict, Any, Union
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
 from configs.settings import settings
-from utilities.custom_manager import CustomGroupChatManager
 from simplegmail import Gmail
 
 
@@ -44,6 +43,10 @@ from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
+from typing import Optional
+import asyncio
+from utilities.logging import logger
+
 llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 
 
@@ -59,7 +62,21 @@ def validate_attachments(file_paths):
             invalid_paths.append(path)
     return invalid_paths
 
-
+class EmailGroupChatManager(autogen.GroupChatManager):
+    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None, capability_name = "default"):
+        super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
+        self.queue = queue
+        self.capability_name = capability_name
+    
+    def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
+        logger.info(f"Received from {sender.name}: {message}")
+        super()._print_received_message(message, sender)
+        content = message.get("content", "") if isinstance(message, dict) else str(message)
+        try:
+            # omni_storage.add_capability_message(capability_name=self.capability_name,role="user",agent_name=sender.name,content=content)
+            logger.debug(f"Queued from {sender.name}: {content}")
+        except asyncio.QueueFull:
+            logger.error(f"Queue full, could not queue message from {sender.name}: {content}")
 
 
 
@@ -207,7 +224,7 @@ class EmailManager:
             speaker_selection_method=self.custom_speaker_selection_func,
             max_round=500,
         )
-        self.manager = CustomGroupChatManager(
+        self.manager = EmailGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
