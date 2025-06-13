@@ -34,8 +34,7 @@ import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
-# from omni.response_format import PlannerResponse
-# from omni.response_format import CapabilityRoutingResponse
+
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
@@ -69,16 +68,6 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         except Exception as e:
             logger.error(f"Error {e}, could not queue message from {sender.name}: {content}")
 
-# def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
-#     omni_storage.start_new_iteration("image_generator")
-#     response = ig_manager.initiate_chat(ig_manager, message=query)
-#     messages = ig_groupchat.messages
-#     for msg in reversed(messages):
-#         if msg.get("name") == "process_completion":
-#             # add_entry("image_generator", msg["content"])
-#             return msg["content"]
-#     # add_entry("image_generator", "No completion message found")
-#     return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
     omni_storage.start_new_iteration("image_generator")
@@ -109,20 +98,6 @@ def web_browser(query: Annotated[str,"The complete search query with all the det
     # add_entry("Web_browser", "No completion message found")
     return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
-
-# def python_coder(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
-#     # Initiate the chat
-#     omni_storage.start_new_iteration("python_code")
-#     response = pcw_manager.initiate_chat(pcw_manager, message=query)
-#     # Get messages directly from cs_groupchat
-#     messages = pcw_groupchat.messages
-#     # Find the last process_completion message
-#     for msg in reversed(messages):
-#         if msg.get("name") == "ProcessCompletion":
-#             # add_entry("python_coder", msg["content"])
-#             return msg["content"]
-#     # add_entry("python_coder", "No completion message found")
-#     return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 def python_coder(query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
     # Initiate the chat
@@ -156,23 +131,11 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
     for msg in reversed(messages):
         if (
             msg.get("name") == "process_completion_agent"
-        ):  # Make sure there's no extra space
-            # add_entry("email_sender", msg["content"])
+        ): 
             return msg["content"]
-    # add_entry("email_sender", "No completion message found")
+
     return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
-
-# def file_finder(query: Annotated[str, "The search query"]):
-#     omni_storage.start_new_iteration("file_finder")
-#     response = ff_manager.initiate_chat(ff_manager, message=query)
-#     messages = ff_groupchat.messages
-#     for msg in reversed(messages):
-#         if msg.get("name") == "process_completion":
-#             # add_entry("file_finder", msg["content"])
-#             return msg["content"]
-#     # add_entry("email_sender", "No completion message found")
-#     return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
 def file_finder(query: Annotated[str, "The search query"]):
@@ -348,18 +311,23 @@ class Omni:
             llm_config=self.llm_config,
             system_message=prompts.questions_generator.format(today_date=today_date),
         )
-
+    # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
         # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
+        #arrival of the first message
         if len(messages) == 1:
+        #judge a question and understand if the question is a task or  general conversation
                 return groupchat.agent_by_name("judge_question")
         if last_speaker.name in ["judge_question"]:
             if "task_oriented" in messages[-1]["content"]:
+        #if it is a task oriented question then route to planner agent
                 return groupchat.agent_by_name("planner_agent")
+        #if it is a general conversation then route to conversation agent
             if "conversation" in messages[-1]["content"]:
                 return groupchat.agent_by_name("conversation_agent")
-            
+
+        #Agent Aligner will align the process and will route to the next agent    
         if last_speaker.name == "agent_aligner":
             if "agent_router" in messages[-1]["content"]:
                 return groupchat.agent_by_name("agent_router")
@@ -367,21 +335,23 @@ class Omni:
                 return groupchat.agent_by_name("manual_verification")
             elif "process_completion" in messages[-1]["content"]:
                 return groupchat.agent_by_name("process_completion_agent")
+            
 
+        # inner loop planner agent will report back to aligner agent
         if last_speaker.name in ["planner_agent"]:
             return groupchat.agent_by_name("agent_aligner")
         
+        # inner loop manual verification agent will report back to aligner agent
         if last_speaker.name in ["manual_verification"]:
             return groupchat.agent_by_name("agent_aligner")
-
+        
+        # how the sequential processess will get called
         if last_speaker.name == "agent_router":
             return groupchat.agent_by_name("agent_caller")
         if last_speaker.name == "agent_caller":
             return groupchat.agent_by_name("agent_executor")
         if last_speaker.name == "agent_executor":
             return groupchat.agent_by_name("planner_agent")
-        # if last_speaker.name == "process_completion_agent":
-        #     return "Process Completed"
 
         return None
 

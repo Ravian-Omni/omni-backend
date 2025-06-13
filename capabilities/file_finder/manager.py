@@ -237,111 +237,8 @@ class filefinder:
             system_message=prompts.process_completion)
     
 
-    # def search_files_with_agent(self, search_term: str, file_type: Optional[str] = None) -> List[Dict[str, str]]:
-    #     """
-    #     Search for files using the enhanced FileSearchAgent.
-        
-    #     Args:
-    #         search_term (str): Term to search for in filenames
-    #         file_type (Optional[str]): File extension to filter by
-            
-    #     Returns:
-    #         List[Dict[str, str]]: List of matching files with metadata
-    #     """
-    #     # Initialize the file search agent
-    #     file_agent = FileSearchAgent()
-
-    #     # Perform the search
-    #     print(f"\nSearching for files containing '{search_term}'{f' with type .{file_type}' if file_type else ''}...")
-    #     results = file_agent.search_files(search_term, file_type)
-
-    #     # Format results for display
-    #     if results:
-    #         print(f"\nFound {len(results)} matching files:")
-    #         for idx, result in enumerate(results, 1):
-    #             print(f"\n{idx}. File Details:")
-    #             print(f"   Path: {result['path']}")
-    #             print(f"   Size: {result['size']}")
-    #             print(f"   Last Modified: {result['modified']}")
-    #     else:
-    #         print(f"\nNo files found matching the search criteria.")
-
-    #     return results
     
-
-
-# # Cell 5 - Create the assistant agent
-# file_finder_planner = autogen.AssistantAgent(
-#     name="file_finder_planner",
-#     llm_config=llm_config,
-#     system_message=prompts.planner.format(get_last_entry=get_last_entry,get_all_messages=get_all_messages)
-#     )
-
-# file_finder = autogen.AssistantAgent(
-#     name="file_finder",
-#     llm_config=llm_config,
-#     system_message=prompts.file_finder
-#     )
-
-# # Cell 6 - Create the user proxy agent
-# user_proxy = autogen.UserProxyAgent(
-#     name="user_proxy",
-#     llm_config=llm_config,
-#     human_input_mode="NEVER",
-#     is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
-#     code_execution_config={
-#         "work_dir": "file_search_workspace",
-#         "use_docker": False
-#         }
-#     )
-
-# prob_status_checker = AssistantAgent(
-#     name="prob_status_checker",
-#     description="""call this agent to check if the Task specified by the user has been completed""",
-#     system_message=prompts.prob_status_checker,
-#     llm_config=llm_config_psc
-#     )
-
-# process_completion = AssistantAgent(
-#     name="process_completion",
-#     llm_config=llm_config,
-#     description="Let group manager know that the process is completed. ",
-#     system_message=prompts.process_completion)
-
-
-# def search_files_with_agent(search_term: str, file_type: Optional[str] = None) -> List[Dict[str, str]]:
-#     """
-#     Search for files using the enhanced FileSearchAgent.
-    
-#     Args:
-#         search_term (str): Term to search for in filenames
-#         file_type (Optional[str]): File extension to filter by
-        
-#     Returns:
-#         List[Dict[str, str]]: List of matching files with metadata
-#     """
-#     # Initialize the file search agent
-#     file_agent = FileSearchAgent()
-
-#     # Perform the search
-#     print(f"\nSearching for files containing '{search_term}'{f' with type .{file_type}' if file_type else ''}...")
-#     results = file_agent.search_files(search_term, file_type)
-
-#     # Format results for display
-#     if results:
-#         print(f"\nFound {len(results)} matching files:")
-#         for idx, result in enumerate(results, 1):
-#             print(f"\n{idx}. File Details:")
-#             print(f"   Path: {result['path']}")
-#             print(f"   Size: {result['size']}")
-#             print(f"   Last Modified: {result['modified']}")
-#     else:
-#         print(f"\nNo files found matching the search criteria.")
-
-#     return results
-
-
-# custom speaker agent
+    # static custom speaker selection, no dynamic agent selection or condition chat routing
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
         if len(messages) == 1:
@@ -393,22 +290,4 @@ class filefinder:
         )
         return self.groupchat , self.manager
 
-
-
-
-# register_function(search_files_with_agent,
-#     caller=file_finder,
-#     executor=user_proxy,
-#     name="file_search_function",
-#     description="This tool will be used to search for any files in the system",
-#     )
-
-# agents= [file_finder_planner, file_finder, user_proxy,prob_status_checker, process_completion]
-
-# ff_groupchat = autogen.GroupChat(agents=agents,
-#     messages=[],
-#     speaker_selection_method=custom_speaker_selection_func,
-#     max_round=50
-#     )
-# ff_manager = autogen.GroupChatManager(groupchat=ff_groupchat)
 

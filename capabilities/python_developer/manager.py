@@ -1,18 +1,10 @@
-# To install required packages:
-# pip install pyautogen==0.2.9 panel==1.3.8
 import autogen
-# import panel as pn
 import requests
 import openai
 import re
 import os
 import time
 import asyncio
-# from langchain.chat_models.azure_openai import AzureChatOpenAI
-# from langchain_community.chat_models.azure_openai import AzureChatOpenAI
-# from langchain_openai import AzureChatOpenAI
-# from autogen.coding import LocalCommandLineCodeExecutor
-# import LocalCommandLineCodeExecutor
 import pandas as pd
 from autogen.agentchat.agent import Agent
 from typing import List, Dict, Any
@@ -49,7 +41,7 @@ results_dir = os.path.join(settings.ROOT_DIR, "code")
 os.makedirs(results_dir, exist_ok=True)
 
 file_location = os.path.join(settings.ROOT_DIR, "code","output")#
-#file_location ="/Users/lokesh/Desktop/omni_app/omni_be/omni-backend/code/output"
+
 coding_language = "python"
 question = None
 
@@ -108,11 +100,11 @@ class pythondeveloper:
             system_message=prompts.process_completion
         )
         
-
+    # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
         messages = groupchat.messages
         if len(messages) <= 1:
-            # st.spinner("User has asked me a question lets try to solve the question. Bur for this I need better understanding of the question.")
+            
             return groupchat.agent_by_name("planner_agent")
         if last_speaker.name == "planner_agent":
             return groupchat.agent_by_name("code_writer_agent")
