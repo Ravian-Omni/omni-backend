@@ -17,12 +17,12 @@ from autogen.agentchat.agent import Agent
 from autogen import register_function
 # from omni_newton import cs_groupchat,cs_manager
 # from capabilities.file_finder.controller import ff_groupchat, ff_manager
-from capabilities.file_finder.manager import filefinder
+from capabilities.file_finder.manager import FileFinder
 #from capabilities.image_generator.controller import ig_groupchat, ig_manager
 from capabilities.image_generator.manager import ImageGenerator
 # from omni_birbal import birbal_groupchat, birbal_manager
 # from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
-from capabilities.python_developer.manager import pythondeveloper
+from capabilities.python_developer.manager import PythonDeveloper
 from capabilities.email_manager.manager import EmailManager
 # from omni_dashboarding import dash_groupchat, dash_manager
 from capabilities.browser_manager.controller import browser_gc, browser_manager
@@ -34,7 +34,7 @@ import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
-
+from utilities.custom_manager import create_capability_chat
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
@@ -64,7 +64,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         super()._print_received_message(message, sender)
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content,"raw_message":message}
-        asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
+        # asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
         try:
             omni_storage.add_main_message(role="user",agent_name=sender.name,content=content)
             logger.debug(f"Queued from {sender.name}: {content}")
@@ -87,90 +87,6 @@ class CustomUserProxyAgent(UserProxyAgent):
         return super().get_human_input(prompt)
     
 
-def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
-    omni_storage.start_new_iteration("image_generator")
-    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-    recent_capability = omni_storage.get_most_recently_updated_capability()
-    print(recent_capability)
-    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-    image_generator = ImageGenerator()
-    response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
-    messages = image_generator.groupchat.messages
-    for msg in reversed(messages):
-        if msg.get("name") == "process_completion":
-            # add_entry("image_generator", msg["content"])
-            return msg["content"]
-    # add_entry("image_generator", "No completion message found")
-    return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
-
-
-def web_browser(query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
-    omni_storage.start_new_iteration("web_browser")
-    response = browser_manager.initiate_chat(browser_manager, message=query)
-    messages = browser_gc.messages
-    for msg in reversed(messages):
-        if msg.get("name") == "process_completion":
-            # add_entry("Web_browser", msg["content"])
-            return msg["content"]
-    # add_entry("Web_browser", "No completion message found")
-    return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
-
-
-def python_coder(query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
-    # Initiate the chat
-    omni_storage.start_new_iteration("python_code")
-    recent_capability = omni_storage.get_most_recently_updated_capability()
-    print(recent_capability)
-    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-    python_dev= pythondeveloper()
-    response = python_dev.manager.initiate_chat(python_dev.manager, message=query)
-    # Get messages directly from cs_groupchat
-    messages = python_dev.groupchat.messages
-    # Find the last process_completion message
-    for msg in reversed(messages):
-        if msg.get("name") == "process_completion_agent":
-            # add_entry("python_coder", msg["content"])
-            return msg["content"]
-    # add_entry("python_coder", "No completion message found")
-    return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
-
-
-def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
-    omni_storage.start_new_iteration("email_sender")
-    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-    recent_capability = omni_storage.get_most_recently_updated_capability()
-    print(recent_capability)
-    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-    emailer = EmailManager()
-    response = emailer.manager.initiate_chat(emailer.manager, message=query)
-    messages = emailer.groupchat.messages
-    for msg in reversed(messages):
-        if (
-            msg.get("name") == "process_completion_agent"
-        ): 
-            return msg["content"]
-
-    return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
-
-
-
-def file_finder(query: Annotated[str, "The search query"]):
-    omni_storage.start_new_iteration("file_finder")
-    recent_capability = omni_storage.get_most_recently_updated_capability()
-    print(recent_capability)
-    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-    file_finder = filefinder()
-    response = file_finder.manager.initiate_chat(file_finder.manager, message=query)
-    messages = file_finder.groupchat.messages
-    for msg in reversed(messages):
-        if msg.get("name") == "process_completion":
-            # add_entry("file_finder", msg["content"])
-            return msg["content"]
-    # add_entry("email_sender", "No completion message found")
-    return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
-
 
 class Omni:
     def __init__(self,chat_id):
@@ -189,12 +105,132 @@ class Omni:
         self.llm_config_question_class["response_format"] = QuestionClassification
 
         self.agents = self.get_agents()
-        self.function_registration()
+        self._register_functions()
         self.get_chat_manager()
+    
+    def get_last_call_id(self):
+        last_speaker = self.groupchat.messages[-1]
+        if last_speaker.get("name") == "agent_caller":
+            tool_calls = last_speaker.get("tool_calls")
+            call_id = tool_calls[0].get("id")
+            return call_id
+        return None
+        
+    def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
+        omni_storage.start_new_iteration("image_generator")
+        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+        recent_capability = omni_storage.get_most_recently_updated_capability()
+        print(recent_capability)
+        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+        call_id = self.get_last_call_id()
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION))
+        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id)
+        response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
+        messages = image_generator.groupchat.messages
+        for msg in reversed(messages):
+            if msg.get("name") == "process_completion":
+                # add_entry("image_generator", msg["content"])
+                return msg["content"]
+        # add_entry("image_generator", "No completion message found")
+        return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
 
-    def function_registration(self):
+
+    def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
+        omni_storage.start_new_iteration("web_browser")
+        call_id = self.get_last_call_id()
+        result = asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION))
+        response = browser_manager.initiate_chat(browser_manager, message=query)
+        messages = browser_gc.messages
+        for msg in reversed(messages):
+            if msg.get("name") == "process_completion":
+                # add_entry("Web_browser", msg["content"])
+                return msg["content"]
+        # add_entry("Web_browser", "No completion message found")
+        return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+
+    def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
+        # Initiate the chat
+        omni_storage.start_new_iteration("python_code")
+        recent_capability = omni_storage.get_most_recently_updated_capability()
+        print(recent_capability)
+        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+        call_id = self.get_last_call_id()
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.PYTHON_DEV_COLLECTION))
+        python_dev= PythonDeveloper(chat_id=self.chat_id, call_id=call_id)
+        response = python_dev.manager.initiate_chat(python_dev.manager, message=query)
+        # Get messages directly from cs_groupchat
+        messages = python_dev.groupchat.messages
+        # Find the last process_completion message
+        for msg in reversed(messages):
+            if msg.get("name") == "process_completion_agent":
+                # add_entry("python_coder", msg["content"])
+                return msg["content"]
+        # add_entry("python_coder", "No completion message found")
+        return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+
+    def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
+        omni_storage.start_new_iteration("email_sender")
+        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+        recent_capability = omni_storage.get_most_recently_updated_capability()
+        print(recent_capability)
+        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+        call_id = self.get_last_call_id()
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION))
+        emailer = EmailManager(self.chat_id,call_id)
+        response = emailer.manager.initiate_chat(emailer.manager, message=query)
+        messages = emailer.groupchat.messages
+        for msg in reversed(messages):
+            if (
+                msg.get("name") == "process_completion_agent"
+            ): 
+                return msg["content"]
+
+        return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+
+
+    def get_file_finder(self, query: Annotated[str, "The search query"]):
+        omni_storage.start_new_iteration("file_finder")
+        # recent_capability = omni_storage.get_most_recently_updated_capability()
+        # print(recent_capability)
+        # print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+        call_id = self.get_last_call_id()
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION))
+        file_finder = FileFinder(chat_id=self.chat_id,call_id=call_id)
+        response = file_finder.manager.initiate_chat(file_finder.manager, message=query)
+        messages = file_finder.groupchat.messages
+        for msg in reversed(messages):
+            if msg.get("name") == "process_completion":
+                # add_entry("file_finder", msg["content"])
+                return msg["content"]
+        # add_entry("email_sender", "No completion message found")
+        return f"The file finder  process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
+    def _register_functions(self):
+        
+        #Wrapper functions before registring to agents
+        
+        def image_generator_wrapper(query: Annotated[str, "The detailed image generation prompt"]):
+            return self.get_image_generator(query)
+        
+        def web_browser_wrapper(query: Annotated[str,"The complete search query with all the details like subject relationship with the message",]) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
+            return self.get_web_browser(query)
+        
+        def python_coder_wrapper(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",]) -> Annotated[str, "The results"]:
+            return self.get_python_coder(query)
+        
+        def email_sender_wrapper(query: Annotated[str, "The complete user query"]):
+            return self.get_email_sender(query)
+        
+        def file_finder_wrapper(query: Annotated[str, "The search query"]):
+            return self.get_file_finder(query)
+        
         autogen.agentchat.register_function(
-            python_coder,
+            python_coder_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="python_coder",
@@ -202,7 +238,7 @@ class Omni:
         )
 
         autogen.agentchat.register_function(
-            email_sender,
+            email_sender_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="email_sender",
@@ -210,7 +246,7 @@ class Omni:
         )
 
         autogen.agentchat.register_function(
-            file_finder,
+            file_finder_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="file_finder",
@@ -219,7 +255,7 @@ class Omni:
 
 
         autogen.agentchat.register_function(
-            web_browser,
+            web_browser_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="web_browser",
@@ -227,7 +263,7 @@ class Omni:
         )
 
         autogen.agentchat.register_function(
-            image_generator,
+            image_generator_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="image_generator",

@@ -26,35 +26,27 @@ from autogen import config_list_from_json
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
+import autogen
+import asyncio
+from typing import List, Optional,Dict,Any
+from utilities.logging import logger
+from utilities.storage import omni_storage, update_db
 from utilities.custom_manager import CustomGroupChatManager
 
 
 
-llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
-llm_config_psc["response_format"] = ProblemStatusResponse
 
-llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-
-file_path = None  # Replace with your data file path
-
-results_dir = os.path.join(settings.ROOT_DIR, "code")
-os.makedirs(results_dir, exist_ok=True)
-
-file_location = os.path.join(settings.ROOT_DIR, "code","output")#
-
-coding_language = "python"
-question = None
-
-
-class pythondeveloper:
-    def __init__(self):
+class PythonDeveloper:
+    def __init__(self, chat_id, call_id):
+        self.chat_id = chat_id
+        self.call_id = call_id
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
-        self.question = question
-        self.file_location = file_location
-        self.coding_language = coding_language
-        self.results_dir = results_dir
+        self.question = None
+        self.file_location = os.path.join(settings.ROOT_DIR, "code", "output")
+        self.coding_language = "python"
+        self.results_dir = os.path.join(settings.ROOT_DIR, "code")
         self.agents = self.get_agents()
         self.get_chat_manager()
         
@@ -153,8 +145,10 @@ class pythondeveloper:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            human_input_mode="ALWAYS",
-            capability_name="python_coder"
+            capability_name=settings.PYTHON_DEV_COLLECTION,
+            chat_id=self.chat_id,
+            call_id=self.call_id,
+            human_input_mode="ALWAYS"
         )
         return self.groupchat , self.manager
     

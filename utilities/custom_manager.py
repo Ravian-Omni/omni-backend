@@ -4,20 +4,64 @@ import asyncio
 from typing import List, Optional,Dict,Any
 from utilities.logging import logger
 from utilities.storage import omni_storage
-# Load OpenAI API key
+from utilities.storage import omni_storage
+from datetime import datetime,timezone
+from dependencies import get_mongodb_service
+
+async def create_capability_chat(chat_id,call_id,capability):
+    mongodb = await get_mongodb_service()
+    chat_document = {
+        "chat_id": chat_id,
+        "call_id":call_id,
+        "messages": [],
+        "raw_messages": [],
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    
+    # Create database record
+    await mongodb.insert_one(capability, chat_document)
+    
+    # Return standardized response using Pydantic model
+    return {"chat_id":chat_id}
+
+async def update_db(chat_id, call_id, message, capability):
+    mongodb = await get_mongodb_service()
+    raw_message = {k: message[k] for k in ['role', 'name', 'raw_message']}
+    message = {k: message[k] for k in ['role', 'name', 'content']}
+    # Build the push operations conditionally
+    push_operations = {"raw_messages": raw_message}
+
+    # Only add to messages if content is not empty/null
+    if message.get('content'):
+        push_operations["messages"] = message
+
+    mongo_update = {
+        "$push": push_operations,
+        "$set": {
+            "updated_at": datetime.now()
+        }
+    }
+    db_mongo_update = asyncio.create_task(mongodb.update_one(capability,{"chat_id":chat_id,"call_id":call_id},mongo_update))
+    logger.info(f"MongoDB updated for {chat_id} having status {db_mongo_update} and details are {call_id} | {capability}")
+    return True
 
 class CustomGroupChatManager(autogen.GroupChatManager):
-    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None, capability_name = "default"):
+    def __init__(self, groupchat, llm_config, capability_name="default", chat_id=None, call_id=None, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.queue = queue
-        self.capability_name = capability_name
+        self.capability = capability_name
+        self.chat_id = chat_id
+        self.call_id = call_id
     
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
         content = message.get("content", "") if isinstance(message, dict) else str(message)
+        db_content = {"role":"user","name":sender.name,"content":content,"raw_message":message}
+        asyncio.run(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability))
         try:
-            omni_storage.add_capability_message(capability_name=self.capability_name,role="user",agent_name=sender.name,content=content)
+            omni_storage.add_capability_message(capability_name=self.capability,role="user",agent_name=sender.name,content=content)
             logger.debug(f"Queued from {sender.name}: {content}")
         except asyncio.QueueFull:
             logger.error(f"Queue full, could not queue message from {sender.name}: {content}")

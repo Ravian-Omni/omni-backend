@@ -27,6 +27,8 @@ class Settings:
     EMAIL_COLLECTION= os.getenv("EMAIL_COLLECTION","email_manager")
     BROWSER_COLLECTION= os.getenv("BROWSER_COLLECTION","browser_manager")
     PYTHON_DEV_COLLECTION= os.getenv("PYTHON_DEV_COLLECTION","python_developer")
+    FILE_FINDER_COLLECTION= os.getenv("FILE_FINDER_COLLECTION","file_finder")
+    IMAGE_GENERATOR_COLLECTION= os.getenv("IMAGE_GENERATOR_COLLECTION","image_generator")
     
     
     

@@ -38,7 +38,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import os
-
+from utilities.custom_manager import CustomGroupChatManager
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from capabilities.email_manager import prompts
@@ -62,26 +62,12 @@ def validate_attachments(file_paths):
             invalid_paths.append(path)
     return invalid_paths
 
-class EmailGroupChatManager(autogen.GroupChatManager):
-    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None, capability_name = "default"):
-        super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
-        self.queue = queue
-        self.capability_name = capability_name
-    
-    def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
-        logger.info(f"Received from {sender.name}: {message}")
-        super()._print_received_message(message, sender)
-        content = message.get("content", "") if isinstance(message, dict) else str(message)
-        try:
-            # omni_storage.add_capability_message(capability_name=self.capability_name,role="user",agent_name=sender.name,content=content)
-            logger.debug(f"Queued from {sender.name}: {content}")
-        except asyncio.QueueFull:
-            logger.error(f"Queue full, could not queue message from {sender.name}: {content}")
-
 
 
 class EmailManager:
-    def __init__(self):
+    def __init__(self, chat_id, call_id):
+        self.chat_id = chat_id
+        self.call_id = call_id
         self.llm_config = LLMConfigManager.get_config("gpt4o")
         self.agents = self.get_agents()
         autogen.register_function(
@@ -224,10 +210,12 @@ class EmailManager:
             speaker_selection_method=self.custom_speaker_selection_func,
             max_round=500,
         )
-        self.manager = EmailGroupChatManager(
+        self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            human_input_mode="ALWAYS",
-            capability_name="email_sender"
+            capability_name=settings.EMAIL_COLLECTION,
+            chat_id=self.chat_id,
+            call_id=self.call_id,
+            human_input_mode="ALWAYS"
         )
         return

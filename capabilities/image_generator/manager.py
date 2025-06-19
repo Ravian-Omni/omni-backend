@@ -64,7 +64,9 @@ def flux_image_generator(prompt: Annotated[str, "The image generation prompt"]):
 
 
 class ImageGenerator:
-    def __init__(self):
+    def __init__(self, chat_id, call_id):
+        self.chat_id = chat_id
+        self.call_id = call_id
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         autogen.register_function(
@@ -159,7 +161,9 @@ class ImageGenerator:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            human_input_mode="ALWAYS",
-            capability_name="image_generator"
+            capability_name=settings.IMAGE_GENERATOR_COLLECTION,
+            chat_id=self.chat_id,
+            call_id=self.call_id,
+            human_input_mode="ALWAYS"
         )
         return  self.groupchat , self.manager

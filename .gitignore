@@ -182,6 +182,9 @@ cython_debug/
 
 
 #Project Specific
-results
+results/*
 .vscode
 *.gif
+browser/*
+code/*
+images/*

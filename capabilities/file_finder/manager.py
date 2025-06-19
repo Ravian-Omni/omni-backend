@@ -22,7 +22,7 @@ from capabilities.file_finder import prompts
 from configs.llm_configs_manager import LLMConfigManager
 llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from utilities.custom_manager import CustomGroupChatManager
-
+from configs.settings import settings
 from capabilities.file_finder.response_format import ProblemStatusResponse
 
 
@@ -183,8 +183,10 @@ def search_files_with_agent(search_term: str, file_type: Optional[str] = None) -
     return results
 
 
-class filefinder:
-    def __init__(self):
+class FileFinder:
+    def __init__(self, chat_id, call_id):
+        self.chat_id = chat_id
+        self.call_id = call_id
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
@@ -285,8 +287,10 @@ class filefinder:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            human_input_mode="ALWAYS",
-            capability_name="file_finder"
+            capability_name=settings.FILE_FINDER_COLLECTION,
+            chat_id=self.chat_id,
+            call_id=self.call_id,
+            human_input_mode="ALWAYS"
         )
         return self.groupchat , self.manager
 
