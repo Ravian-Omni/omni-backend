@@ -11,9 +11,10 @@ current_file_path = Path(__file__).resolve()
 class Settings:
     PROJECT_NAME = "OMNI"
     ROOT_DIR = os.path.dirname(current_file_path.parent)
-    USER_EMAIL = "codelokiyt@gmail.com"
+    USER_EMAIL = os.getenv("email_username")
+    USER_EMAIL_PASSWORD = os.getenv("email_password")
     USER_FILES_PATH = os.getenv("USER_FILES_PATH","/mnt/data")
-    USER_NAME = os.getenv("USER_NAME","Lokesh")
+    USER_NAME = os.getenv("user_name")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")

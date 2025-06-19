@@ -25,7 +25,8 @@ from capabilities.image_generator.manager import ImageGenerator
 from capabilities.python_developer.manager import pythondeveloper
 from capabilities.email_manager.manager import EmailManager
 # from omni_dashboarding import dash_groupchat, dash_manager
-from capabilities.browser_manager.controller import browser_gc, browser_manager
+# from capabilities.browser_manager.controller import browser_gc, browser_manager
+from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
 from utilities.logging import logger
@@ -89,8 +90,12 @@ def image_generator(query: Annotated[str, "The detailed image generation prompt"
 
 def web_browser(query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
     omni_storage.start_new_iteration("web_browser")
-    response = browser_manager.initiate_chat(browser_manager, message=query)
-    messages = browser_gc.messages
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    browser_manager = BrowserManager()
+    response = browser_manager.manager.initiate_chat(browser_manager.manager, message=query)
+    messages = browser_manager.groupchat.messages
     for msg in reversed(messages):
         if msg.get("name") == "process_completion":
             # add_entry("Web_browser", msg["content"])
@@ -273,10 +278,10 @@ class Omni:
         return autogen.UserProxyAgent(
             "agent_executor",
             human_input_mode="NEVER",
-            description="""This agent will execute the function which are group chat on their own""",
+            #description="""This agent will execute the function which are group chat on their own""",
             code_execution_config=False,
             system_message=prompts.agent_executor.format(today_date=today_date),
-            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+            #is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
         )
 
     def get_problem_status_checker(self):

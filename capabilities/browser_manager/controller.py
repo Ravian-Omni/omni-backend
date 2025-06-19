@@ -31,7 +31,7 @@ from capabilities.browser_manager import prompts
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 
-llm_config = LLMConfigManager.get_config("gpt4o")
+llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
 
 

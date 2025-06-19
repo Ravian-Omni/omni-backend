@@ -9,9 +9,11 @@ __pycache__/
 code
 browser
 images
+results
 gmail_token.json
 client_secret.json
 test.ipynb
+agent_history.gif
 
 # Distribution / packaging
 .Python
