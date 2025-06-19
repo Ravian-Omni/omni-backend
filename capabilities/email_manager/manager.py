@@ -177,7 +177,7 @@ class EmailManager:
             llm_config=self.llm_config,
             system_message=prompts.process_completion,
         )
-
+    # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
         # Proceed based on the last speaker

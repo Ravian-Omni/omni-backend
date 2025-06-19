@@ -304,20 +304,32 @@ nest_asyncio.apply()
 #     return None
 
 
+# def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
+#     messages = groupchat.messages
+#     if len(messages) == 1:
+#         return groupchat.agent_by_name("web_browser_planner")
+#     if last_speaker.name == "web_browser_planner":
+#         return groupchat.agent_by_name("judge_question")
+#     if last_speaker.name == "judge_question":
+#         if "FACTUAL".lower() in messages[-1]["content"]:
+#             return groupchat.agent_by_name("factual_request")
+#         if "EXPLORATORY".lower() in messages[-1]["content"]:
+#             return groupchat.agent_by_name("exploratoty_request")
+#     if last_speaker.name == "factual_request":
+#         return groupchat.agent_by_name("browser_reader")
+#     if last_speaker.name == "exploratoty_request":
+#         return groupchat.agent_by_name("browser_reader")
+#     if last_speaker.name == "browser_reader":
+#         return groupchat.agent_by_name("browser_searcher")
+#     if last_speaker.name == "browser_searcher":
+#         return groupchat.agent_by_name("process_completion")
+#     return None
+
+
+
 def custom_speaker_selection_func(last_speaker: Any, groupchat: Any) -> Any:
     messages = groupchat.messages
     if len(messages) == 1:
-        return groupchat.agent_by_name("web_browser_planner")
-    if last_speaker.name == "web_browser_planner":
-        return groupchat.agent_by_name("judge_question")
-    if last_speaker.name == "judge_question":
-        if "FACTUAL".lower() in messages[-1]["content"]:
-            return groupchat.agent_by_name("factual_request")
-        if "EXPLORATORY".lower() in messages[-1]["content"]:
-            return groupchat.agent_by_name("exploratoty_request")
-    if last_speaker.name == "factual_request":
-        return groupchat.agent_by_name("browser_reader")
-    if last_speaker.name == "exploratoty_request":
         return groupchat.agent_by_name("browser_reader")
     if last_speaker.name == "browser_reader":
         return groupchat.agent_by_name("browser_searcher")

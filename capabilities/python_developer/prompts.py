@@ -28,6 +28,7 @@ Rules:
 - Optimize for performance and readability
 - ALWAYS WRITE THE COMPLETE CODE
 - The only language you can work with is --> {coding_language}
+- Always write the code in such a way that it uses python print() to print out the complete  responses along with the steps and actual answer to the original problem with the help of
 - Always WRITE CODE IN SUCH A WAY THAT ITS EXECUTION WILL SAVED IN A .txt FILE AND .JSON FILE. YOU SAVE TWO SEPERATE FILES OF THE CODE EXECUTION OUTPUT TO SAVE THE DETAILS OF THE PROGRAM
 - SAVE ALL TYPES OF FILES LIKE PPT, PPTX, PDF, HTML, CSV, XLS and other files in this location --> {file_location}
 

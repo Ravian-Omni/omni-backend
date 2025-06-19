@@ -16,10 +16,13 @@ from datetime import datetime
 from autogen.agentchat.agent import Agent
 from autogen import register_function
 # from omni_newton import cs_groupchat,cs_manager
-from capabilities.file_finder.controller import ff_groupchat, ff_manager
-from capabilities.image_generator.controller import ig_groupchat, ig_manager
+# from capabilities.file_finder.controller import ff_groupchat, ff_manager
+from capabilities.file_finder.manager import filefinder
+#from capabilities.image_generator.controller import ig_groupchat, ig_manager
+from capabilities.image_generator.manager import ImageGenerator
 # from omni_birbal import birbal_groupchat, birbal_manager
-from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
+# from capabilities.python_developer.controller import pcw_groupchat, pcw_manager
+from capabilities.python_developer.manager import pythondeveloper
 from capabilities.email_manager.manager import EmailManager
 # from omni_dashboarding import dash_groupchat, dash_manager
 from capabilities.browser_manager.controller import browser_gc, browser_manager
@@ -31,8 +34,7 @@ import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
-# from omni.response_format import PlannerResponse
-# from omni.response_format import CapabilityRoutingResponse
+
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
@@ -87,8 +89,14 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 def image_generator(query: Annotated[str, "The detailed image generation prompt"]):
     omni_storage.start_new_iteration("image_generator")
-    response = ig_manager.initiate_chat(ig_manager, message=query)
-    messages = ig_groupchat.messages
+    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
+    image_generator = ImageGenerator()
+    response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
+    messages = image_generator.groupchat.messages
     for msg in reversed(messages):
         if msg.get("name") == "process_completion":
             # add_entry("image_generator", msg["content"])
@@ -109,15 +117,19 @@ def web_browser(query: Annotated[str,"The complete search query with all the det
     return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
-def python_coder(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
+def python_coder(query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
     # Initiate the chat
     omni_storage.start_new_iteration("python_code")
-    response = pcw_manager.initiate_chat(pcw_manager, message=query)
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    python_dev= pythondeveloper()
+    response = python_dev.manager.initiate_chat(python_dev.manager, message=query)
     # Get messages directly from cs_groupchat
-    messages = pcw_groupchat.messages
+    messages = python_dev.groupchat.messages
     # Find the last process_completion message
     for msg in reversed(messages):
-        if msg.get("name") == "ProcessCompletion":
+        if msg.get("name") == "process_completion_agent":
             # add_entry("python_coder", msg["content"])
             return msg["content"]
     # add_entry("python_coder", "No completion message found")
@@ -137,17 +149,21 @@ def email_sender(query: Annotated[str, "The complete user query"]) -> dict:
     for msg in reversed(messages):
         if (
             msg.get("name") == "process_completion_agent"
-        ):  # Make sure there's no extra space
-            # add_entry("email_sender", msg["content"])
+        ): 
             return msg["content"]
-    # add_entry("email_sender", "No completion message found")
+
     return f"The email sending process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
+
 
 
 def file_finder(query: Annotated[str, "The search query"]):
     omni_storage.start_new_iteration("file_finder")
-    response = ff_manager.initiate_chat(ff_manager, message=query)
-    messages = ff_groupchat.messages
+    recent_capability = omni_storage.get_most_recently_updated_capability()
+    print(recent_capability)
+    print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
+    file_finder = filefinder()
+    response = file_finder.manager.initiate_chat(file_finder.manager, message=query)
+    messages = file_finder.groupchat.messages
     for msg in reversed(messages):
         if msg.get("name") == "process_completion":
             # add_entry("file_finder", msg["content"])
@@ -314,18 +330,23 @@ class Omni:
             llm_config=self.llm_config,
             system_message=prompts.questions_generator.format(today_date=today_date),
         )
-
+    # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
         # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
+        #arrival of the first message
         if len(messages) == 1:
+        #judge a question and understand if the question is a task or  general conversation
                 return groupchat.agent_by_name("judge_question")
         if last_speaker.name in ["judge_question"]:
             if "task_oriented" in messages[-1]["content"]:
+        #if it is a task oriented question then route to planner agent
                 return groupchat.agent_by_name("planner_agent")
+        #if it is a general conversation then route to conversation agent
             if "conversation" in messages[-1]["content"]:
                 return groupchat.agent_by_name("conversation_agent")
-            
+
+        #Agent Aligner will align the process and will route to the next agent    
         if last_speaker.name == "agent_aligner":
             if "agent_router" in messages[-1]["content"]:
                 return groupchat.agent_by_name("agent_router")
@@ -333,13 +354,17 @@ class Omni:
                 return groupchat.agent_by_name("manual_verification")
             elif "process_completion" in messages[-1]["content"]:
                 return groupchat.agent_by_name("process_completion_agent")
+            
 
+        # inner loop planner agent will report back to aligner agent
         if last_speaker.name in ["planner_agent"]:
             return groupchat.agent_by_name("agent_aligner")
         
+        # inner loop manual verification agent will report back to aligner agent
         if last_speaker.name in ["manual_verification"]:
             return groupchat.agent_by_name("agent_aligner")
-
+        
+        # how the sequential processess will get called
         if last_speaker.name == "agent_router":
             return groupchat.agent_by_name("agent_caller")
         if last_speaker.name == "agent_caller":

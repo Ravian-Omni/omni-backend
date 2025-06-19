@@ -1,0 +1,12 @@
+{
+  "task": "Who is Lokesh from Ravian AI?",
+  "timestamp": "20250612_102941",
+  "status": "success",
+  "result": "{\"posts\": [{\"caption\": \"Lokesh Kumar - Chief Technology Officer at Ravian AI\", \"post_url\": \"https://ravian.ai\"}], \"content\": \"Based on my research, here is comprehensive information about Lokesh Kumar from Ravian AI:\\n\\n**Current Role & Position:**\\n- Chief Technology Officer (CTO) at Ravian AI (described as a 'Stealth AI Startup') since January 2024\\n- Director at Ravian Artificial Intelligence Private Limited since May 17, 2024\\n- Based in New Delhi, Delhi, India\\n\\n**About Ravian AI:**\\n- Ravian AI is an AI Platform for Decision Intelligence with industry-agnostic AI Agents\\n- Products include Newton, Sherlock, Birbal, and Curie AI agents\\n- Company website: www.ravian.ai\\n- Located in Gurugram, Haryana, India\\n- Recognized by NVIDIA, NASSCOM, AWS, and IIT Bombay\\n\\n**Lokesh Kumar's Background:**\\n- Previous experience as SVP Technology, Chief Architect, & Co-Founder at Urgently (April 2014 - April 2022)\\n- Also serves as CTO at Sheeva.AI (based in Vienna, Austria)\\n- Listed in Ravian AI's 'Join our community of AI Experts' section on their website\\n- Has personally used and endorsed RAVIAN.AI Data Scientist tools, praising the advanced chatbot capabilities\\n\\n**Professional Recognition:**\\n- Dheeraj Gupta from Ravian AI has worked alongside Lokesh Kumar for close to two years and praises his 'rare mix of productivity and ambition'\\n- Active on LinkedIn sharing insights about Ravian AI's capabilities and tools\\n\\n**Summary:**\\nLokesh Kumar is the Chief Technology Officer and Director at Ravian AI, a company that develops AI-powered decision intelligence platforms. He has been leading the technical development of their AI agents and tools since early 2024, bringing extensive experience from his previous role as a co-founder and technology leader at Urgently.\"}",
+  "metadata": {
+    "max_failures": 5,
+    "retry_delay": 3,
+    "llm": "ChatAnthropic",
+    "controller": "Controller"
+  }
+}

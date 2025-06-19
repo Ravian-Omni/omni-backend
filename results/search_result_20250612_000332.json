@@ -1,0 +1,12 @@
+{
+  "task": "Who is Lokesh from Ravian AI and what is his role within the organization?",
+  "timestamp": "20250612_000332",
+  "status": "success",
+  "result": "{\"posts\": [{\"caption\": \"Lokesh Kumar - Chief Technology Officer and Director at Ravian AI\", \"post_url\": \"https://www.ravian.ai\"}], \"content\": \"Based on my research, here is the information about Lokesh from Ravian AI:\\n\\n**Who is Lokesh:**\\nLokesh Kumar is the Chief Technology Officer (CTO) at Ravian AI. He is based in New Delhi, Delhi, India.\\n\\n**His Role within Ravian AI:**\\n1. **Chief Technology Officer (CTO)** - He holds the senior technology leadership position at Ravian AI, which is described as a \\\"Stealth AI Startup\\\" that he is actively building.\\n\\n2. **Director** - Lokesh Kumar is also listed as a Director of Ravian Artificial Intelligence Private Limited, indicating he has both operational and governance responsibilities within the company.\\n\\n3. **AI Expert Community Member** - He is featured in Ravian AI's \\\"Join our community of AI Experts\\\" section on their official website, highlighting his expertise in the AI field.\\n\\n**About Ravian AI:**\\nRavian AI is \\\"The AI Platform\\\" that offers industry-agnostic AI Agents for decision intelligence. The company provides products like Newton, Sherlock, Birbal, and Curie for data analysis and business insights. They claim to boost efficiency by 20x with features like seamless data integration, self-debugging capabilities, and robust data security. The company is recognized by NVIDIA and AWS Startups and is headquartered in Gurugram, Haryana, India.\\n\\n**Professional Background:**\\nLokesh Kumar has 6 connections on LinkedIn and is actively involved in building Ravian AI as a stealth AI startup, focusing on developing AI solutions for decision intelligence and data analysis.\"}",
+  "metadata": {
+    "max_failures": 5,
+    "retry_delay": 3,
+    "llm": "ChatAnthropic",
+    "controller": "Controller"
+  }
+}
