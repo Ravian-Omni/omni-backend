@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 # Add the project root directory to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -23,6 +24,8 @@ from autogen import (
 )
 from langchain_openai import ChatOpenAI
 from browser_use import Agent, Browser, BrowserConfig, Controller, ActionResult
+from browser_use.browser.profile import BrowserProfile
+from browser_use.browser.session import BrowserSession
 from browser_use.browser.context import BrowserContextConfig
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -31,6 +34,7 @@ from utilities.custom_manager import CustomGroupChatManager
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
+
 
 load_dotenv()
 nest_asyncio.apply()
@@ -52,6 +56,8 @@ class Posts(BaseModel):
 
 # Global reference to browser manager instance
 _browser_manager_instance = None
+browser_data_dir = str(Path.home() / "browser_use_data")
+os.makedirs(browser_data_dir, exist_ok=True)
 
 
 async def browser_search_function(task: str) -> str:
@@ -63,18 +69,22 @@ async def browser_search_function(task: str) -> str:
 
 
 class BrowserManager:
-    def __init__(self, headless=True, use_chrome=False):
+    def __init__(self, headless=False, use_chrome=True, window_size=None, keep_alive=False):
         """Initialize BrowserManager with configurable browser options.
         
         Args:
             headless (bool): Whether to run browser in headless mode
             use_chrome (bool): Whether to use Chrome browser
+            window_size (dict): Window size configuration {'width': int, 'height': int}
+            keep_alive (bool): Whether to keep browser session alive
         """
         global _browser_manager_instance
         _browser_manager_instance = self
         
         self.headless = headless
         self.use_chrome = use_chrome
+        self.window_size = window_size or {'width': 4, 'height': 4} #setup the window size
+        self.keep_alive = keep_alive
         self.results_dir = results_dir
         
         # Initialize LLM configurations
@@ -94,8 +104,8 @@ class BrowserManager:
             api_key=settings.ANTHROPIC_API_KEY,
         )
         
-        # Initialize browser
-        self.browser = self._initialize_browser()
+        # Initialize browser session
+        self.browser_session = None
         self.controller = Controller(output_model=Posts)
         
         # Initialize agents first
@@ -107,8 +117,26 @@ class BrowserManager:
         # Initialize group chat
         self.get_chat_manager()
 
+    async def _initialize_browser_session(self):
+        """Initialize browser session with new BrowserSession and BrowserProfile."""
+        if self.browser_session is None:
+            browser_profile = BrowserProfile(
+                window_size=self.window_size,
+                keep_alive=self.keep_alive,
+                user_data_dir=browser_data_dir,
+                headless=self.headless,
+            )
+            
+            self.browser_session = BrowserSession(
+                browser_profile=browser_profile
+            )
+            
+            await self.browser_session.start()
+        
+        return self.browser_session
+
     def _initialize_browser(self):
-        """Initialize browser with configurable options."""
+        """Initialize browser with configurable options (legacy method for backward compatibility)."""
         if self.use_chrome:
             return Browser(
                 config=BrowserConfig(
@@ -140,7 +168,7 @@ class BrowserManager:
         )
 
     async def _browser_search_impl(self, task: str) -> str:
-        """Implementation of browser search functionality.
+        """Implementation of browser search functionality using new BrowserSession.
 
         Args:
             task: The task description (e.g., "Check school website for fee structure")
@@ -171,14 +199,22 @@ class BrowserManager:
         def ask_human_local(question: str) -> str:
             answer = input(f'\n{question}\nInput: ')
             return ActionResult(extracted_content=answer)
+            
+        import browser_use.utils
+        original_config_dir = browser_use.utils.BROWSER_USE_CONFIG_DIR
+        browser_use.utils.BROWSER_USE_CONFIG_DIR = Path(self.results_dir)
+
+        # Initialize browser session
+        browser_session = await self._initialize_browser_session()
 
         agent = Agent(
             task=task,
-            browser=self.browser if self.use_chrome else None,
+            browser_session=browser_session,  # Use browser_session instead of browser
             max_failures=max_failures,
             retry_delay=retry_delay,
             use_vision=True,
             generate_gif=True,
+            max_input_tokens=200000,
             validate_output=True,
             llm=self.vision_llm,
             save_conversation_path=self.results_dir,
@@ -204,6 +240,8 @@ class BrowserManager:
                     "retry_delay": retry_delay,
                     "llm": str(self.vision_llm.__class__.__name__),
                     "controller": str(controller.__class__.__name__),
+                    "window_size": self.window_size,
+                    "keep_alive": self.keep_alive,
                 },
             }
 
@@ -218,7 +256,12 @@ class BrowserManager:
                 "timestamp": timestamp,
                 "status": "error",
                 "error": str(e),
-                "metadata": {"max_failures": max_failures, "retry_delay": retry_delay},
+                "metadata": {
+                    "max_failures": max_failures, 
+                    "retry_delay": retry_delay,
+                    "window_size": self.window_size,
+                    "keep_alive": self.keep_alive,
+                },
             }
 
             with open(filename, "w", encoding="utf-8") as f:
@@ -226,8 +269,11 @@ class BrowserManager:
 
             return f"Error: {str(e)}"
 
-        finally:
-            await self.browser.close()
+    async def close_browser_session(self):
+        """Close the browser session if it exists."""
+        if self.browser_session:
+            await self.browser_session.kill()
+            self.browser_session = None
 
     # Keep the original method for backward compatibility
     async def browser_search(self, task: str) -> str:
@@ -298,3 +344,12 @@ class BrowserManager:
             capability_name="email_sender"
         )
         return self.groupchat, self.manager
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._initialize_browser_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close_browser_session()
