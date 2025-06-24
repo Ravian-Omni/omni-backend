@@ -23,15 +23,6 @@ Security Features
 Core Components
 
 
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Portal    │    │  Local Client   │    │   Backend API   │
-│                 │    │                 │    │                 │
-│ • User Signup   │◄──►│ • RAVIAN App    │◄──►│ • Auth Service  │
-│ • Downloads     │    │ • Task Execution│    │ • Credit System │
-│ • Payment       │    │ • Chat Interface│    │ • Message Store │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-
-
 
 Technology Stack
 Frontend: Native Desktop Application (Electron/Tauri)
@@ -40,6 +31,8 @@ Database: Telemetry Web DB for message storage
 Browser: Chromium (shipped as default)
 Authentication: 2FA with JSON token support (V2)
 Payment: Integrated payment gateway for credit system
+
+
 👤 User Journey
 Phase 1: Discovery & Onboarding
 Web Portal Access
@@ -76,17 +69,18 @@ Internet connection for authentication
 Email account for signup
 Installation Steps
 Web Registration
-bash
+
 # Visit RAVIAN web portal
 # Complete email verification
 # Automatic download trigger
 Local Installation
-bash
+
 # Mount .dmg file
 # Drag to Applications
 # Grant necessary permissions
 First Launch Configuration
 Email verification (same as signup)
+
 2FA setup (mandatory in V1)
 Local file access permissions
 Python environment initialization
@@ -104,6 +98,7 @@ Secure token storage
 Automatic session refresh
 Cross-device synchronization
 Security Flow
+
 Email Signup → Email Verification → 2FA Setup → Token Generation → App Access
 ⭐ Core Features
 V1 Features (Initial Release)
@@ -122,63 +117,8 @@ Headless Chrome: Perplexity search integration
 Enhanced Authentication: JSON token support
 Premium Capabilities: Extended feature set for paid users
 Message Storage & Retrieval
-python
-# Message storage for Omni capabilities
-def store_message(user_id, project_id, message_content, capability_type):
-    """
-    Store messages for all Omni capabilities
-    Enables chat history retrieval and error tracking
-    """
-    pass
 
-def retrieve_chat_history(user_id, project_id):
-    """
-    Retrieve messages to show chat history
-    Maintains conversation context across sessions
-    """
-    pass
-🗄️ Database Schema
-Core Tables
-Users Table
-sql
-CREATE TABLE users (
-    user_id UUID PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP,
-    last_login TIMESTAMP,
-    auth_token TEXT,
-    two_fa_enabled BOOLEAN DEFAULT TRUE
-);
-Credits Table
-sql
-CREATE TABLE credits (
-    credit_id UUID PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id),
-    balance INTEGER NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP,
-    transaction_history JSONB
-);
-Messages Table
-sql
-CREATE TABLE messages (
-    message_id UUID PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id),
-    project_id UUID,
-    content TEXT NOT NULL,
-    capability_type VARCHAR(100),
-    timestamp TIMESTAMP DEFAULT NOW(),
-    metadata JSONB
-);
-Projects Table
-sql
-CREATE TABLE projects (
-    project_id UUID PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id),
-    project_name VARCHAR(255),
-    directory_path TEXT,
-    created_at TIMESTAMP,
-    last_accessed TIMESTAMP
-);
+
 💳 Credit System & API Integration
 Credit Management
 Dollar to Token to Credit Conversion
@@ -189,13 +129,7 @@ Credit Allocation Flow
 Payment Validation → Credit Addition → User Account Update → API Key Provisioning
 API Key Management
 Key Request Validation
-python
-def validate_and_provide_keys(user_id, requested_capability):
-    # Validate user ID
-    # Check associated credits
-    # Verify minimum threshold
-    # Provide encrypted keys from DB store
-    pass
+
 Credit Verification
 Check current credit quota for every API request
 Break execution before minimum threshold
@@ -218,24 +152,8 @@ Version 2 (Enhanced)
 🔄 Premium capability extensions
 🔄 Advanced UI/UX improvements
 💻 Technical Implementation
-Python Environment Management
-python
-# Dual Python setup
-GLOBAL_PYTHON = "System Python for RAVIAN core"
-LOCAL_PYTHON = "Virtual environment for user tasks"
 
-def setup_virtual_environment(project_path):
-    """
-    Create isolated Python environment for each project
-    Allows package installation without system conflicts
-    """
-    pass
-Code Execution Architecture
-Global Python (RAVIAN Core) ←→ Virtual Environment (User Tasks)
-        ↓                              ↓
-    AI Processing                 Package Installation
-    Chat Interface               Task Execution
-    System Management            User Code Running
+
 Real-time Features
 Prompt Delivery: Real-time prompt processing and response
 Credit Monitoring: Live credit balance updates
@@ -253,18 +171,7 @@ Selective Data Transmission: Only necessary data sent to servers
 User Control: Granular permissions for data access
 Audit Trail: Complete logging of data access and usage
 🚀 Getting Started
-For Developers
-Clone Repository
-bash
-git clone https://github.com/your-org/ravian.git
-cd ravian
-Environment Setup
-bash
-python -m venv ravian-env
-source ravian-env/bin/activate  # On Windows: ravian-env\Scripts\activate
-pip install -r requirements.txt
-Database Setup
-bash
+
 # Setup PostgreSQL/your preferred database
 python manage.py migrate
 Configuration
