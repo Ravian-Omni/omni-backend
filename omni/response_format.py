@@ -72,7 +72,6 @@ class Capability(str, Enum):
     PYTHON_CODER = "python_coder"
     EMAIL_SENDER = "email_sender"
     FILE_FINDER = "file_finder"
-    DASHBOARD_SERVER = "dashboard_server"
     IMAGE_GENERATOR = "image_generator"
     MANUAL_VERIFICATION = "manual_verification"
 
@@ -89,6 +88,7 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
+    detailed_result: str
 
 
 class PlannerResponse(BaseModel):

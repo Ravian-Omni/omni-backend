@@ -46,6 +46,20 @@ coding_language = "python"
 question = None
 
 
+class LoopDetector:
+        def __init__(self, window_size=3):
+            self.recent_messages = []
+            self.window_size = window_size
+
+        def update(self, message: str) -> bool:
+            if message in self.recent_messages:
+                return True
+            self.recent_messages.append(message)
+            if len(self.recent_messages) > self.window_size:
+                self.recent_messages.pop(0)
+            return False
+loop_detector = LoopDetector()
+
 class pythondeveloper:
     def __init__(self):
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -99,10 +113,29 @@ class pythondeveloper:
             llm_config=self.llm_config,
             system_message=prompts.process_completion
         )
+    
+    def get_stop_agent(self):
+        return autogen.ConversableAgent(
+            name="stop_agent",
+            llm_config=self.llm_config,
+            system_message="I am the fallback agent. My only task is to terminate the conversation."
+        )
+    
+    
+
+        
+    def is_termination_msg(msg: str) -> bool:
+        return "terminate" in msg.lower() or "exit" in msg.lower()
+    
         
     # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
         messages = groupchat.messages
+        last_msg = messages[-1]["content"] if messages else ""
+        
+        if loop_detector.update(last_msg):
+            return groupchat.agent_by_name("stop_agent")
+        
         if len(messages) <= 1:
             
             return groupchat.agent_by_name("planner_agent")
@@ -122,6 +155,8 @@ class pythondeveloper:
                 return groupchat.agent_by_name("code_writer_agent")
         elif last_speaker.name == "code_debugger_agent":
             return groupchat.agent_by_name("code_writer_agent")
+        
+        # return groupchat.agent_by_name("stop_agent")
 
 
 
@@ -130,6 +165,7 @@ class pythondeveloper:
         self.code_writer = self.get_code_writer()
         self.code_executor = self.get_code_executor()
         self.code_debugger = self.get_code_debugger()
+        self.stop_agent = self.get_stop_agent()
         self.problem_status_checker = self.problem_status_checker()
         self.process_completion = self.get_process_completion()
 
@@ -138,6 +174,7 @@ class pythondeveloper:
             self.code_writer,
             self.code_executor,
             self.code_debugger,
+            self.stop_agent,
             self.problem_status_checker,
             self.process_completion
         ]

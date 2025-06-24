@@ -61,7 +61,7 @@ from langchain_openai import AzureChatOpenAI
 # secret_path = os.path.join(settings.ROOT_DIR,"configs","client_secret.json")
 username = settings.USER_EMAIL
 password = settings.USER_EMAIL_PASSWORD
-print(f"username is {username} and password is {password}")
+# print(f"username is {username} and password is {password}")
 
 
 llm = AzureChatOpenAI(

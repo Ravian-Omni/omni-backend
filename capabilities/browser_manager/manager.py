@@ -280,6 +280,15 @@ class BrowserManager:
         """Original browser search method - kept for backward compatibility."""
         return await self._browser_search_impl(task)
 
+    def browser_planner(self):
+        return autogen.AssistantAgent(
+            name="browser_planner",
+            llm_config=self.llm_config,
+            system_message=prompts.planner.format(
+                get_last_entry=get_last_entry, get_all_messages=get_all_messages
+            ),
+        )
+
     def browser_searcher(self):
         """Create and return browser searcher agent."""
         return autogen.UserProxyAgent(
@@ -294,7 +303,7 @@ class BrowserManager:
         return autogen.AssistantAgent(
             name="browser_reader",
             llm_config=self.llm_config,
-            system_message=prompts.browser_reader,
+            #system_message=prompts.browser_reader,
         )
 
     def process_completion(self):
@@ -310,6 +319,8 @@ class BrowserManager:
         """Custom speaker selection function for group chat."""
         messages = groupchat.messages
         if len(messages) == 1:
+            return groupchat.agent_by_name("browser_planner")
+        if last_speaker.name == "browser_planner":
             return groupchat.agent_by_name("browser_reader")
         if last_speaker.name == "browser_reader":
             return groupchat.agent_by_name("browser_searcher")
@@ -319,10 +330,12 @@ class BrowserManager:
 
     def get_agents(self):
         """Initialize and return all agents."""
+        self.planner= self.browser_planner()
         self.browser_reader = self.browser_reader()
         self.browser_searcher = self.browser_searcher()
         self.process_completion = self.process_completion()
         return [
+                self.planner,
                 self.browser_searcher,
                 self.browser_reader,
                 self.process_completion,
@@ -345,11 +358,11 @@ class BrowserManager:
         )
         return self.groupchat, self.manager
 
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._initialize_browser_session()
-        return self
+    # async def __aenter__(self):
+    #     """Async context manager entry."""
+    #     await self._initialize_browser_session()
+    #     return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.close_browser_session()
+    # async def __aexit__(self, exc_type, exc_val, exc_tb):
+    #     """Async context manager exit."""
+    #     await self.close_browser_session()

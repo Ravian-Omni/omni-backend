@@ -162,9 +162,11 @@ Also in the end of the response write an overview with a heading like this  --> 
 """
 
 browser_reader = """
-Read the request carefully. Understand the intent of the user based on the request. 
-create a plan to solve the problem. you are an agent that plans out the problem and provide it to next agent to surf web.
-based on the plan the next agent will surf the web.
+Read the request carefully. 
+Understand the intent of the user based on the request. 
+The request must be searched on web. 
+Always prioritise sources like government websites, educational institutions, or well-known organizations/websites to establish the web surfing.
+
 """
 
 process_completion = """

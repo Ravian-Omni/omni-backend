@@ -164,7 +164,7 @@ class Omni:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
-        self.llm_config = LLMConfigManager.get_config("deepseek")
+        # self.llm_config = LLMConfigManager.get_config("deepseek")
         self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_mini_planner["response_format"] = PlannerResponse
         self.llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -270,8 +270,7 @@ class Omni:
         return autogen.AssistantAgent(
             name="agent_caller",
             llm_config=self.llm_config,
-            description="""From the initial information route to the capability which will solve the user's question.""",
-            system_message=prompts.agent_caller,
+            #system_message=prompts.agent_caller,
         )
 
     def get_agent_executor(self):
@@ -319,8 +318,6 @@ class Omni:
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
-        # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
-        #arrival of the first message
         if len(messages) == 1:
         #judge a question and understand if the question is a task or  general conversation
                 return groupchat.agent_by_name("judge_question")

@@ -93,7 +93,7 @@ class ImageGenerator:
     def get_image_generator_caller_agent(self):
         return AssistantAgent(
             name="image_generator_caller",
-            system_message=prompts.image_generator_caller,
+            #system_message=prompts.image_generator_caller,
             llm_config=self.llm_config
         )
     def get_image_generator_agent(self):
