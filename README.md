@@ -21,6 +21,8 @@ Technical Implementation
 Security Features
 🏗️ System Architecture
 Core Components
+
+
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Web Portal    │    │  Local Client   │    │   Backend API   │
 │                 │    │                 │    │                 │
@@ -28,6 +30,9 @@ Core Components
 │ • Downloads     │    │ • Task Execution│    │ • Credit System │
 │ • Payment       │    │ • Chat Interface│    │ • Message Store │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
+
+
+
 Technology Stack
 Frontend: Native Desktop Application (Electron/Tauri)
 Backend: Python-based microservices
