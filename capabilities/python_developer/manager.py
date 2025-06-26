@@ -37,13 +37,14 @@ from utilities.custom_manager import CustomGroupChatManager
 
 
 class PythonDeveloper:
-    def __init__(self, chat_id, call_id):
+    def __init__(self, chat_id, call_id, capability_id, omni_memory):
         self.chat_id = chat_id
         self.call_id = call_id
+        self.capability_id = capability_id
+        self.omni_memory = omni_memory
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
-        self.question = None
         self.file_location = os.path.join(settings.ROOT_DIR, "code", "output")
         self.coding_language = "python"
         self.results_dir = os.path.join(settings.ROOT_DIR, "code")
@@ -82,7 +83,7 @@ class PythonDeveloper:
     def problem_status_checker(self):
         return autogen.AssistantAgent(
             name="problem_status_checker_agent",
-            system_message=prompts.prob_status_checker.format(question=self.question),
+            system_message=prompts.prob_status_checker,
             llm_config=self.llm_config_psc
         )
     def get_process_completion(self):
@@ -95,7 +96,7 @@ class PythonDeveloper:
     # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
         messages = groupchat.messages
-        if len(messages) <= 1:
+        if len(messages) <= 1 or last_speaker.name == "chat_manager":
             
             return groupchat.agent_by_name("planner_agent")
         if last_speaker.name == "planner_agent":
@@ -145,7 +146,9 @@ class PythonDeveloper:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
+            omni_memory=self.omni_memory,
             capability_name=settings.PYTHON_DEV_COLLECTION,
+            capability_id=self.capability_id,
             chat_id=self.chat_id,
             call_id=self.call_id,
             human_input_mode="ALWAYS"

@@ -184,9 +184,11 @@ def search_files_with_agent(search_term: str, file_type: Optional[str] = None) -
 
 
 class FileFinder:
-    def __init__(self, chat_id, call_id):
+    def __init__(self, chat_id, call_id, capability_id, omni_memory):
         self.chat_id = chat_id
         self.call_id = call_id
+        self.capability_id = capability_id
+        self.omni_memory = omni_memory
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
@@ -243,7 +245,7 @@ class FileFinder:
     # static custom speaker selection, no dynamic agent selection or condition chat routing
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
-        if len(messages) == 1:
+        if len(messages) == 1 or last_speaker.name == "chat_manager":
             print("Initial query received ")
             return groupchat.agent_by_name("file_finder_planner")
         elif last_speaker.name == "file_finder_planner":
@@ -287,7 +289,9 @@ class FileFinder:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
+            omni_memory = self.omni_memory,
             capability_name=settings.FILE_FINDER_COLLECTION,
+            capability_id=self.capability_id,
             chat_id=self.chat_id,
             call_id=self.call_id,
             human_input_mode="ALWAYS"

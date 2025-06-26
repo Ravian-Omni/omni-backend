@@ -59,7 +59,6 @@ prob_status_checker = """
 Check if the problem is solved as what user has asked for.                         
 
 CHECK CLOSELY IF WE HAVE ANSWERED THE QUESTION ASKED BY USER. 
-original query -- {question}
 Your answer will be  yes or no. 
 Think step by step and then respond.
 If we have not answered the question say NO

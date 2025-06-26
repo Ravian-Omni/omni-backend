@@ -70,5 +70,6 @@ async def chat_endpoint(request:Request, chat_request: ChatRequest, mongodb: Mon
     messages = history.get("messages",[])
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
-    response = omni.manager.initiate_chat(omni.manager,message=chat_request.message,clear_history=False)
-    return response
+        omni.memory.load_main_messages(messages)
+    response = await omni.manager.a_initiate_chat(omni.manager,message=chat_request.message,clear_history=False)
+    return omni.groupchat.messages[-1]

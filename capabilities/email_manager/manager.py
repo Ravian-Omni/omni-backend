@@ -65,9 +65,11 @@ def validate_attachments(file_paths):
 
 
 class EmailManager:
-    def __init__(self, chat_id, call_id):
+    def __init__(self, chat_id, call_id, capability_id, omni_memory):
         self.chat_id = chat_id
         self.call_id = call_id
+        self.capability_id = capability_id
+        self.omni_memory = omni_memory
         self.llm_config = LLMConfigManager.get_config("gpt4o")
         self.agents = self.get_agents()
         autogen.register_function(
@@ -213,7 +215,9 @@ class EmailManager:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
+            omni_memory = self.omni_memory,
             capability_name=settings.EMAIL_COLLECTION,
+            capability_id=self.capability_id,
             chat_id=self.chat_id,
             call_id=self.call_id,
             human_input_mode="ALWAYS"

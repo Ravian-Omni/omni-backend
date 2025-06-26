@@ -25,17 +25,19 @@ from capabilities.image_generator.manager import ImageGenerator
 from capabilities.python_developer.manager import PythonDeveloper
 from capabilities.email_manager.manager import EmailManager
 # from omni_dashboarding import dash_groupchat, dash_manager
-from capabilities.browser_manager.controller import browser_gc, browser_manager
+from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
 from utilities.logging import logger
-from utilities.storage import omni_storage, update_db
+from utilities.storage import update_db
 import asyncio
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
 from utilities.custom_manager import create_capability_chat
-
+import uuid
+from omni.memory import OmniMemory
+import aioconsole
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
@@ -54,26 +56,64 @@ llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):
-    def __init__(self, groupchat, llm_config, human_input_mode="NEVER", chat_id=None, queue: Optional[asyncio.Queue] = None):
+    def __init__(self, groupchat, llm_config, memory: OmniMemory, human_input_mode: str = "NEVER", chat_id: str = None, queue: Optional[asyncio.Queue] = None):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.queue = queue
         self.chat_id = chat_id
+        self.memory = memory
+        
+    def generate_reply(
+        self,
+        messages: Optional[list[dict[str, Any]]] = None,
+        sender: Optional["Agent"] = None,
+        **kwargs: Any,
+    ) -> Union[str, dict[str, Any], None]:
+        """Generate a reply based on the received messages.
+
+        Args:
+            messages (list[dict[str, Any]]): a list of messages received from other agents.
+                The messages are dictionaries that are JSON-serializable and
+                follows the OpenAI's ChatCompletion schema.
+            sender: sender of an Agent instance.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str or dict or None: the generated reply. If None, no reply is generated.
+        """
+        super().generate_reply(messages, sender,**kwargs)
+
+    async def a_generate_reply(
+        self,
+        messages: Optional[list[dict[str, Any]]] = None,
+        sender: Optional["Agent"] = None,
+        **kwargs: Any,
+    ) -> Union[str, dict[str, Any], None]:
+        """(Async) Generate a reply based on the received messages.
+
+        Args:
+            messages (list[dict[str, Any]]): a list of messages received from other agents.
+                The messages are dictionaries that are JSON-serializable and
+                follows the OpenAI's ChatCompletion schema.
+            sender: sender of an Agent instance.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str or dict or None: the generated reply. If None, no reply is generated.
+        """
+        await super().a_generate_reply(messages, sender, **kwargs)
     
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
         content = message.get("content", "") if isinstance(message, dict) else str(message)
-        db_content = {"role":"user","name":sender.name,"content":content,"raw_message":message}
-        # asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
-        try:
-            omni_storage.add_main_message(role="user",agent_name=sender.name,content=content)
-            logger.debug(f"Queued from {sender.name}: {content}")
-        except Exception as e:
-            logger.error(f"Error {e}, could not queue message from {sender.name}: {content}")
+        db_content = {"role":"user","name":sender.name,"content":content}
+        self.memory.push_main_message(db_content)
+        db_content["raw_message"] = message
+        asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
             
             
 class CustomUserProxyAgent(UserProxyAgent):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, input_queue: asyncio.Queue = None, **kwargs):
         super().__init__(*args, **kwargs)
     
     def get_human_input(self, prompt: str) -> str:
@@ -85,6 +125,15 @@ class CustomUserProxyAgent(UserProxyAgent):
         
         # Wait for response from websocket
         return super().get_human_input(prompt)
+    
+    async def a_get_human_input(self, prompt: str) -> str:
+        print("🔁 Custom logic before input...")
+        
+        # Safely call super, assuming you have registered an async input
+        # result = await super().a_get_human_input(prompt)
+        
+        # print(f"✅ Got input: {result}")
+        return await aioconsole.ainput(prompt)
     
 
 
@@ -103,29 +152,28 @@ class Omni:
         self.llm_config_mini_router["response_format"] = CapabilityRoutingResponse
         self.llm_config_question_class = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_question_class["response_format"] = QuestionClassification
+        
+        #Memory Configuration
+        self.memory = OmniMemory()
 
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
+        
     
     def get_last_call_id(self):
         last_speaker = self.groupchat.messages[-1]
         if last_speaker.get("name") == "agent_caller":
             tool_calls = last_speaker.get("tool_calls")
-            call_id = tool_calls[0].get("id")
-            return call_id
+            result = {item['function']['name']: item['id'] for item in tool_calls}
+            return result
         return None
         
-    def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
-        omni_storage.start_new_iteration("image_generator")
-        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-        recent_capability = omni_storage.get_most_recently_updated_capability()
-        print(recent_capability)
-        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-        call_id = self.get_last_call_id()
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION))
-        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id)
+    async def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
+        call_id = self.get_last_call_id().get("image_generator")
+        capability_id = str(uuid.uuid4())
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION, capability_id=capability_id))
+        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id)
         response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
         messages = image_generator.groupchat.messages
         for msg in reversed(messages):
@@ -136,12 +184,20 @@ class Omni:
         return f"The image generation process got into a runtime error, please check the logs for more details. . Process that encountered the error > : {query}"
 
 
-    def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
-        omni_storage.start_new_iteration("web_browser")
-        call_id = self.get_last_call_id()
-        result = asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION))
-        response = browser_manager.initiate_chat(browser_manager, message=query)
-        messages = browser_gc.messages
+    async def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
+        call_id = self.get_last_call_id().get("web_browser")
+        capability_id = str(uuid.uuid4())
+        result = asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION, capability_id=capability_id))
+        browser_manager = BrowserManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
+        # messages = self.memory.pull_recent_from_chat_manager()
+        # if self.memory.get_last_capability():
+        #     last_content = next((d['content'] for d in self.memory.pull_last_capability_messages() if d.get('name') == 'process_completion'), None)
+        #     if last_content:
+        #         messages.append({"role":"user","name":"chat_manager","content":last_content})
+        # last_agent, last_message = browser_manager.manager.resume(messages=messages)
+        response = browser_manager.manager.initiate_chat(browser_manager.manager, message=query, clear_history=False)
+        # response = browser_manager.initiate_chat(browser_manager, message=query)
+        messages = browser_manager.groupchat.messages
         for msg in reversed(messages):
             if msg.get("name") == "process_completion":
                 # add_entry("Web_browser", msg["content"])
@@ -150,16 +206,18 @@ class Omni:
         return f"The web browsing process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
-    def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
-        # Initiate the chat
-        omni_storage.start_new_iteration("python_code")
-        recent_capability = omni_storage.get_most_recently_updated_capability()
-        print(recent_capability)
-        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-        call_id = self.get_last_call_id()
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.PYTHON_DEV_COLLECTION))
-        python_dev= PythonDeveloper(chat_id=self.chat_id, call_id=call_id)
-        response = python_dev.manager.initiate_chat(python_dev.manager, message=query)
+    async def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
+        call_id = self.get_last_call_id().get("python_coder")
+        capability_id = str(uuid.uuid4())
+        asyncio.run(create_capability_chat(chat_id=self.chat_id, call_id=call_id, capability=settings.PYTHON_DEV_COLLECTION, capability_id=capability_id))
+        python_dev= PythonDeveloper(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
+        messages = self.memory.pull_recent_from_chat_manager()
+        if self.memory.get_last_capability():
+            last_content = next((d['content'] for d in self.memory.pull_last_capability_messages() if d.get('name') == 'process_completion'), None)
+            if last_content:
+                messages.append({"role":"user","name":"chat_manager","content":last_content})
+        last_agent, last_message = python_dev.manager.resume(messages=messages)
+        response = python_dev.manager.initiate_chat(python_dev.manager, message=query, clear_history=False)
         # Get messages directly from cs_groupchat
         messages = python_dev.groupchat.messages
         # Find the last process_completion message
@@ -171,17 +229,18 @@ class Omni:
         return f"The python coding process got into a runtime error, please check the logs for more details. Process that encountered the error > : {query}"
 
 
-    def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
-        omni_storage.start_new_iteration("email_sender")
-        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-        recent_capability = omni_storage.get_most_recently_updated_capability()
-        print(recent_capability)
-        print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-        print("%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%^%")
-        call_id = self.get_last_call_id()
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION))
-        emailer = EmailManager(self.chat_id,call_id)
-        response = emailer.manager.initiate_chat(emailer.manager, message=query)
+    async def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
+        call_id = self.get_last_call_id().get("email_sender")
+        capability_id = str(uuid.uuid4())
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION, capability_id=capability_id))
+        emailer = EmailManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
+        messages = self.memory.pull_recent_from_chat_manager()
+        if self.memory.get_last_capability():
+            last_content = next((d['content'] for d in self.memory.pull_last_capability_messages() if d.get('name') == 'process_completion'), None)
+            if last_content:
+                messages.append({"role":"user","name":"chat_manager","content":last_content})
+        last_agent, last_message = emailer.manager.resume(messages=messages)
+        response = emailer.manager.initiate_chat(emailer.manager, message=query, clear_history=False)
         messages = emailer.groupchat.messages
         for msg in reversed(messages):
             if (
@@ -193,15 +252,18 @@ class Omni:
 
 
 
-    def get_file_finder(self, query: Annotated[str, "The search query"]):
-        omni_storage.start_new_iteration("file_finder")
-        # recent_capability = omni_storage.get_most_recently_updated_capability()
-        # print(recent_capability)
-        # print(omni_storage.get_latest_iteration_agent_messages(capability_name=recent_capability,agent_name="process_completion_agent"))
-        call_id = self.get_last_call_id()
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION))
-        file_finder = FileFinder(chat_id=self.chat_id,call_id=call_id)
-        response = file_finder.manager.initiate_chat(file_finder.manager, message=query)
+    async def get_file_finder(self, query: Annotated[str, "The search query"]):
+        call_id = self.get_last_call_id().get("file_finder")
+        capability_id = str(uuid.uuid4())
+        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION, capability_id=capability_id))
+        file_finder = FileFinder(chat_id=self.chat_id,call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
+        # messages = self.memory.pull_recent_from_chat_manager()
+        # if self.memory.get_last_capability():
+        #     last_content = next((d['content'] for d in self.memory.pull_last_capability_messages() if d.get('name') == 'process_completion'), None)
+        #     if last_content:
+        #         messages.append({"role":"user","name":"chat_manager","content":last_content})
+        # last_agent, last_message = file_finder.manager.resume(messages=messages)
+        response = file_finder.manager.initiate_chat(file_finder.manager, message=query, clear_history=False)
         messages = file_finder.groupchat.messages
         for msg in reversed(messages):
             if msg.get("name") == "process_completion":
@@ -214,20 +276,20 @@ class Omni:
         
         #Wrapper functions before registring to agents
         
-        def image_generator_wrapper(query: Annotated[str, "The detailed image generation prompt"]):
-            return self.get_image_generator(query)
+        async def image_generator_wrapper(query: Annotated[str, "The detailed image generation prompt"]):
+            return await self.get_image_generator(query)
         
-        def web_browser_wrapper(query: Annotated[str,"The complete search query with all the details like subject relationship with the message",]) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
-            return self.get_web_browser(query)
+        async def web_browser_wrapper(query: Annotated[str,"The complete search query with all the details like subject relationship with the message",]) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
+            return await self.get_web_browser(query)
         
-        def python_coder_wrapper(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",]) -> Annotated[str, "The results"]:
-            return self.get_python_coder(query)
+        async def python_coder_wrapper(query: Annotated[str,"The complete search query with all the details what work we have to do and what we have to return for other agents to work on",]) -> Annotated[str, "The results"]:
+            return await self.get_python_coder(query)
         
-        def email_sender_wrapper(query: Annotated[str, "The complete user query"]):
-            return self.get_email_sender(query)
+        async def email_sender_wrapper(query: Annotated[str, "The complete user query"]):
+            return await self.get_email_sender(query)
         
-        def file_finder_wrapper(query: Annotated[str, "The search query"]):
-            return self.get_file_finder(query)
+        async def file_finder_wrapper(query: Annotated[str, "The search query"]):
+            return await self.get_file_finder(query)
         
         autogen.agentchat.register_function(
             python_coder_wrapper,
@@ -450,6 +512,7 @@ class Omni:
         self.manager = OmniGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
+            memory=self.memory,
             human_input_mode="ALWAYS",
             chat_id=self.chat_id
         )

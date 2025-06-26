@@ -64,9 +64,10 @@ def flux_image_generator(prompt: Annotated[str, "The image generation prompt"]):
 
 
 class ImageGenerator:
-    def __init__(self, chat_id, call_id):
+    def __init__(self, chat_id, call_id, capability_id):
         self.chat_id = chat_id
         self.call_id = call_id
+        self.capability_id = capability_id
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         autogen.register_function(
@@ -120,7 +121,7 @@ class ImageGenerator:
         messages = groupchat.messages
         #file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
 
-        if len(messages) == 1:
+        if len(messages) == 1 or last_speaker.name == "chat_manager":
             return groupchat.agent_by_name("user_intent")
         if last_speaker.name == "user_intent":
             return groupchat.agent_by_name("image_prompt_generator")
@@ -162,6 +163,7 @@ class ImageGenerator:
             groupchat=self.groupchat,
             llm_config=self.llm_config,
             capability_name=settings.IMAGE_GENERATOR_COLLECTION,
+            capability_id=self.capability_id,
             chat_id=self.chat_id,
             call_id=self.call_id,
             human_input_mode="ALWAYS"
