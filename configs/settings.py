@@ -21,6 +21,7 @@ class Settings:
     AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_API_KEY_O3 = os.getenv("AZURE_OPENAI_API_KEY_O3")
     TOGETHER_DEEPSEEK_API_KEY = os.getenv("TOGETHER_DEEPSEEK_API_KEY")
+    WEB_API = os.getenv("web_api")
     
     # MongoDB settings
     MONGODB_URI = os.getenv("MONGODB_URI","localhost")

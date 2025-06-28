@@ -5,7 +5,9 @@ os.environ["ANONYMIZED_TELEMETRY"] = "false"
 # Add the project root directory to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, project_root)
-
+from typing import Annotated
+import httpx
+import asyncio
 
 from configs.settings import settings
 from langchain_anthropic import ChatAnthropic
@@ -34,6 +36,11 @@ from utilities.custom_manager import CustomGroupChatManager
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
+from tavily import TavilyClient
+
+web_api= settings.WEB_API
+print(f"Using Tavily API key: {web_api}")
+tavily = TavilyClient(api_key=web_api)
 
 
 load_dotenv()
@@ -51,7 +58,7 @@ class Post(BaseModel):
 
 class Posts(BaseModel):
     posts: List[Post]
-    content: str = "Final response"
+    exhaustive_result: str 
 
 
 # Global reference to browser manager instance
@@ -59,6 +66,24 @@ _browser_manager_instance = None
 browser_data_dir = str(Path.home() / "browser_use_data")
 os.makedirs(browser_data_dir, exist_ok=True)
 
+
+async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
+    api_key = "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"
+    url = "https://api.tavily.com/search"
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url,
+            json={
+                "query": query,
+                "search_depth": "advanced",
+                "api_key": api_key,
+            }
+        )
+        response.raise_for_status()
+        results = response.json()
+        print(results)
+        return results
 
 async def browser_search_function(task: str) -> str:
     """Standalone function wrapper for browser search functionality."""
@@ -125,6 +150,7 @@ class BrowserManager:
                 keep_alive=self.keep_alive,
                 user_data_dir=browser_data_dir,
                 headless=self.headless,
+                chrome_instance_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" if self.use_chrome else None,
             )
             
             self.browser_session = BrowserSession(
@@ -156,16 +182,52 @@ class BrowserManager:
 
     def _register_functions(self):
         """Register functions after agents are initialized."""
+        
         autogen.register_function(
             browser_search_function,  # Use the standalone function
             caller=self.browser_reader,
             executor=self.browser_searcher,
-            name="web_search_tool",
+            name="web_search_tool_chrome",
             description="""
-            This tool will be used to search on the web regarding any question that user has asked, and needs to search on the web.
-            TRY TO ADD AS MANY QUESTIONS AS YOU CAN TO COMBINE COMPLETE CONTEXT OF THE QUESTION.
-            """,
-        )
+            Use this tool for tasks requiring step-by-step interaction with websites, such as clicking buttons, 
+            logging into accounts, filling forms, or extracting data from dynamic/visual elements. 
+            It operates by taking screenshots, analyzing page elements, and performing sequential actions in Chrome. 
+            Ideal when information cannot be retrieved via simple search APIs (e.g., behind login walls, in complex web apps, or requiring navigation)."
+
+Input Parameters:
+
+task_goal: "Specific, step-by-step instructions. Example: 'Log into Gmail, find the latest unread email from John, and extract its content'."
+starting_url: "Optional URL to start from (default: Google search if not provided)."
+When to Use:
+
+User queries imply interaction (e.g., "Buy a product on Amazon", "Scrape my LinkedIn notifications").
+Information is visual/dynamic (e.g., "What’s trending in the Twitter sidebar right now?").
+When Not to Use:
+
+For simple factual queries (e.g., "Who is the CEO of SpaceX?").
+            """)
+
+        autogen.register_function(
+            search_tool,  # Use the standalone function
+            caller=self.browser_reader,
+            executor=self.browser_searcher,
+            name="web_search_tool_api",
+            description="""
+            Use this tool for quick, factual queries where real-time search results or summarized data are sufficient.
+            It calls APIs (e.g., SERP, Tavily) to retrieve text-based web results, news, or knowledge graphs. Ideal for broad information synthesis without visual/iterative interaction."
+
+Input Parameters:
+
+query: "Concise search string. Example: 'Current inflation rate in Germany'."
+When to Use:
+
+Factual lookups (e.g., "Height of Mount Everest", "Apple stock price").
+Time-sensitive data (e.g., "Latest Ukraine-Russia news headlines").
+Broad research (e.g., "Renewable energy trends in 2024").
+When Not to Use:
+
+Tasks requiring website interaction (e.g., "Order me a pizza from Domino's").
+            """)
 
     async def _browser_search_impl(self, task: str) -> str:
         """Implementation of browser search functionality using new BrowserSession.
@@ -189,16 +251,11 @@ class BrowserManager:
         
         controller = Controller(output_model=Posts)
         
-        @controller.action("""Ask user for information or manual verification.
-        When to Communicate with User -
-        - When encountering environment issues like, couldn't click on some box,
-        - When encountering captcha or security
-        - When Asked for input on user's behalf, like login ID or password, filling out any form
-        - When critical information cannot be accessed through available resources
-        - When requesting permissions or keys from the user """)
-        def ask_human_local(question: str) -> str:
+        @controller.action("""Ask user for credentials,
+        - Ask user credentials login ID or password""")
+        def ask_human_local(question: str) -> ActionResult:
             answer = input(f'\n{question}\nInput: ')
-            return ActionResult(extracted_content=answer)
+            return ActionResult(extracted_content=answer, include_in_memory=True)
             
         import browser_use.utils
         original_config_dir = browser_use.utils.BROWSER_USE_CONFIG_DIR
@@ -209,12 +266,13 @@ class BrowserManager:
 
         agent = Agent(
             task=task,
+            browser=self._initialize_browser(),  # Use the legacy method for backward compatibility
             browser_session=browser_session,  # Use browser_session instead of browser
             max_failures=max_failures,
             retry_delay=retry_delay,
             use_vision=True,
             generate_gif=True,
-            max_input_tokens=200000,
+            max_input_tokens=180000,
             validate_output=True,
             llm=self.vision_llm,
             save_conversation_path=self.results_dir,
@@ -357,12 +415,3 @@ class BrowserManager:
             capability_name="email_sender"
         )
         return self.groupchat, self.manager
-
-    # async def __aenter__(self):
-    #     """Async context manager entry."""
-    #     await self._initialize_browser_session()
-    #     return self
-
-    # async def __aexit__(self, exc_type, exc_val, exc_tb):
-    #     """Async context manager exit."""
-    #     await self.close_browser_session()

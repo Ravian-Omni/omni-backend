@@ -295,6 +295,7 @@ class Omni:
         return autogen.UserProxyAgent(
             name="manual_verification",
             llm_config=self.llm_config,
+            default_auto_reply="Awaiting for manual verification",
             human_input_mode="ALWAYS",
             code_execution_config=False,
             description="You will take input from user if needed for any manual intervention or verification ",
