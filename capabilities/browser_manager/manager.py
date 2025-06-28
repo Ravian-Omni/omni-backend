@@ -124,7 +124,7 @@ class BrowserManager:
         
         # Initialize vision LLM
         self.vision_llm = ChatAnthropic(
-            model_name="claude-3-7-sonnet-20250219",
+            model_name="claude-3-7-sonnet-20250219",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219
             temperature=0.1,
             api_key=settings.ANTHROPIC_API_KEY,
         )
@@ -189,22 +189,32 @@ class BrowserManager:
             executor=self.browser_searcher,
             name="web_search_tool_chrome",
             description="""
-            Use this tool for tasks requiring step-by-step interaction with websites, such as clicking buttons, 
-            logging into accounts, filling forms, or extracting data from dynamic/visual elements. 
-            It operates by taking screenshots, analyzing page elements, and performing sequential actions in Chrome. 
-            Ideal when information cannot be retrieved via simple search APIs (e.g., behind login walls, in complex web apps, or requiring navigation)."
-
-Input Parameters:
-
-task_goal: "Specific, step-by-step instructions. Example: 'Log into Gmail, find the latest unread email from John, and extract its content'."
-starting_url: "Optional URL to start from (default: Google search if not provided)."
-When to Use:
-
-User queries imply interaction (e.g., "Buy a product on Amazon", "Scrape my LinkedIn notifications").
-Information is visual/dynamic (e.g., "What’s trending in the Twitter sidebar right now?").
-When Not to Use:
-
-For simple factual queries (e.g., "Who is the CEO of SpaceX?").
+            Interactive web automation tool for complex browser-based tasks requiring visual parsing and multi-step interactions.
+        
+        Core Capabilities:
+        - Screenshot-based page analysis and element identification
+        - Sequential action execution (click, type, navigate, scroll)
+        - Form filling and authentication workflows
+        - Dynamic content extraction from JavaScript-heavy sites
+        - Multi-page navigation and data collection
+        
+        Input Parameters:
+        - task_goal: Detailed step-by-step instructions describing the complete workflow
+          Example: "Navigate to LinkedIn, log in with provided credentials, go to notifications tab, and extract the 5 most recent connection requests with their profile information"
+        - starting_url: Optional initial URL (defaults to Google search if omitted)
+        
+        Optimal Use Cases:
+        ✓ Account-based operations (login required content)
+        ✓ E-commerce interactions (shopping, checkout processes)
+        ✓ Social media automation (posting, messaging, data extraction)
+        ✓ Form submissions and multi-step workflows
+        ✓ Visual content analysis (charts, images, layouts)
+        ✓ Sites with heavy JavaScript or dynamic loading
+        
+        Avoid For:
+        ✗ Simple factual queries answerable by search results
+        ✗ Static content that doesn't require interaction
+        ✗ Time-sensitive queries where speed is critical
             """)
 
         autogen.register_function(
@@ -213,20 +223,32 @@ For simple factual queries (e.g., "Who is the CEO of SpaceX?").
             executor=self.browser_searcher,
             name="web_search_tool_api",
             description="""
-            Use this tool for quick, factual queries where real-time search results or summarized data are sufficient.
-            It calls APIs (e.g., SERP, Tavily) to retrieve text-based web results, news, or knowledge graphs. Ideal for broad information synthesis without visual/iterative interaction."
-
-Input Parameters:
-
-query: "Concise search string. Example: 'Current inflation rate in Germany'."
-When to Use:
-
-Factual lookups (e.g., "Height of Mount Everest", "Apple stock price").
-Time-sensitive data (e.g., "Latest Ukraine-Russia news headlines").
-Broad research (e.g., "Renewable energy trends in 2024").
-When Not to Use:
-
-Tasks requiring website interaction (e.g., "Order me a pizza from Domino's").
+            High-speed API-based search tool for rapid information retrieval and knowledge synthesis.
+        
+        Core Capabilities:
+        - Multi-source search aggregation (web, news, academic)
+        - Real-time data retrieval and trending information
+        - Structured data extraction (knowledge graphs, snippets)
+        - Cross-reference validation from multiple sources
+        - Intelligent query expansion and result filtering
+        
+        Input Parameters:
+        - query: Focused search terms optimized for information retrieval
+          Example: "Tesla Q4 2024 earnings report key metrics" or "Current mortgage rates USA December 2024"
+        
+        Optimal Use Cases:
+        ✓ Factual research and data gathering
+        ✓ Current events and breaking news monitoring
+        ✓ Market data and financial information
+        ✓ Academic and technical knowledge lookup
+        ✓ Comparative analysis across multiple sources
+        ✓ Trend identification and industry insights
+        
+        Avoid For:
+        ✗ Tasks requiring user account access
+        ✗ Interactive elements or form submissions
+        ✗ Visual content analysis or screenshot needs
+        ✗ Multi-step workflows or complex navigation
             """)
 
     async def _browser_search_impl(self, task: str) -> str:
