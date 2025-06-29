@@ -8,6 +8,7 @@ sys.path.insert(0, project_root)
 from typing import Annotated
 import httpx
 import asyncio
+import requests
 
 from configs.settings import settings
 from langchain_anthropic import ChatAnthropic
@@ -36,15 +37,19 @@ from utilities.custom_manager import CustomGroupChatManager
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
+from datetime import datetime
+today_date = datetime.now()
+from .country_data import country_codes
+
 from tavily import TavilyClient
 web_api= settings.WEB_API
 import asyncio
 from tavily import AsyncTavilyClient
 tavily_client = AsyncTavilyClient(web_api)
 
-web_api= settings.WEB_API
-print(f"Using Tavily API key: {web_api}")
-tavily = TavilyClient(api_key=web_api)
+# web_api= settings.WEB_API
+# print(f"Using Tavily API key: {web_api}")
+# tavily = TavilyClient(api_key=web_api)
 
 
 load_dotenv()
@@ -70,24 +75,6 @@ _browser_manager_instance = None
 browser_data_dir = str(Path.home() / "browser_use_data")
 os.makedirs(browser_data_dir, exist_ok=True)
 
-
-# async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
-#     api_key = "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"
-#     url = "https://api.tavily.com/search"
-    
-#     async with httpx.AsyncClient() as client:
-#         response = await client.post(
-#             url,
-#             json={
-#                 "query": query,
-#                 "search_depth": "advanced",
-#                 "api_key": api_key,
-#             }
-#         )
-#         response.raise_for_status()
-#         results = response.json()
-#         print(results)
-#         return results
     
 async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
     """
@@ -115,14 +102,46 @@ async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[st
         error_msg = f"Search failed: {str(e)}"
         print(error_msg)
         return error_msg
+    
+
+def get_country_name_from_ip(country_data):
+    try:
+        response = requests.get("https://ipinfo.io/json")
+        data = response.json()
+        country_code = data.get("country")
+
+        country = next(
+            (c for c in country_data if c["alpha_2"] == country_code or c["alpha_3"] == country_code),
+            None
+        )
+
+        return country["name"] if country else f"Unknown ({country_code})"
+
+    except Exception as e:
+        return f"Error: {e}"
+    
+usercountry = get_country_name_from_ip(country_codes)
+
+print(f"Country the user belongs to-->: {usercountry}")
 
 
-async def browser_search_function(task: str) -> str:
+# async def browser_search_function(task: str) -> str:
+
+# async def browser_search_function(task: str, starting_url: str = None) -> str:
+
+#     """Standalone function wrapper for browser search functionality."""
+#     global _browser_manager_instance
+#     if _browser_manager_instance is None:
+#         raise RuntimeError("BrowserManager instance not initialized")
+#     return await _browser_manager_instance._browser_search_impl(task)
+
+
+async def browser_search_function(task_goal: str, starting_url: str = None) -> str:
     """Standalone function wrapper for browser search functionality."""
     global _browser_manager_instance
     if _browser_manager_instance is None:
         raise RuntimeError("BrowserManager instance not initialized")
-    return await _browser_manager_instance._browser_search_impl(task)
+    return await _browser_manager_instance._browser_search_impl(task_goal)
 
 
 class BrowserManager:
@@ -155,10 +174,16 @@ class BrowserManager:
         self.llm_config_wc["response_format"] = webprocess_completion
         
         # Initialize vision LLM
-        self.vision_llm = ChatAnthropic(
-            model_name="claude-3-7-sonnet-20250219",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219
+        # self.vision_llm = ChatAnthropic(
+        #     model_name="claude-3-7-sonnet-20250219",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219
+        #     temperature=0.1,
+        #     api_key=settings.ANTHROPIC_API_KEY,
+        # )
+
+        self.vision_llm = ChatOpenAI(
+            model_name="gpt-4.1-2025-04-14",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219 , gpt-4.1-2025-04-14,  gpt-4.1-mini-2025-04-14
             temperature=0.1,
-            api_key=settings.ANTHROPIC_API_KEY,
+            api_key=settings.OPENAI_API_KEY,
         )
         
         # Initialize browser session
@@ -178,11 +203,10 @@ class BrowserManager:
         """Initialize browser session with new BrowserSession and BrowserProfile."""
         if self.browser_session is None:
             browser_profile = BrowserProfile(
-                window_size=self.window_size,
+                #window_size=self.window_size,
                 keep_alive=self.keep_alive,
                 user_data_dir=browser_data_dir,
                 headless=self.headless,
-                chrome_instance_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" if self.use_chrome else None,
             )
             
             self.browser_session = BrowserSession(
@@ -343,7 +367,7 @@ class BrowserManager:
             browser_session=browser_session,  # Use browser_session instead of browser
             max_failures=max_failures,
             retry_delay=retry_delay,
-            use_vision=True,
+            use_vision=False,
             generate_gif=True,
             max_input_tokens=180000,
             validate_output=True,
@@ -415,9 +439,7 @@ class BrowserManager:
         return autogen.AssistantAgent(
             name="browser_planner",
             llm_config=self.llm_config,
-            system_message=prompts.planner.format(
-                get_last_entry=get_last_entry, get_all_messages=get_all_messages
-            ),
+            system_message=prompts.planner.format(today_date=today_date, usercountry=usercountry),
         )
 
     def browser_searcher(self):

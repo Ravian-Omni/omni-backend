@@ -32,6 +32,7 @@ from omni import prompts
 from utilities.logging import logger
 from utilities.storage import omni_storage
 import asyncio
+from string import Template
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
@@ -238,7 +239,7 @@ class Omni:
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=self.llm_config_mini_planner,
-            system_message=prompts.planner
+            system_message=Template(prompts.planner).substitute(today_date=today_date)
         )
 
     def get_get_request(self):

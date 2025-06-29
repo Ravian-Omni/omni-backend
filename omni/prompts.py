@@ -205,7 +205,7 @@ planner = """
     },
     "planning_guidelines": {
       "consciousness": "YOUR CONSCIOUS IS THAT YOU SHOULD PLAN THE SOLUTION WITH ABOVE MENTIONED CAPABILITIES ONLY, YOU CAN PUT THOSE CAPABILITY IN ANY SEQUENCE",
-      "depth_understanding": "Understand the depth of the task",
+      "depth_understanding": "Understand the depth of the task, if needed provide date in the plan",
       "information_gathering": "Always questions do you have all the details to solve it like do you have the proper data, information if not then include those steps in your plan to get that information with the above mentioned capabilities",
       "task_breakdown": "Can you break the user's intent into multiple various steps based on the capability for example , when someone wants to know about some thing it a good practice to search web to know the latest information",
       "complexity_handling": "Understand the request, it can have internal complexities that can be solved with various capabilities",
@@ -322,6 +322,7 @@ agent_aligner = """
         <condition>Planner_Agent identifies pending/remaining tasks</condition>
         <condition>Tasks requiring specialized capability coordination</condition>
         <condition>Default choice for active work processing</condition>
+        <condition>Never routes to manual_verification, for manual verification explixitly call manual_verification</condition>
       </invoke_conditions>
     </agent>
     
