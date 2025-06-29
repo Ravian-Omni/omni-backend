@@ -37,6 +37,10 @@ from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
 from tavily import TavilyClient
+web_api= settings.WEB_API
+import asyncio
+from tavily import AsyncTavilyClient
+tavily_client = AsyncTavilyClient(web_api)
 
 web_api= settings.WEB_API
 print(f"Using Tavily API key: {web_api}")
@@ -67,23 +71,51 @@ browser_data_dir = str(Path.home() / "browser_use_data")
 os.makedirs(browser_data_dir, exist_ok=True)
 
 
-async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
-    api_key = "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"
-    url = "https://api.tavily.com/search"
+# async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
+#     api_key = "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"
+#     url = "https://api.tavily.com/search"
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            json={
-                "query": query,
-                "search_depth": "advanced",
-                "api_key": api_key,
-            }
-        )
-        response.raise_for_status()
-        results = response.json()
-        print(results)
-        return results
+#     async with httpx.AsyncClient() as client:
+#         response = await client.post(
+#             url,
+#             json={
+#                 "query": query,
+#                 "search_depth": "advanced",
+#                 "api_key": api_key,
+#             }
+#         )
+#         response.raise_for_status()
+#         results = response.json()
+#         print(results)
+#         return results
+    
+async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
+    """
+    Single query search - simplified version
+    """
+    try:
+        # For single query, no need for asyncio.gather
+        response = await tavily_client.search(query, search_depth="advanced")
+        
+        # Convert response to string format as per return annotation
+        if response and 'results' in response:
+            result_text = f"Query: {response.get('query', query)}\n"
+            result_text += f"Found {len(response['results'])} results:\n\n"
+            
+            for i, result in enumerate(response['results'][:5], 1):  # Limit to top 5
+                result_text += f"{i}. {result.get('title', 'No title')}\n"
+                result_text += f"   URL: {result.get('url', 'No URL')}\n"
+                result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
+            
+            return result_text
+        else:
+            return "No results found"
+            
+    except Exception as e:
+        error_msg = f"Search failed: {str(e)}"
+        print(error_msg)
+        return error_msg
+
 
 async def browser_search_function(task: str) -> str:
     """Standalone function wrapper for browser search functionality."""
@@ -108,7 +140,7 @@ class BrowserManager:
         
         self.headless = headless
         self.use_chrome = use_chrome
-        self.window_size = window_size or {'width': 4, 'height': 4} #setup the window size
+        self.window_size = window_size or {'width': 10, 'height': 10} #setup the window size
         self.keep_alive = keep_alive
         self.results_dir = results_dir
         
@@ -189,32 +221,42 @@ class BrowserManager:
             executor=self.browser_searcher,
             name="web_search_tool_chrome",
             description="""
-            Interactive web automation tool for complex browser-based tasks requiring visual parsing and multi-step interactions.
-        
-        Core Capabilities:
-        - Screenshot-based page analysis and element identification
-        - Sequential action execution (click, type, navigate, scroll)
-        - Form filling and authentication workflows
-        - Dynamic content extraction from JavaScript-heavy sites
-        - Multi-page navigation and data collection
-        
-        Input Parameters:
-        - task_goal: Detailed step-by-step instructions describing the complete workflow
-          Example: "Navigate to LinkedIn, log in with provided credentials, go to notifications tab, and extract the 5 most recent connection requests with their profile information"
-        - starting_url: Optional initial URL (defaults to Google search if omitted)
-        
-        Optimal Use Cases:
-        ✓ Account-based operations (login required content)
-        ✓ E-commerce interactions (shopping, checkout processes)
-        ✓ Social media automation (posting, messaging, data extraction)
-        ✓ Form submissions and multi-step workflows
-        ✓ Visual content analysis (charts, images, layouts)
-        ✓ Sites with heavy JavaScript or dynamic loading
-        
-        Avoid For:
-        ✗ Simple factual queries answerable by search results
-        ✗ Static content that doesn't require interaction
-        ✗ Time-sensitive queries where speed is critical
+            {
+  "name": "web_search_tool_chrome",
+  "description": "<description>Interactive web automation tool for complex browser-based tasks requiring visual parsing and multi-step interactions.</description>",
+  "core_capabilities": [
+    "<capability>Screenshot-based page analysis and element identification</capability>",
+    "<capability>Sequential action execution (click, type, navigate, scroll)</capability>",
+    "<capability>Form filling and authentication workflows</capability>",
+    "<capability>Dynamic content extraction from JavaScript-heavy sites</capability>",
+    "<capability>Multi-page navigation and data collection</capability>"
+  ],
+  "input_parameters": {
+    "task_goal": {
+      "type": "string",
+      "description": "<parameter_description>Detailed step-by-step instructions describing the complete workflow</parameter_description>",
+      "example": "<example>Navigate to LinkedIn, log in with provided credentials, go to notifications tab, and extract the 5 most recent connection requests with their profile information</example>"
+    },
+    "starting_url": {
+      "type": "string",
+      "description": "<parameter_description>Optional initial URL (defaults to Google search if omitted)</parameter_description>",
+      "required": false
+    }
+  },
+  "optimal_use_cases": [
+    "<use_case>Account-based operations (login required content)</use_case>",
+    "<use_case>E-commerce interactions (shopping, checkout processes)</use_case>",
+    "<use_case>Social media automation (posting, messaging, data extraction)</use_case>",
+    "<use_case>Form submissions and multi-step workflows</use_case>",
+    "<use_case>Visual content analysis (charts, images, layouts)</use_case>",
+    "<use_case>Sites with heavy JavaScript or dynamic loading</use_case>"
+  ],
+  "avoid_for": [
+    "<avoid_case>Simple factual queries answerable by search results</avoid_case>",
+    "<avoid_case>Static content that doesn't require interaction</avoid_case>",
+    "<avoid_case>Time-sensitive queries where speed is critical</avoid_case>"
+  ]
+}
             """)
 
         autogen.register_function(
@@ -223,32 +265,41 @@ class BrowserManager:
             executor=self.browser_searcher,
             name="web_search_tool_api",
             description="""
-            High-speed API-based search tool for rapid information retrieval and knowledge synthesis.
-        
-        Core Capabilities:
-        - Multi-source search aggregation (web, news, academic)
-        - Real-time data retrieval and trending information
-        - Structured data extraction (knowledge graphs, snippets)
-        - Cross-reference validation from multiple sources
-        - Intelligent query expansion and result filtering
-        
-        Input Parameters:
-        - query: Focused search terms optimized for information retrieval
-          Example: "Tesla Q4 2024 earnings report key metrics" or "Current mortgage rates USA December 2024"
-        
-        Optimal Use Cases:
-        ✓ Factual research and data gathering
-        ✓ Current events and breaking news monitoring
-        ✓ Market data and financial information
-        ✓ Academic and technical knowledge lookup
-        ✓ Comparative analysis across multiple sources
-        ✓ Trend identification and industry insights
-        
-        Avoid For:
-        ✗ Tasks requiring user account access
-        ✗ Interactive elements or form submissions
-        ✗ Visual content analysis or screenshot needs
-        ✗ Multi-step workflows or complex navigation
+            {
+    "name": "web_search_tool_api",
+    "description": "<description>High-speed API-based search tool for rapid information retrieval and knowledge synthesis.</description>",
+    "core_capabilities": [
+      "<capability>Multi-source search aggregation (web, news, academic)</capability>",
+      "<capability>Real-time data retrieval and trending information</capability>",
+      "<capability>Structured data extraction (knowledge graphs, snippets)</capability>",
+      "<capability>Cross-reference validation from multiple sources</capability>",
+      "<capability>Intelligent query expansion and result filtering</capability>"
+    ],
+    "input_parameters": {
+      "query": {
+        "type": "string",
+        "description": "<parameter_description>Focused search terms optimized for information retrieval</parameter_description>",
+        "examples": [
+          "<example>Tesla Q4 2024 earnings report key metrics</example>",
+          "<example>Current mortgage rates USA December 2024</example>"
+        ]
+      }
+    },
+    "optimal_use_cases": [
+      "<use_case>Factual research and data gathering</use_case>",
+      "<use_case>Current events and breaking news monitoring</use_case>",
+      "<use_case>Market data and financial information</use_case>",
+      "<use_case>Academic and technical knowledge lookup</use_case>",
+      "<use_case>Comparative analysis across multiple sources</use_case>",
+      "<use_case>Trend identification and industry insights</use_case>"
+    ],
+    "avoid_for": [
+      "<avoid_case>Tasks requiring user account access</avoid_case>",
+      "<avoid_case>Interactive elements or form submissions</avoid_case>",
+      "<avoid_case>Visual content analysis or screenshot needs</avoid_case>",
+      "<avoid_case>Multi-step workflows or complex navigation</avoid_case>"
+    ]
+  }
             """)
 
     async def _browser_search_impl(self, task: str) -> str:

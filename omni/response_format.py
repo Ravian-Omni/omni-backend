@@ -1,3 +1,6 @@
+from pydantic import BaseModel, Field, model_validator
+
+
 # omni_planner_response_format = {
 #     "$defs": {
 #         "Task": {
@@ -163,32 +166,66 @@ class PlannerResponse(BaseModel):
 #     steps: List[Step] = Field(..., title="Steps")
 #     final_answer: Literal["agent_router", "process_completion"] = Field(..., title="Final Answer")
 
+#############################################
+# Omni Agent Orchetrator Response Format    #
+                                            #
+#############################################
 
-from pydantic import BaseModel, Field, validator
+
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Literal
 
 AllowedAgents = Literal["Planner_Agent", "agent_router", "process_completion", "manual_verification"]
 
 class Step(BaseModel):
-    question: str = Field(..., title="Question")
-    thought: str = Field(..., title="Thought")
-    action: AllowedAgents = Field(..., title="Action")
+    question: str = Field(..., title="Question" , min_length=1)
+    thought: str = Field(..., title="Thought", min_length=1)
+    action: AllowedAgents = Field(..., title="Action", min_length=1)
 
 class AgentSelectionResponse(BaseModel):
     steps: List[Step] = Field(..., title="Steps")
     final_answer: AllowedAgents = Field(..., title="Final Answer")
 
-    @validator("final_answer")
+    @field_validator("final_answer")
+    @classmethod
     def validate_single_agent_final(cls, value):
         if value not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
-            raise ValueError("Final answer must be one of: agent_router, process_completion")
+            raise ValueError("Final answer must be one of: Planner_Agent, agent_router, process_completion, manual_verification")
         return value
 
-    @validator("steps", each_item=True)
-    def validate_single_agent_in_steps(cls, step):
-        if step.action not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
-            raise ValueError("Each step's action must be one of: agent_router, process_completion")
-        return step
+    @field_validator("steps")
+    @classmethod
+    def validate_single_agent_in_steps(cls, steps):
+        for step in steps:
+            if step.action not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
+                raise ValueError("Each step's action must be one of: Planner_Agent, agent_router, process_completion, manual_verification")
+        return steps
+
+# from pydantic import BaseModel, Field, validator
+# from typing import List, Literal
+
+# AllowedAgents = Literal["Planner_Agent", "agent_router", "process_completion", "manual_verification"]
+
+# class Step(BaseModel):
+#     question: str = Field(..., title="Question")
+#     thought: str = Field(..., title="Thought")
+#     action: AllowedAgents = Field(..., title="Action")
+
+# class AgentSelectionResponse(BaseModel):
+#     steps: List[Step] = Field(..., title="Steps")
+#     final_answer: AllowedAgents = Field(..., title="Final Answer")
+
+#     @validator("final_answer")
+#     def validate_single_agent_final(cls, value):
+#         if value not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
+#             raise ValueError("Final answer must be one of: agent_router, process_completion")
+#         return value
+
+#     @validator("steps", each_item=True)
+#     def validate_single_agent_in_steps(cls, step):
+#         if step.action not in ("Planner_Agent", "agent_router", "process_completion", "manual_verification"):
+#             raise ValueError("Each step's action must be one of: agent_router, process_completion")
+#         return step
     
 
 
@@ -202,7 +239,6 @@ class Capability(str, Enum):
     PYTHON_CODER = "python_coder"
     EMAIL_SENDER = "email_sender"
     FILE_FINDER = "file_finder"
-    DASHBOARD_SERVER = "dashboard_server"
     WEB_BROWSER = "web_browser"
     IMAGE_GENERATOR = "image_generator"
 
@@ -257,6 +293,73 @@ class CapabilityRoutingResponse(BaseModel):
 
 
 
+# class QuestionType(str, Enum):
+#     """Enumeration of question classification types."""
+#     CONVERSATION = "conversation"
+#     TASK_ORIENTED = "task_oriented"
+
+
+# class ConfidenceLevel(str, Enum):
+#     """Enumeration of confidence levels for classification."""
+#     HIGH = "High"
+#     MEDIUM = "Medium"
+#     LOW = "Low"
+
+
+# class QuestionClassification(BaseModel):
+#     """
+#     Pydantic model for question classification results.
+    
+#     This model represents the output of a classification agent that
+#     determines whether a user question is conversational or task-oriented.
+#     """
+    
+#     classification: QuestionType = Field(
+#         ...,
+#         description="The primary classification of the question",
+#         example=QuestionType.CONVERSATION
+#     )
+    
+#     confidence: ConfidenceLevel = Field(
+#         ...,
+#         description="Confidence level of the classification decision",
+#         example=ConfidenceLevel.HIGH
+#     )
+    
+#     reasoning: str = Field(
+#         ...,
+#         min_length=10,
+#         max_length=500,
+#         description="Brief explanation of the classification decision",
+#         example="Simple greeting seeking casual interaction"
+#     )
+    
+#     original_question: str = Field(
+#         ...,
+#         min_length=1,
+#         description="The original user question being classified",
+#         example="How are you doing today?"
+#     )
+    
+#     complexity_score: Optional[int] = Field(
+#         None,
+#         ge=1,
+#         le=10,
+#         description="Optional complexity score from 1-10, where 1 is simple and 10 is highly complex"
+#     )
+    
+#     suggested_response_type: Optional[str] = Field(
+#         None,
+#         description="Optional suggestion for how to respond to this type of question"
+#     )
+
+
+
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field
+
+
 class QuestionType(str, Enum):
     """Enumeration of question classification types."""
     CONVERSATION = "conversation"
@@ -274,22 +377,28 @@ class QuestionClassification(BaseModel):
     """
     Pydantic model for question classification results.
     
-    This model represents the output of a classification agent that
-    determines whether a user question is conversational or task-oriented.
+    IMPORTANT FOR LLM: When setting eta_minutes, use this mapping based on complexity_score:
+    - complexity_score 1: "1-5 minutes"
+    - complexity_score 2: "5-12 minutes" 
+    - complexity_score 3: "15-20 minutes"
+    - complexity_score 4: "15-25 minutes"
+    - complexity_score 5: "20-30 minutes"
+    - complexity_score 6: "30-40 minutes"
+    - complexity_score 7: "40-60 minutes"
+    - complexity_score 8: "50-80 minutes"
+    - complexity_score 9: "60-120 minutes"
+    - complexity_score 10: "120-150 minutes"
     """
-    
     classification: QuestionType = Field(
         ...,
         description="The primary classification of the question",
         example=QuestionType.CONVERSATION
     )
-    
     confidence: ConfidenceLevel = Field(
         ...,
         description="Confidence level of the classification decision",
         example=ConfidenceLevel.HIGH
     )
-    
     reasoning: str = Field(
         ...,
         min_length=10,
@@ -297,22 +406,46 @@ class QuestionClassification(BaseModel):
         description="Brief explanation of the classification decision",
         example="Simple greeting seeking casual interaction"
     )
-    
     original_question: str = Field(
         ...,
         min_length=1,
         description="The original user question being classified",
         example="How are you doing today?"
     )
-    
     complexity_score: Optional[int] = Field(
         None,
         ge=1,
         le=10,
         description="Optional complexity score from 1-10, where 1 is simple and 10 is highly complex"
     )
-    
     suggested_response_type: Optional[str] = Field(
         None,
         description="Optional suggestion for how to respond to this type of question"
     )
+    eta_minutes: Optional[str] = Field(
+        None,
+        description=(
+            "Estimated time to complete the task. MUST correspond to complexity_score: "
+            "1='1-5 minutes', 2='5-12 minutes', 3='15-20 minutes', 4='15-25 minutes', "
+            "5='20-30 minutes', 6='30-40 minutes', 7='40-60 minutes', 8='50-80 minutes', "
+            "9='60-120 minutes', 10='120-150 minutes'"
+        ),
+        example="15-20 minutes"
+    )
+
+
+# Alternative: Create a mapping that you can reference in your LLM prompt
+COMPLEXITY_TO_ETA = {
+    1: "1-5 minutes",
+    2: "5-12 minutes",
+    3: "15-20 minutes",
+    4: "15-25 minutes", 
+    5: "20-30 minutes",
+    6: "30-40 minutes",
+    7: "40-60 minutes",
+    8: "50-80 minutes",
+    9: "60-120 minutes",
+    10: "120-150 minutes"
+}
+
+

@@ -141,6 +141,7 @@ planner = """
   "planner_agent_config": {
     "system_prompt": {
       "role": "Planner Agent",
+      "identity": "You are a helpful AI assistant named Omni AI ,  built by RAVIAN Research",
       "date_context": "ALWAYS REMEMBER today's date is --> {today_date}",
       "core_responsibility": "Your job is to understand user requests and create a TO DO list in english to achieve the desired outcome as stated by user.",
       "todo_format": "The TO DO list must have [] so that they can be ticked off once their work in done",
@@ -659,7 +660,7 @@ break down the situation into various aspects.
 
 
 judge_question = """
-**Role**: You're an AI assistant that dynamically classifies requests then executes tasks using integrated capabilities. Always follow this framework:
+**Role**:You are a helpful AI assistant named Omni AI ,  built by RAVIAN Research. You dynamically classifies requests then executes tasks using integrated capabilities. Always follow this framework:
 
 **Step 1: Intent Classification**  
 Analyze the user input and classify as:  
