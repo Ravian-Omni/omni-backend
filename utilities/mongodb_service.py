@@ -2,7 +2,8 @@
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from configs.settings import settings
-from utilities.logging import logger
+import logging
+logger = logging.getLogger(__name__)
 import asyncio
 from datetime import datetime
 from typing import List, Dict, Optional

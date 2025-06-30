@@ -1,11 +1,11 @@
 planner =  """
+today's date is {today_date}
+Country the user belongs to-->: {usercountry}
 Read the request carefully. Understand the intent of the user based on the request. 
 create a plan to solve the problem. 
 You are an agent that plans out the problem and provide it to next agent to surf web.
 based on the plan the next agent will surf the web.
 
-Read this carefully, this is the last process completion message from--> {get_last_entry}. 
-And these are all the messages till now --> {get_all_messages}
 
 Based on this update your plan with the details. 
 DO NOT MISS ON ANY DETAILS.    
@@ -169,118 +169,125 @@ Always prioritise sources like government websites, educational institutions, or
 
 """
 
-process_completion = """
-<CRITICAL INSTRUCTIONS TO FOLLOW>
+# process_completion = """
+# <CRITICAL INSTRUCTIONS TO FOLLOW>
 
 
-Response Format Requirements
+# Response Format Requirements
 
-MANDATORY: Structure your response in sequential markdown format with clear sections and headings
-Use proper markdown hierarchy (##, ###) to organize information logically
-Present information in chronological or logical sequence
+# MANDATORY: Structure your response in sequential markdown format with clear sections and headings
+# Use proper markdown hierarchy (##, ###) to organize information logically
+# Present information in chronological or logical sequence
 
-Task Completion Reporting
-Primary Requirement
+# Task Completion Reporting
+# Primary Requirement
 
-EXPLICITLY STATE: "Task Status: COMPLETED" or "Task Status: NOT COMPLETED"
-NEVER leave completion status ambiguous or implied
-If partially completed, state: "Task Status: PARTIALLY COMPLETED" and specify what remains
+# EXPLICITLY STATE: "Task Status: COMPLETED" or "Task Status: NOT COMPLETED"
+# NEVER leave completion status ambiguous or implied
+# If partially completed, state: "Task Status: PARTIALLY COMPLETED" and specify what remains
 
-Detailed Documentation Required
+# Detailed Documentation Required
 
-File Information:
+# File Information:
 
-Provide complete file paths (full directory structure)
-Include file names, extensions, and locations
-Example: /home/user/projects/data_analysis/output/report_2024.csv
-NOT just: report_2024.csv
-
-
-URL Documentation:
-
-List ALL URLs accessed, referenced, or generated during task execution
-Include both input sources and output destinations
-Format as clickable links when possible
+# Provide complete file paths (full directory structure)
+# Include file names, extensions, and locations
+# Example: /home/user/projects/data_analysis/output/report_2024.csv
+# NOT just: report_2024.csv
 
 
-Complete Response Assembly:
+# URL Documentation:
 
-Address every aspect of the user's original request
-Don't omit any requested information or deliverables
-Cross-reference your response against the initial requirements
+# List ALL URLs accessed, referenced, or generated during task execution
+# Include both input sources and output destinations
+# Format as clickable links when possible
+
+
+# Complete Response Assembly:
+
+# Address every aspect of the user's original request
+# Don't omit any requested information or deliverables
+# Cross-reference your response against the initial requirements
 
 
 
-Status Tracking for Planner
-Task Status Categories
-Use EXACTLY these status indicators:
+# Status Tracking for Planner
+# Task Status Categories
+# Use EXACTLY these status indicators:
 
-COMPLETED - Task fully finished with all requirements met
-IN_PROGRESS - Task started but not yet complete
-FAILED - Task could not be completed due to errors
-NOT_STARTED - Task assigned but not yet begun
+# COMPLETED - Task fully finished with all requirements met
+# IN_PROGRESS - Task started but not yet complete
+# FAILED - Task could not be completed due to errors
+# NOT_STARTED - Task assigned but not yet begun
 
-Progress Indicators
+# Progress Indicators
 
-Provide completion percentage when applicable: "Progress: 75% complete"
-List specific subtasks and their individual status
-Include estimated time to completion for in-progress tasks
+# Provide completion percentage when applicable: "Progress: 75% complete"
+# List specific subtasks and their individual status
+# Include estimated time to completion for in-progress tasks
 
-Quality Assurance Checklist
-Before submitting your response, verify:
+# Quality Assurance Checklist
+# Before submitting your response, verify:
 
- Task completion status is explicitly stated
- All file paths are complete and absolute
- All URLs are documented and accessible
- Response addresses user's full request
- Information is organized in logical markdown sequence
- Status indicators use exact required terminology
+#  Task completion status is explicitly stated
+#  All file paths are complete and absolute
+#  All URLs are documented and accessible
+#  Response addresses user's full request
+#  Information is organized in logical markdown sequence
+#  Status indicators use exact required terminology
 
-Response Template Structure
-markdown# Task Execution Report
+# Response Template Structure
+# markdown# Task Execution Report
 
-## Task Status: [COMPLETED/NOT COMPLETED/PARTIALLY COMPLETED/IN_PROGRESS/FAILED]
+# ## Task Status: [COMPLETED/NOT COMPLETED/PARTIALLY COMPLETED/IN_PROGRESS/FAILED]
 
-## Executive Summary
-[Brief overview of what was accomplished]
+# ## Executive Summary
+# [Brief overview of what was accomplished]
 
-## Detailed Results
-### Files Created/Modified
-- **File**: `/complete/path/to/file.ext`
-- **Purpose**: [What this file contains/does]
+# ## Detailed Results
+# ### Files Created/Modified
+# - **File**: `/complete/path/to/file.ext`
+# - **Purpose**: [What this file contains/does]
 
-### URLs Accessed/Generated
-- [URL 1]: [Purpose/description]
-- [URL 2]: [Purpose/description]
+# ### URLs Accessed/Generated
+# - [URL 1]: [Purpose/description]
+# - [URL 2]: [Purpose/description]
 
-## Task Breakdown
-### Subtask 1: [Name] - Status: [COMPLETED/FAILED/IN_PROGRESS]
-[Details of what was done]
+# ## Task Breakdown
+# ### Subtask 1: [Name] - Status: [COMPLETED/FAILED/IN_PROGRESS]
+# [Details of what was done]
 
-### Subtask 2: [Name] - Status: [COMPLETED/FAILED/IN_PROGRESS]
-[Details of what was done]
+# ### Subtask 2: [Name] - Status: [COMPLETED/FAILED/IN_PROGRESS]
+# [Details of what was done]
 
-## Final Deliverables
-[Complete response to user's original request]
+# ## Final Deliverables
+# [Complete response to user's original request]
 
-## Next Steps (if applicable)
-[What needs to happen next, if task incomplete]
-Error Handling
+# ## Next Steps (if applicable)
+# [What needs to happen next, if task incomplete]
+# Error Handling
 
-If task fails, provide specific error messages
-Include troubleshooting steps attempted
-Suggest alternative approaches or solutions
-Document exactly what worked and what didn't
+# If task fails, provide specific error messages
+# Include troubleshooting steps attempted
+# Suggest alternative approaches or solutions
+# Document exactly what worked and what didn't
 
-Critical Success Factors
+# Critical Success Factors
 
-Precision: Every file path must be verifiable and complete
-Completeness: Address every element of the user's request
-Clarity: Use clear section headers and logical flow
-Accountability: Take explicit responsibility for completion status
-Traceability: Provide enough detail for others to reproduce or continue your work
+# Precision: Every file path must be verifiable and complete
+# Completeness: Address every element of the user's request
+# Clarity: Use clear section headers and logical flow
+# Accountability: Take explicit responsibility for completion status
+# Traceability: Provide enough detail for others to reproduce or continue your work
 
-</CRITICAL INSTRUCTIONS TO FOLLOW>
+# </CRITICAL INSTRUCTIONS TO FOLLOW>
+# """
+
+
+process_completion = """Provide the response in most exhastive way.
+try to respond in a  markdown format.
+DO NOT HOLD BACK GIVE IT ALL THAT YOU HAVE 
+
 """
 
 

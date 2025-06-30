@@ -5,7 +5,7 @@ from starlette.responses import RedirectResponse
 from routers import chat
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
-from utilities.logging import logger
+from utilities.logging import setup_fastapi_logging, cleanup_logging
 from contextlib import asynccontextmanager
 from dependencies import mongodb_service
 from configs.settings import settings
@@ -26,17 +26,41 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for the FastAPI application
     Handles startup and shutdown events
     """
-     # Startup: Connect to databases
-    logger.info("Connecting to MongoDB...")
-    await mongodb_service.connect()
-    logger.info("Connected to MongoDB")
+    # Startup: Setup logging first
+    logger = setup_fastapi_logging()
+    logger.info("🚀 Starting FastAPI application...")
+    
+    try:
+        # Startup: Connect to databases
+        logger.info("📊 Connecting to MongoDB...")
+        await mongodb_service.connect()
+        logger.info("✅ MongoDB connection established")
+        
+        # Add any other startup tasks here
+        logger.info("🎯 Application startup completed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start application: {e}")
+        raise
     
     yield  # App is running and handling requests here
     
-    # Shutdown: Close database connections
-    logger.info("Closing database connections...")
-    await mongodb_service.close()
-    logger.info("MongoDB connection closed")
+    # Shutdown: Close database connections and cleanup
+    logger.info("🛑 Shutting down FastAPI application...")
+    
+    try:
+        logger.info("📊 Closing MongoDB connections...")
+        await mongodb_service.close()
+        logger.info("✅ MongoDB connections closed")
+        
+        # Add any other cleanup tasks here
+        logger.info("🧹 Application shutdown completed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Error during shutdown: {e}")
+    finally:
+        # Cleanup logging resources
+        cleanup_logging()
 
 app = FastAPI(
     title="Autogen FastAPI Backend",

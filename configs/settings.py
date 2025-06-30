@@ -11,14 +11,17 @@ current_file_path = Path(__file__).resolve()
 class Settings:
     PROJECT_NAME = "OMNI"
     ROOT_DIR = os.path.dirname(current_file_path.parent)
-    USER_EMAIL = os.getenv("USER_EMAIL","omni@ravian.ai")
+    USER_EMAIL = os.getenv("email_username")
+    USER_EMAIL_PASSWORD = os.getenv("email_password")
     USER_FILES_PATH = os.getenv("USER_FILES_PATH","/mnt/data")
+    USER_NAME = os.getenv("user_name")
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_API_KEY_O3 = os.getenv("AZURE_OPENAI_API_KEY_O3")
     TOGETHER_DEEPSEEK_API_KEY = os.getenv("TOGETHER_DEEPSEEK_API_KEY")
+    WEB_API = os.getenv("web_api")
     
     # MongoDB settings
     MONGODB_URI = os.getenv("MONGODB_URI","localhost")

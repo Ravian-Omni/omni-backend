@@ -29,12 +29,38 @@ from configs.llm_configs_manager import LLMConfigManager
 import autogen
 import asyncio
 from typing import List, Optional,Dict,Any
-from utilities.logging import logger
+import logging
+logger = logging.getLogger(__name__)
 from utilities.storage import omni_storage, update_db
 from utilities.custom_manager import CustomGroupChatManager
 
 
+llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 
+file_path = None  # Replace with your data file path
+
+results_dir = os.path.join(settings.ROOT_DIR, "code")
+os.makedirs(results_dir, exist_ok=True)
+
+file_location = os.path.join(settings.ROOT_DIR, "code","output")#
+
+coding_language = "python"
+question = None
+
+
+class LoopDetector:
+        def __init__(self, window_size=3):
+            self.recent_messages = []
+            self.window_size = window_size
+
+        def update(self, message: str) -> bool:
+            if message in self.recent_messages:
+                return True
+            self.recent_messages.append(message)
+            if len(self.recent_messages) > self.window_size:
+                self.recent_messages.pop(0)
+            return False
+loop_detector = LoopDetector()
 
 class PythonDeveloper:
     def __init__(self, chat_id, call_id, capability_id, omni_memory):
@@ -92,10 +118,29 @@ class PythonDeveloper:
             llm_config=self.llm_config,
             system_message=prompts.process_completion
         )
+    
+    def get_stop_agent(self):
+        return autogen.ConversableAgent(
+            name="stop_agent",
+            llm_config=self.llm_config,
+            system_message="I am the fallback agent. My only task is to terminate the conversation."
+        )
+    
+    
+
+        
+    def is_termination_msg(msg: str) -> bool:
+        return "terminate" in msg.lower() or "exit" in msg.lower()
+    
         
     # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
         messages = groupchat.messages
+        last_msg = messages[-1]["content"] if messages else ""
+        
+        if loop_detector.update(last_msg):
+            return groupchat.agent_by_name("stop_agent")
+        
         if len(messages) <= 1 or last_speaker.name == "chat_manager":
             
             return groupchat.agent_by_name("planner_agent")
@@ -115,6 +160,8 @@ class PythonDeveloper:
                 return groupchat.agent_by_name("code_writer_agent")
         elif last_speaker.name == "code_debugger_agent":
             return groupchat.agent_by_name("code_writer_agent")
+        
+        # return groupchat.agent_by_name("stop_agent")
 
 
 
@@ -123,6 +170,7 @@ class PythonDeveloper:
         self.code_writer = self.get_code_writer()
         self.code_executor = self.get_code_executor()
         self.code_debugger = self.get_code_debugger()
+        self.stop_agent = self.get_stop_agent()
         self.problem_status_checker = self.problem_status_checker()
         self.process_completion = self.get_process_completion()
 
@@ -131,6 +179,7 @@ class PythonDeveloper:
             self.code_writer,
             self.code_executor,
             self.code_debugger,
+            self.stop_agent,
             self.problem_status_checker,
             self.process_completion
         ]

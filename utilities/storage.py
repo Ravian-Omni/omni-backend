@@ -5,7 +5,8 @@ from dependencies import get_mongodb_service
 from datetime import datetime
 from configs.settings import settings
 import asyncio
-from utilities.logging import logger
+import logging
+logger = logging.getLogger(__name__)
 
 async def update_db(chat_id, message, capability):
     mongodb = await get_mongodb_service()

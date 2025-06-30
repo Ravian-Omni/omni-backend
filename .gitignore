@@ -9,9 +9,11 @@ __pycache__/
 code
 browser
 images
+results
 gmail_token.json
 client_secret.json
 test.ipynb
+agent_history.gif
 
 # Distribution / packaging
 .Python
@@ -57,6 +59,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
 
 # Translations
 *.mo
@@ -188,3 +191,5 @@ results/*
 browser/*
 code/*
 images/*
+events/*
+logs/*

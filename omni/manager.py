@@ -28,9 +28,11 @@ from capabilities.email_manager.manager import EmailManager
 from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
-from utilities.logging import logger
+import logging
+logger = logging.getLogger(__name__)
 from utilities.storage import update_db
 import asyncio
+from string import Template
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
 from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
@@ -143,7 +145,7 @@ class Omni:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
-        self.llm_config = LLMConfigManager.get_config("deepseek")
+        # self.llm_config = LLMConfigManager.get_config("deepseek")
         self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_mini_planner["response_format"] = PlannerResponse
         self.llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -350,7 +352,7 @@ class Omni:
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=self.llm_config_mini_planner,
-            system_message=prompts.planner
+            system_message=Template(prompts.planner).substitute(today_date=today_date)
         )
 
     def get_get_request(self):
@@ -382,18 +384,17 @@ class Omni:
         return autogen.AssistantAgent(
             name="agent_caller",
             llm_config=self.llm_config,
-            description="""From the initial information route to the capability which will solve the user's question.""",
-            system_message=prompts.agent_caller,
+            #system_message=prompts.agent_caller,
         )
 
     def get_agent_executor(self):
         return autogen.UserProxyAgent(
             "agent_executor",
             human_input_mode="NEVER",
-            description="""This agent will execute the function which are group chat on their own""",
+            #description="""This agent will execute the function which are group chat on their own""",
             code_execution_config=False,
             system_message=prompts.agent_executor.format(today_date=today_date),
-            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+            #is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
         )
 
     def get_problem_status_checker(self):
@@ -408,6 +409,7 @@ class Omni:
         return CustomUserProxyAgent(
             name="manual_verification",
             llm_config=self.llm_config,
+            default_auto_reply="Awaiting for manual verification",
             human_input_mode="ALWAYS",
             code_execution_config=False,
             description="You will take input from user if needed for any manual intervention or verification ",
@@ -431,8 +433,6 @@ class Omni:
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
-        # file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
-        #arrival of the first message
         if len(messages) == 1:
         #judge a question and understand if the question is a task or  general conversation
                 return groupchat.agent_by_name("judge_question")

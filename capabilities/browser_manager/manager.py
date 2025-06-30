@@ -5,7 +5,10 @@ os.environ["ANONYMIZED_TELEMETRY"] = "false"
 # Add the project root directory to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, project_root)
-
+from typing import Annotated
+import httpx
+import asyncio
+import requests
 
 from configs.settings import settings
 from langchain_anthropic import ChatAnthropic
@@ -34,6 +37,19 @@ from utilities.custom_manager import CustomGroupChatManager
 from utilities.external_memory import get_last_entry, get_all_messages
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import QuestionClassification, webprocess_completion
+from datetime import datetime
+today_date = datetime.now()
+from .country_data import country_codes
+
+from tavily import TavilyClient
+web_api= settings.WEB_API
+import asyncio
+from tavily import AsyncTavilyClient
+tavily_client = AsyncTavilyClient(web_api)
+
+# web_api= settings.WEB_API
+# print(f"Using Tavily API key: {web_api}")
+# tavily = TavilyClient(api_key=web_api)
 
 
 load_dotenv()
@@ -51,7 +67,7 @@ class Post(BaseModel):
 
 class Posts(BaseModel):
     posts: List[Post]
-    content: str = "Final response"
+    exhaustive_result: str 
 
 
 # Global reference to browser manager instance
@@ -59,13 +75,73 @@ _browser_manager_instance = None
 browser_data_dir = str(Path.home() / "browser_use_data")
 os.makedirs(browser_data_dir, exist_ok=True)
 
+    
+async def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
+    """
+    Single query search - simplified version
+    """
+    try:
+        # For single query, no need for asyncio.gather
+        response = await tavily_client.search(query, search_depth="advanced")
+        
+        # Convert response to string format as per return annotation
+        if response and 'results' in response:
+            result_text = f"Query: {response.get('query', query)}\n"
+            result_text += f"Found {len(response['results'])} results:\n\n"
+            
+            for i, result in enumerate(response['results'][:5], 1):  # Limit to top 5
+                result_text += f"{i}. {result.get('title', 'No title')}\n"
+                result_text += f"   URL: {result.get('url', 'No URL')}\n"
+                result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
+            
+            return result_text
+        else:
+            return "No results found"
+            
+    except Exception as e:
+        error_msg = f"Search failed: {str(e)}"
+        print(error_msg)
+        return error_msg
+    
 
-async def browser_search_function(task: str) -> str:
+def get_country_name_from_ip(country_data):
+    try:
+        response = requests.get("https://ipinfo.io/json")
+        data = response.json()
+        country_code = data.get("country")
+
+        country = next(
+            (c for c in country_data if c["alpha_2"] == country_code or c["alpha_3"] == country_code),
+            None
+        )
+
+        return country["name"] if country else f"Unknown ({country_code})"
+
+    except Exception as e:
+        return f"Error: {e}"
+    
+usercountry = get_country_name_from_ip(country_codes)
+
+print(f"Country the user belongs to-->: {usercountry}")
+
+
+# async def browser_search_function(task: str) -> str:
+
+# async def browser_search_function(task: str, starting_url: str = None) -> str:
+
+#     """Standalone function wrapper for browser search functionality."""
+#     global _browser_manager_instance
+#     if _browser_manager_instance is None:
+#         raise RuntimeError("BrowserManager instance not initialized")
+#     return await _browser_manager_instance._browser_search_impl(task)
+
+
+async def browser_search_function(task_goal: str, starting_url: str = None) -> str:
     """Standalone function wrapper for browser search functionality."""
     global _browser_manager_instance
     if _browser_manager_instance is None:
         raise RuntimeError("BrowserManager instance not initialized")
-    return await _browser_manager_instance._browser_search_impl(task)
+    return await _browser_manager_instance._browser_search_impl(task_goal)
 
 
 class BrowserManager:
@@ -83,7 +159,7 @@ class BrowserManager:
         
         self.headless = headless
         self.use_chrome = use_chrome
-        self.window_size = window_size or {'width': 4, 'height': 4} #setup the window size
+        self.window_size = window_size or {'width': 10, 'height': 10} #setup the window size
         self.keep_alive = keep_alive
         self.results_dir = results_dir
         
@@ -98,10 +174,16 @@ class BrowserManager:
         self.llm_config_wc["response_format"] = webprocess_completion
         
         # Initialize vision LLM
-        self.vision_llm = ChatAnthropic(
-            model_name="claude-3-7-sonnet-20250219",
+        # self.vision_llm = ChatAnthropic(
+        #     model_name="claude-3-7-sonnet-20250219",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219
+        #     temperature=0.1,
+        #     api_key=settings.ANTHROPIC_API_KEY,
+        # )
+
+        self.vision_llm = ChatOpenAI(
+            model_name="gpt-4.1-2025-04-14",  #claude-sonnet-4-20250514 , claude-3-7-sonnet-20250219 , gpt-4.1-2025-04-14,  gpt-4.1-mini-2025-04-14
             temperature=0.1,
-            api_key=settings.ANTHROPIC_API_KEY,
+            api_key=settings.OPENAI_API_KEY,
         )
         
         # Initialize browser session
@@ -161,16 +243,93 @@ class BrowserManager:
 
     def _register_functions(self):
         """Register functions after agents are initialized."""
+        
         autogen.register_function(
             browser_search_function,  # Use the standalone function
             caller=self.browser_reader,
             executor=self.browser_searcher,
-            name="web_search_tool",
+            name="web_search_tool_chrome",
             description="""
-            This tool will be used to search on the web regarding any question that user has asked, and needs to search on the web.
-            TRY TO ADD AS MANY QUESTIONS AS YOU CAN TO COMBINE COMPLETE CONTEXT OF THE QUESTION.
-            """,
-        )
+            {
+  "name": "web_search_tool_chrome",
+  "description": "<description>Interactive web automation tool for complex browser-based tasks requiring visual parsing and multi-step interactions.</description>",
+  "core_capabilities": [
+    "<capability>Screenshot-based page analysis and element identification</capability>",
+    "<capability>Sequential action execution (click, type, navigate, scroll)</capability>",
+    "<capability>Form filling and authentication workflows</capability>",
+    "<capability>Dynamic content extraction from JavaScript-heavy sites</capability>",
+    "<capability>Multi-page navigation and data collection</capability>"
+  ],
+  "input_parameters": {
+    "task_goal": {
+      "type": "string",
+      "description": "<parameter_description>Detailed step-by-step instructions describing the complete workflow</parameter_description>",
+      "example": "<example>Navigate to LinkedIn, log in with provided credentials, go to notifications tab, and extract the 5 most recent connection requests with their profile information</example>"
+    },
+    "starting_url": {
+      "type": "string",
+      "description": "<parameter_description>Optional initial URL (defaults to Google search if omitted)</parameter_description>",
+      "required": false
+    }
+  },
+  "optimal_use_cases": [
+    "<use_case>Account-based operations (login required content)</use_case>",
+    "<use_case>E-commerce interactions (shopping, checkout processes)</use_case>",
+    "<use_case>Social media automation (posting, messaging, data extraction)</use_case>",
+    "<use_case>Form submissions and multi-step workflows</use_case>",
+    "<use_case>Visual content analysis (charts, images, layouts)</use_case>",
+    "<use_case>Sites with heavy JavaScript or dynamic loading</use_case>"
+  ],
+  "avoid_for": [
+    "<avoid_case>Simple factual queries answerable by search results</avoid_case>",
+    "<avoid_case>Static content that doesn't require interaction</avoid_case>",
+    "<avoid_case>Time-sensitive queries where speed is critical</avoid_case>"
+  ]
+}
+            """)
+
+        autogen.register_function(
+            search_tool,  # Use the standalone function
+            caller=self.browser_reader,
+            executor=self.browser_searcher,
+            name="web_search_tool_api",
+            description="""
+            {
+    "name": "web_search_tool_api",
+    "description": "<description>High-speed API-based search tool for rapid information retrieval and knowledge synthesis.</description>",
+    "core_capabilities": [
+      "<capability>Multi-source search aggregation (web, news, academic)</capability>",
+      "<capability>Real-time data retrieval and trending information</capability>",
+      "<capability>Structured data extraction (knowledge graphs, snippets)</capability>",
+      "<capability>Cross-reference validation from multiple sources</capability>",
+      "<capability>Intelligent query expansion and result filtering</capability>"
+    ],
+    "input_parameters": {
+      "query": {
+        "type": "string",
+        "description": "<parameter_description>Focused search terms optimized for information retrieval</parameter_description>",
+        "examples": [
+          "<example>Tesla Q4 2024 earnings report key metrics</example>",
+          "<example>Current mortgage rates USA December 2024</example>"
+        ]
+      }
+    },
+    "optimal_use_cases": [
+      "<use_case>Factual research and data gathering</use_case>",
+      "<use_case>Current events and breaking news monitoring</use_case>",
+      "<use_case>Market data and financial information</use_case>",
+      "<use_case>Academic and technical knowledge lookup</use_case>",
+      "<use_case>Comparative analysis across multiple sources</use_case>",
+      "<use_case>Trend identification and industry insights</use_case>"
+    ],
+    "avoid_for": [
+      "<avoid_case>Tasks requiring user account access</avoid_case>",
+      "<avoid_case>Interactive elements or form submissions</avoid_case>",
+      "<avoid_case>Visual content analysis or screenshot needs</avoid_case>",
+      "<avoid_case>Multi-step workflows or complex navigation</avoid_case>"
+    ]
+  }
+            """)
 
     async def _browser_search_impl(self, task: str) -> str:
         """Implementation of browser search functionality using new BrowserSession.
@@ -194,16 +353,11 @@ class BrowserManager:
         
         controller = Controller(output_model=Posts)
         
-        @controller.action("""Ask user for information or manual verification.
-        When to Communicate with User -
-        - When encountering environment issues like, couldn't click on some box,
-        - When encountering captcha or security
-        - When Asked for input on user's behalf, like login ID or password, filling out any form
-        - When critical information cannot be accessed through available resources
-        - When requesting permissions or keys from the user """)
-        def ask_human_local(question: str) -> str:
+        @controller.action("""Ask user for credentials,
+        - Ask user credentials login ID or password""")
+        def ask_human_local(question: str) -> ActionResult:
             answer = input(f'\n{question}\nInput: ')
-            return ActionResult(extracted_content=answer)
+            return ActionResult(extracted_content=answer, include_in_memory=True)
             
         import browser_use.utils
         original_config_dir = browser_use.utils.BROWSER_USE_CONFIG_DIR
@@ -214,12 +368,13 @@ class BrowserManager:
 
         agent = Agent(
             task=task,
+            browser=self._initialize_browser(),  # Use the legacy method for backward compatibility
             browser_session=browser_session,  # Use browser_session instead of browser
             max_failures=max_failures,
             retry_delay=retry_delay,
-            use_vision=True,
+            use_vision=False,
             generate_gif=True,
-            max_input_tokens=200000,
+            max_input_tokens=180000,
             validate_output=True,
             llm=self.vision_llm,
             save_conversation_path=self.results_dir,
@@ -289,9 +444,7 @@ class BrowserManager:
         return autogen.AssistantAgent(
             name="browser_planner",
             llm_config=self.llm_config,
-            system_message=prompts.planner.format(
-                get_last_entry=get_last_entry, get_all_messages=get_all_messages
-            ),
+            system_message=prompts.planner.format(today_date=today_date, usercountry=usercountry),
         )
 
     def browser_searcher(self):
