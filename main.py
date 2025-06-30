@@ -5,7 +5,7 @@ from starlette.responses import RedirectResponse
 from routers import chat
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
-from utilities.logging import setup_fastapi_logging, cleanup_logging
+from utilities.logging import setup_logging, cleanup_logging
 from contextlib import asynccontextmanager
 from dependencies import mongodb_service
 from configs.settings import settings
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events
     """
     # Startup: Setup logging first
-    logger = setup_fastapi_logging()
+    logger = setup_logging(log_file="app.log")
     logger.info("🚀 Starting FastAPI application...")
     
     try:

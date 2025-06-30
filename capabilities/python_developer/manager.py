@@ -29,8 +29,7 @@ from configs.llm_configs_manager import LLMConfigManager
 import autogen
 import asyncio
 from typing import List, Optional,Dict,Any
-import logging
-logger = logging.getLogger(__name__)
+from loguru import logger
 from utilities.storage import omni_storage, update_db
 from utilities.custom_manager import CustomGroupChatManager
 

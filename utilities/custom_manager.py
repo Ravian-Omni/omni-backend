@@ -2,8 +2,7 @@ import os
 import autogen
 import asyncio
 from typing import List, Optional,Dict,Any
-import logging
-logger = logging.getLogger(__name__)
+from loguru import logger
 from utilities.storage import omni_storage
 from utilities.storage import omni_storage
 from datetime import datetime,timezone

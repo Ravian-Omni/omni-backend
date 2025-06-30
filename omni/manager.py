@@ -28,8 +28,7 @@ from capabilities.email_manager.manager import EmailManager
 from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
-import logging
-logger = logging.getLogger(__name__)
+from loguru import logger
 from utilities.storage import update_db
 import asyncio
 from string import Template

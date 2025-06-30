@@ -49,8 +49,7 @@ from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
 from typing import Optional
 import asyncio
-import logging
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 #new imports
 import imaplib

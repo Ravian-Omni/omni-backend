@@ -75,6 +75,7 @@ langchain-ollama==0.3.3
 langchain-openai==0.3.21
 langchain-text-splitters==0.3.8
 langsmith==0.3.45
+loguru==0.7.3
 lxml==5.4.0
 markdown-it-py==3.0.0
 markdownify==1.1.0
