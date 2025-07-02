@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket JSON Client</title>
+    <style>
+        body { font-family: Arial; margin: 2rem; }
+        textarea, input, button { width: 100%; padding: 10px; margin: 10px 0; }
+        #messages { margin-top: 20px; padding: 10px; background: #f9f9f9; border: 1px solid #ccc; font-family: monospace; white-space: pre-wrap; }
+        .sent { color: blue; }
+        .received { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h2>WebSocket JSON Client</h2>
+    <label>Client UUID:</label>
+    <input id="clientId" value="550e8400-e29b-41d4-a716-446655440000" />
+    <button id="connectBtn">Connect</button>
+    <p id="status"></p>
+
+    <label>JSON Message:</label>
+    <textarea id="jsonInput">{ "hello": "world" }</textarea>
+    <button id="sendBtn">Send</button>
+
+    <div id="messages"></div>
+
+    <script>
+        let ws;
+
+        window.onload = function () {
+            const connectBtn = document.getElementById("connectBtn");
+            const sendBtn = document.getElementById("sendBtn");
+
+            connectBtn.addEventListener("click", () => {
+                const clientId = document.getElementById("clientId").value.trim();
+                if (!clientId) return alert("Enter a UUID!");
+
+                const url = `ws://${location.host}/ws/runs/${clientId}`;
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    document.getElementById("status").textContent = "Connected ✅";
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const json = JSON.parse(event.data);
+                        showMessage("Received:", json, "received");
+                    } catch {
+                        showMessage("Received (raw):", event.data, "error");
+                    }
+                };
+
+                ws.onclose = () => {
+                    document.getElementById("status").textContent = "Disconnected ❌";
+                };
+            });
+
+            sendBtn.addEventListener("click", () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert("WebSocket not connected.");
+                    return;
+                }
+
+                const raw = document.getElementById("jsonInput").value;
+                try {
+                    const parsed = JSON.parse(raw);
+                    const jsonText = JSON.stringify(parsed);
+                    ws.send(jsonText);
+                    showMessage("Sent:", parsed, "sent");
+                } catch {
+                    alert("Invalid JSON.");
+                }
+            });
+        };
+
+        function showMessage(label, data, className) {
+            const messages = document.getElementById("messages");
+            const div = document.createElement("div");
+            div.className = className;
+            div.textContent = label + "\\n" + JSON.stringify(data, null, 2);
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+    </script>
+</body>
+</html>
