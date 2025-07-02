@@ -6,11 +6,12 @@ from utilities.mongodb_service import MongoDBService
 import uuid
 import json
 from configs.settings import settings
-router = APIRouter(prefix="/chats", tags=["Chat Management"])
 from omni.manager import Omni
 from fastapi import HTTPException, Depends, status
 import datetime
 from pydantic import BaseModel
+
+router = APIRouter()
 
 class ChatRequest(BaseModel):
     chat_id: str
@@ -67,9 +68,9 @@ async def create_new_chat(request:Request, mongodb: MongoDBService = Depends(get
 async def chat_endpoint(request:Request, chat_request: ChatRequest, mongodb: MongoDBService = Depends(get_mongodb_service)):
     omni = Omni(chat_request.chat_id)
     history = await mongodb.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_request.chat_id})
-    messages = history.get("messages",[])
-    if messages:
-        last_agent, last_message = omni.manager.resume(messages=messages)
-        omni.memory.load_main_messages(messages)
+    # messages = history.get("messages",[])
+    # if messages:
+    #     last_agent, last_message = omni.manager.resume(messages=messages)
+    #     omni.memory.load_main_messages(messages)
     response = await omni.manager.a_initiate_chat(omni.manager,message=chat_request.message,clear_history=False)
     return omni.groupchat.messages[-1]

@@ -231,7 +231,7 @@ class AgentSelectionResponse(BaseModel):
 
 
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from enum import Enum
 
 
@@ -449,3 +449,17 @@ COMPLEXITY_TO_ETA = {
 }
 
 
+#Agent Caller Response format
+# Define the exact structure you want
+class FunctionCall(BaseModel):
+    name: str
+    arguments: str
+    
+    class Config:
+        extra = "forbid"
+
+class AgentCallerResponse(BaseModel):
+    function_calls: List[FunctionCall]
+    
+    class Config:
+        extra = "forbid"

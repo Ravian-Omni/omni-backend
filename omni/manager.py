@@ -34,7 +34,7 @@ import asyncio
 from string import Template
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
-from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse
+from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse, AgentCallerResponse
 from utilities.custom_manager import create_capability_chat
 import uuid
 from omni.memory import OmniMemory
@@ -55,13 +55,22 @@ llm_config_question_class["response_format"] = QuestionClassification
 
 llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
 
+llm_config_agent_caller = LLMConfigManager.get_config("gpt_4_1_mini")
+llm_config_agent_caller["response_format"] = AgentCallerResponse
+from managers.connection import WebSocketManager
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from dependencies import get_websocket_manager
 
 class OmniGroupChatManager(autogen.GroupChatManager):
     def __init__(self, groupchat, llm_config, memory: OmniMemory, human_input_mode: str = "NEVER", chat_id: str = None, queue: Optional[asyncio.Queue] = None):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
-        self.queue = queue
         self.chat_id = chat_id
         self.memory = memory
+        
+    async def send_websocket(self, message):
+        ws_manager = await get_websocket_manager()
+        await ws_manager.send_chat_message(session_id=self.chat_id, content=message, source="OMNI")
+        return
         
     def generate_reply(
         self,
@@ -109,13 +118,19 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content}
         self.memory.push_main_message(db_content)
+        asyncio.run(self.send_websocket(db_content))
         db_content["raw_message"] = message
-        asyncio.run(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
+        asyncio.create_task(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
             
             
 class CustomUserProxyAgent(UserProxyAgent):
-    def __init__(self, *args, input_queue: asyncio.Queue = None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
+    def set_input_function(self, input_function):
+        self.input_function = input_function
+        return self.input_function
+        
     
     def get_human_input(self, prompt: str) -> str:
         """Override the default input method to use websocket"""
@@ -132,9 +147,10 @@ class CustomUserProxyAgent(UserProxyAgent):
         
         # Safely call super, assuming you have registered an async input
         # result = await super().a_get_human_input(prompt)
+        return await self.input_function(prompt)
         
         # print(f"✅ Got input: {result}")
-        return await aioconsole.ainput(prompt)
+        # return await aioconsole.ainput(prompt)
     
 
 
@@ -173,7 +189,7 @@ class Omni:
     async def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
         call_id = self.get_last_call_id().get("image_generator")
         capability_id = str(uuid.uuid4())
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION, capability_id=capability_id))
+        await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION, capability_id=capability_id)
         image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id)
         response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
         messages = image_generator.groupchat.messages
@@ -188,7 +204,7 @@ class Omni:
     async def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
         call_id = self.get_last_call_id().get("web_browser")
         capability_id = str(uuid.uuid4())
-        result = asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION, capability_id=capability_id))
+        result = await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION, capability_id=capability_id)
         browser_manager = BrowserManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         # messages = self.memory.pull_recent_from_chat_manager()
         # if self.memory.get_last_capability():
@@ -210,7 +226,7 @@ class Omni:
     async def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
         call_id = self.get_last_call_id().get("python_coder")
         capability_id = str(uuid.uuid4())
-        asyncio.run(create_capability_chat(chat_id=self.chat_id, call_id=call_id, capability=settings.PYTHON_DEV_COLLECTION, capability_id=capability_id))
+        await create_capability_chat(chat_id=self.chat_id, call_id=call_id, capability=settings.PYTHON_DEV_COLLECTION, capability_id=capability_id)
         python_dev= PythonDeveloper(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         messages = self.memory.pull_recent_from_chat_manager()
         if self.memory.get_last_capability():
@@ -233,7 +249,7 @@ class Omni:
     async def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
         call_id = self.get_last_call_id().get("email_sender")
         capability_id = str(uuid.uuid4())
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION, capability_id=capability_id))
+        await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION, capability_id=capability_id)
         emailer = EmailManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         messages = self.memory.pull_recent_from_chat_manager()
         if self.memory.get_last_capability():
@@ -256,7 +272,7 @@ class Omni:
     async def get_file_finder(self, query: Annotated[str, "The search query"]):
         call_id = self.get_last_call_id().get("file_finder")
         capability_id = str(uuid.uuid4())
-        asyncio.run(create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION, capability_id=capability_id))
+        await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION, capability_id=capability_id)
         file_finder = FileFinder(chat_id=self.chat_id,call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         # messages = self.memory.pull_recent_from_chat_manager()
         # if self.memory.get_last_capability():
@@ -382,8 +398,8 @@ class Omni:
     def get_agent_caller(self):
         return autogen.AssistantAgent(
             name="agent_caller",
-            llm_config=self.llm_config,
-            #system_message=prompts.agent_caller,
+            llm_config=llm_config_agent_caller,
+            system_message=prompts.agent_caller,
         )
 
     def get_agent_executor(self):

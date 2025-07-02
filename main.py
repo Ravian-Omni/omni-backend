@@ -7,9 +7,16 @@ from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
 from utilities.logging import setup_logging, cleanup_logging
 from contextlib import asynccontextmanager
-from dependencies import mongodb_service
+from dependencies import mongodb_service, init_managers
 from configs.settings import settings
 from fastapi.openapi.utils import get_openapi
+import os
+from initialization import AppInitializer
+import nest_asyncio
+from routers import ws
+# Initialize application
+app_file_path = os.path.dirname(os.path.abspath(__file__))
+initializer = AppInitializer(settings, app_file_path)
 
 load_dotenv()
 
@@ -26,6 +33,9 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for the FastAPI application
     Handles startup and shutdown events
     """
+    
+    nest_asyncio.apply()  # 🧠 Patch the loop here
+    
     # Startup: Setup logging first
     logger = setup_logging(log_file="app.log")
     logger.info("🚀 Starting FastAPI application...")
@@ -36,6 +46,9 @@ async def lifespan(app: FastAPI):
         await mongodb_service.connect()
         logger.info("✅ MongoDB connection established")
         
+        logger.info("📊 Websocket Manager...")
+        await init_managers()
+        logger.info("✅ Websocket Manager established")
         # Add any other startup tasks here
         logger.info("🎯 Application startup completed successfully")
         
@@ -73,16 +86,26 @@ app = FastAPI(
 
 
 # app.include_router(apis.router)
-app.include_router(chat.router)
+app.include_router(
+    chat.router,
+    prefix="/chats", 
+    tags=["Chat Management"]
+    )
+app.include_router(
+    ws.router,
+    prefix="/ws",
+    tags=["websocket"],
+    responses={404: {"description": "Not found"}},
+)
 
 
 
-@app.get("/")
-async def root():
-    """
-    Root endpoint
-    """
-    return {"message": f"Welcome to {settings.PROJECT_NAME}"}
+# @app.get("/")
+# async def root():
+#     """
+#     Root endpoint
+#     """
+#     return {"message": f"Welcome to {settings.PROJECT_NAME}"}
 
 @app.get(path=base, include_in_schema=False)
 async def docs_redirect():
@@ -116,3 +139,16 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
+#WEBSOCKET Swagger Docs
+
+
+from fastapi.responses import HTMLResponse
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_html():
+    html_content = Path("templates/index.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html_content)

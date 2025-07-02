@@ -7,6 +7,7 @@ from utilities.storage import omni_storage
 from utilities.storage import omni_storage
 from datetime import datetime,timezone
 from dependencies import get_mongodb_service
+from dependencies import get_websocket_manager
 
 async def create_capability_chat(chat_id,call_id,capability, capability_id):
     mongodb = await get_mongodb_service()
@@ -56,6 +57,11 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         self.call_id = call_id
         self.capability_id = capability_id
         self.omni_memory = omni_memory
+        
+    async def send_websocket(self, message):
+        ws_manager = await get_websocket_manager()
+        await ws_manager.send_chat_message(session_id=self.chat_id, content=message, source=self.capability)
+        return
     
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         logger.info(f"Received from {sender.name}: {message}")
@@ -63,5 +69,6 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content}
         self.omni_memory.push_capability_message(db_content,self.capability,self.capability_id)
+        asyncio.run(self.send_websocket(db_content))
         db_content["raw_message"] = message
-        asyncio.run(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability, capability_id=self.capability_id))
+        asyncio.create_task(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability, capability_id=self.capability_id))
