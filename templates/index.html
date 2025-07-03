@@ -7,8 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
-    <script src="/static/websocket-utils.js"></script>
-
+    <!-- <script src="/static/websocket-utils.js"></script> -->
 </head>
 <body data-theme="light">
     <!-- Toast Container -->
@@ -46,6 +45,17 @@
                     </div>
                 </div>
                 <div class="shortcut-group">
+                    <h4>Panels</h4>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>B</kbd>
+                        <span>Toggle left panel</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>M</kbd>
+                        <span>Toggle right panel</span>
+                    </div>
+                </div>
+                <div class="shortcut-group">
                     <h4>Advanced</h4>
                     <div class="shortcut-item">
                         <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd>
@@ -59,6 +69,117 @@
                         <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>E</kbd>
                         <span>Advanced export</span>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Search Modal -->
+    <div id="advancedSearchModal" class="modal-overlay search-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔍 Advanced Search</h3>
+                <button class="modal-close" onclick="hideAdvancedSearch()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="search-form-group">
+                    <label for="advancedSearchTerm">Search Term:</label>
+                    <input type="text" id="advancedSearchTerm" placeholder="Enter search term..." />
+                </div>
+                
+                <div class="search-form-group">
+                    <label for="advancedSearchType">Message Type:</label>
+                    <select id="advancedSearchType">
+                        <option value="all">All messages</option>
+                        <option value="sent">Sent only</option>
+                        <option value="received">Received only</option>
+                        <option value="system">System only</option>
+                        <option value="error">Errors only</option>
+                    </select>
+                </div>
+                
+                <div class="search-form-group">
+                    <label for="advancedSearchSource">Source:</label>
+                    <select id="advancedSearchSource">
+                        <option value="all">All sources</option>
+                        <option value="user">User</option>
+                        <option value="OMNI">OMNI</option>
+                        <option value="email_manager">Email Manager</option>
+                        <option value="browser_manager">Browser Manager</option>
+                        <option value="python_developer">Python Developer</option>
+                        <option value="file_finder">File Finder</option>
+                        <option value="image_generator">Image Generator</option>
+                    </select>
+                </div>
+                
+                <div class="search-form-group">
+                    <label>Date Range:</label>
+                    <div class="date-range">
+                        <input type="datetime-local" id="searchStartDate" />
+                        <input type="datetime-local" id="searchEndDate" />
+                    </div>
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="performAdvancedSearch()" class="primary-btn">Search</button>
+                    <button onclick="clearAdvancedSearch()" class="secondary-btn">Clear</button>
+                    <button onclick="hideAdvancedSearch()" class="secondary-btn">Cancel</button>
+                </div>
+                
+                <div id="advancedSearchResults" class="search-results" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📁 Export Chat History</h3>
+                <button class="modal-close" onclick="hideExportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="search-form-group">
+                    <label>Choose Export Format:</label>
+                    <div class="export-options">
+                        <div class="export-format-card" data-format="json" onclick="selectExportFormat('json')">
+                            <div class="export-format-icon">📄</div>
+                            <strong>JSON</strong>
+                            <p>Structured data format</p>
+                        </div>
+                        <div class="export-format-card" data-format="csv" onclick="selectExportFormat('csv')">
+                            <div class="export-format-icon">📊</div>
+                            <strong>CSV</strong>
+                            <p>Spreadsheet compatible</p>
+                        </div>
+                        <div class="export-format-card" data-format="txt" onclick="selectExportFormat('txt')">
+                            <div class="export-format-icon">📝</div>
+                            <strong>Text</strong>
+                            <p>Plain text format</p>
+                        </div>
+                        <div class="export-format-card" data-format="html" onclick="selectExportFormat('html')">
+                            <div class="export-format-icon">🌐</div>
+                            <strong>HTML</strong>
+                            <p>Web page format</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="search-form-group">
+                    <label>
+                        <input type="checkbox" id="exportApplyFilters"> Apply current search filters
+                    </label>
+                </div>
+                
+                <div class="search-form-group">
+                    <label>
+                        <input type="checkbox" id="exportIncludeStats"> Include statistics
+                    </label>
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="performExport()" class="primary-btn" id="exportButton" disabled>Export</button>
+                    <button onclick="hideExportModal()" class="secondary-btn">Cancel</button>
                 </div>
             </div>
         </div>
@@ -93,8 +214,8 @@
             <div class="left-panel" id="leftPanel">
                 <div class="panel-header">
                     <h3>Controls</h3>
-                    <button class="collapse-btn" onclick="togglePanel('left')" title="Toggle panel">
-                        <span>◀</span>
+                    <button class="collapse-btn" id="leftCollapseBtn" onclick="togglePanel('left')" title="Toggle panel">
+                        <span id="leftCollapseIcon">◀</span>
                     </button>
                 </div>
                 
@@ -228,8 +349,8 @@
                     <div class="panel-controls">
                         <button id="autoScrollBtn" class="icon-btn auto-scroll-enabled" title="Auto-scroll">📄</button>
                         <button id="clearBtn" class="icon-btn">🗑️</button>
-                        <button class="collapse-btn" onclick="togglePanel('right')" title="Toggle panel">
-                            <span>▶</span>
+                        <button class="collapse-btn" id="rightCollapseBtn" onclick="togglePanel('right')" title="Toggle panel">
+                            <span id="rightCollapseIcon">▶</span>
                         </button>
                     </div>
                 </div>
@@ -299,15 +420,23 @@
         let currentTheme = localStorage.getItem('theme') || 'light';
         let currentFontSize = localStorage.getItem('fontSize') || 'medium';
 
+        // Panel state management
+        let leftPanelCollapsed = localStorage.getItem('leftPanelCollapsed') === 'true';
+        let rightPanelCollapsed = localStorage.getItem('rightPanelCollapsed') === 'true';
+        let leftPanelWidth = parseInt(localStorage.getItem('leftPanelWidth')) || 400;
+
+        // Current search and export state
+        let currentSearchResults = [];
+        let selectedExportFormat = null;
+
         // Initialize enhanced client
         function initializeEnhancedClient() {
-            // Initialize utilities if available
             if (window.WebSocketUtils) {
-                wsManager = new WebSocketUtils.WebSocketManager();
+                // Initialize with real enhanced utilities
                 messageStore = new WebSocketUtils.MessageStore(5000);
                 performanceMonitor = new WebSocketUtils.PerformanceMonitor();
                 
-                setupAdvancedEventListeners();
+                // Setup performance monitoring
                 setupPerformanceMonitoring();
                 
                 // Setup virtual scrolling for better performance
@@ -316,19 +445,16 @@
                 
                 // Override the renderItem method for custom message rendering
                 virtualScroll.renderItem = function(message, index) {
-                    const div = document.createElement('div');
-                    div.className = getMessageClass(message);
-                    div.innerHTML = formatMessageContent(message);
-                    return div;
+                    return createMessageElement(message);
                 };
                 
                 // Setup touch gestures for mobile
                 touchHandler = new WebSocketUtils.TouchGestureHandler(document.body);
                 setupTouchGestureHandlers();
                 
-                console.log('✅ Enhanced WebSocket Client initialized with advanced features');
+                console.log('✅ Enhanced WebSocket Client initialized with all advanced features');
             } else {
-                console.warn('⚠️ Advanced utilities not loaded, using basic functionality');
+                console.warn('⚠️ WebSocketUtils not loaded, using basic functionality');
             }
         }
 
@@ -336,7 +462,7 @@
         function setupAdvancedEventListeners() {
             if (!wsManager) return;
             
-            // WebSocket Manager events
+            // Connection events
             wsManager.on('connected', (data) => {
                 updateConnectionQuality(data);
                 showToast(`Connected! Latency: ${data.latency}ms`, 'success');
@@ -356,10 +482,20 @@
                 updateConnectionQuality(data);
             });
             
+            // Message events
             wsManager.on('message', (event) => {
-                handleIncomingMessage(event);
+                handleEnhancedIncomingMessage(event);
             });
             
+            wsManager.on('messageQueued', (message) => {
+                showToast('Message queued (offline)', 'warning');
+            });
+            
+            wsManager.on('messageSent', (message) => {
+                console.log('Message sent:', message.id);
+            });
+            
+            // Network events
             wsManager.on('online', () => {
                 showToast('Internet connection restored', 'success');
                 updateOfflineIndicator(false);
@@ -368,6 +504,11 @@
             wsManager.on('offline', () => {
                 showToast('No internet connection', 'error');
                 updateOfflineIndicator(true);
+            });
+            
+            // Ping events
+            wsManager.on('ping', (data) => {
+                updateConnectionQuality(data);
             });
         }
 
@@ -384,8 +525,9 @@
                     console.warn('Memory usage increasing', report);
                     // Consider cleaning up old messages
                     if (messageStore && messageStore.messages.length > 1000) {
+                        const oldLength = messageStore.messages.length;
                         messageStore.messages = messageStore.messages.slice(0, 500);
-                        showToast('Cleaned up old messages to free memory', 'info');
+                        showToast(`Cleaned up ${oldLength - 500} old messages to free memory`, 'info');
                     }
                 }
             }, 60000);
@@ -430,7 +572,7 @@
         }
 
         // Enhanced message handling
-        function handleIncomingMessage(event) {
+        function handleEnhancedIncomingMessage(event) {
             const startTime = performance.now();
             
             try {
@@ -449,6 +591,8 @@
                 
                 // Update UI
                 showMessage("", data, "received");
+                receivedCount++;
+                updateStats();
                 
                 // Record performance
                 if (performanceMonitor) {
@@ -464,6 +608,8 @@
                 
             } catch (error) {
                 console.error('Error processing message:', error);
+                errorCount++;
+                updateStats();
                 showToast('Error processing incoming message', 'error');
             }
         }
@@ -523,13 +669,13 @@
                     position: fixed;
                     top: 80px;
                     right: 20px;
-                    background: var(--error-color);
+                    background: var(--error-color, #dc3545);
                     color: white;
                     padding: 8px 16px;
                     border-radius: 20px;
                     font-size: 12px;
                     z-index: 9999;
-                    box-shadow: var(--shadow-medium);
+                    box-shadow: var(--shadow-medium, 0 4px 6px rgba(0,0,0,0.1));
                 `;
                 document.body.appendChild(indicator);
             } else if (!isOffline && indicator) {
@@ -552,8 +698,13 @@
                 return;
             }
 
-            if (wsManager) {
-                // Use enhanced WebSocket manager
+            if (window.WebSocketUtils) {
+                // Use the real enhanced WebSocket manager
+                wsManager = new WebSocketUtils.WebSocketManager();
+                
+                // Setup all the advanced event listeners
+                setupAdvancedEventListeners();
+                
                 const url = `ws://${location.host}/ws/runs/${clientId}`;
                 
                 updateStatus("connecting", "🔄", "Connecting...");
@@ -590,10 +741,10 @@
                 const jsonText = JSON.stringify(parsed);
                 
                 if (wsManager) {
-                    // Use enhanced WebSocket manager
+                    // Use enhanced WebSocket manager with queuing
                     const messageId = wsManager.send(jsonText);
                     
-                    // Store sent message
+                    // Store sent message with enhanced features
                     if (messageStore) {
                         messageStore.addMessage({
                             content: parsed,
@@ -607,8 +758,9 @@
                     
                     sentCount++;
                     updateStats();
-                    showMessage("", { type: "message", data: { source: "user", content: { type: "manual", task: JSON.stringify(parsed) }, timestamp: new Date().toISOString() } }, "sent");
+                    showMessage("User", parsed, "user-message");
                     
+                    // Update virtual scroll if available
                     if (virtualScroll && messageStore) {
                         updateVirtualScrollData();
                     }
@@ -623,39 +775,353 @@
             }
         }
 
-        // Performance report
-        function showPerformanceReport() {
+        // ENHANCED SEARCH FUNCTIONALITY
+
+        // Basic search (for real-time filtering)
+        function performBasicSearch() {
+            const searchTerm = document.getElementById('searchInput')?.value || '';
+            const filterType = document.getElementById('filterType')?.value || 'all';
+            
+            if (messageStore) {
+                const results = messageStore.filter({
+                    searchTerm: searchTerm,
+                    type: filterType
+                });
+                
+                displayFilteredMessages(results);
+                
+                if (searchTerm) {
+                    showToast(`Found ${results.length} messages`, 'info', 2000);
+                }
+            } else {
+                // Fallback to basic filtering
+                filterMessages();
+            }
+        }
+
+        // Advanced search functionality
+        function showAdvancedSearch() {
+            document.getElementById('advancedSearchModal').style.display = 'flex';
+        }
+
+        function hideAdvancedSearch() {
+            document.getElementById('advancedSearchModal').style.display = 'none';
+        }
+
+        function performAdvancedSearch() {
+            if (!messageStore) {
+                showToast('Advanced search requires enhanced features', 'warning');
+                return;
+            }
+
+            const searchTerm = document.getElementById('advancedSearchTerm').value;
+            const searchType = document.getElementById('advancedSearchType').value;
+            const searchSource = document.getElementById('advancedSearchSource').value;
+            const startDate = document.getElementById('searchStartDate').value;
+            const endDate = document.getElementById('searchEndDate').value;
+
+            // Build filter object
+            const filters = {
+                searchTerm: searchTerm,
+                type: searchType,
+                source: searchSource === 'all' ? 'all' : searchSource
+            };
+
+            // Add date range if specified
+            if (startDate && endDate) {
+                filters.dateRange = {
+                    start: new Date(startDate),
+                    end: new Date(endDate)
+                };
+            }
+
+            // Perform search
+            const results = messageStore.filter(filters);
+            currentSearchResults = results;
+
+            // Display results in modal
+            displayAdvancedSearchResults(results);
+            
+            // Also update main display
+            displayFilteredMessages(results);
+            
+            showToast(`Advanced search found ${results.length} messages`, 'success');
+        }
+
+        function displayAdvancedSearchResults(results) {
+            const resultsContainer = document.getElementById('advancedSearchResults');
+            resultsContainer.innerHTML = '';
+            
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<p>No messages found matching your criteria.</p>';
+                resultsContainer.style.display = 'block';
+                return;
+            }
+
+            resultsContainer.style.display = 'block';
+            
+            results.slice(0, 50).forEach((message, index) => { // Limit to first 50 results
+                const resultItem = document.createElement('div');
+                resultItem.className = 'search-result-item';
+                resultItem.onclick = () => scrollToMessage(message);
+                
+                const timestamp = new Date(message.timestamp).toLocaleString();
+                const source = message.source || 'Unknown';
+                const content = getMessagePreview(message.content);
+                
+                resultItem.innerHTML = `
+                    <div class="search-result-header">${source} - ${timestamp}</div>
+                    <div class="search-result-content">${content}</div>
+                `;
+                
+                resultsContainer.appendChild(resultItem);
+            });
+
+            if (results.length > 50) {
+                const moreInfo = document.createElement('div');
+                moreInfo.className = 'search-result-item';
+                moreInfo.style.fontStyle = 'italic';
+                moreInfo.innerHTML = `... and ${results.length - 50} more results`;
+                resultsContainer.appendChild(moreInfo);
+            }
+        }
+
+        function getMessagePreview(content) {
+            if (typeof content === 'string') {
+                return content.length > 100 ? content.substring(0, 100) + '...' : content;
+            } else if (typeof content === 'object') {
+                const str = JSON.stringify(content);
+                return str.length > 100 ? str.substring(0, 100) + '...' : str;
+            }
+            return 'N/A';
+        }
+
+        function scrollToMessage(message) {
+            hideAdvancedSearch();
+            
+            // Find the message element and scroll to it
+            const messageElements = document.querySelectorAll('#messages .message');
+            messageElements.forEach(element => {
+                element.classList.remove('highlighted');
+                if (element.dataset.messageId === message.id) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('highlighted');
+                    setTimeout(() => element.classList.remove('highlighted'), 3000);
+                }
+            });
+        }
+
+        function clearAdvancedSearch() {
+            document.getElementById('advancedSearchTerm').value = '';
+            document.getElementById('advancedSearchType').value = 'all';
+            document.getElementById('advancedSearchSource').value = 'all';
+            document.getElementById('searchStartDate').value = '';
+            document.getElementById('searchEndDate').value = '';
+            document.getElementById('advancedSearchResults').style.display = 'none';
+            
+            // Reset main display
+            if (messageStore) {
+                const allMessages = messageStore.filter({ searchTerm: '', type: 'all' });
+                displayFilteredMessages(allMessages);
+            }
+        }
+
+        // ENHANCED EXPORT FUNCTIONALITY
+
+        function showExportModal() {
+            document.getElementById('exportModal').style.display = 'flex';
+        }
+
+        function hideExportModal() {
+            document.getElementById('exportModal').style.display = 'none';
+            selectedExportFormat = null;
+            // Reset format selection
+            document.querySelectorAll('.export-format-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.getElementById('exportButton').disabled = true;
+        }
+
+        function selectExportFormat(format) {
+            selectedExportFormat = format;
+            
+            // Update UI
+            document.querySelectorAll('.export-format-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.querySelector(`[data-format="${format}"]`).classList.add('selected');
+            document.getElementById('exportButton').disabled = false;
+        }
+
+        function performExport() {
+            if (!selectedExportFormat) {
+                showToast('Please select an export format', 'warning');
+                return;
+            }
+
+            if (!messageStore) {
+                // Fallback to basic export
+                exportChatHistory();
+                hideExportModal();
+                return;
+            }
+
+            const applyFilters = document.getElementById('exportApplyFilters').checked;
+            const includeStats = document.getElementById('exportIncludeStats').checked;
+            
+            // Get current filter settings if applying filters
+            let filters = null;
+            if (applyFilters) {
+                filters = {
+                    searchTerm: document.getElementById('searchInput')?.value || '',
+                    type: document.getElementById('filterType')?.value || 'all'
+                };
+            }
+            
+            // Get messages to export
+            const messages = filters ? messageStore.filter(filters) : messageStore.filter();
+            
+            // Generate export content
+            let content = messageStore.exportMessages(selectedExportFormat, filters);
+            
+            // Add statistics if requested
+            if (includeStats && selectedExportFormat !== 'csv') {
+                const stats = messageStore.getStats();
+                const statsText = generateStatsText(stats);
+                
+                if (selectedExportFormat === 'html') {
+                    content = content.replace('</body>', `
+                        <div style="margin-top: 40px; border-top: 2px solid #ccc; padding-top: 20px;">
+                            <h2>Statistics</h2>
+                            <pre>${statsText}</pre>
+                        </div>
+                        </body>
+                    `);
+                } else if (selectedExportFormat === 'json') {
+                    const parsed = JSON.parse(content);
+                    parsed.statistics = stats;
+                    content = JSON.stringify(parsed, null, 2);
+                } else if (selectedExportFormat === 'txt') {
+                    content += '\n\n' + '='.repeat(50) + '\nSTATISTICS\n' + '='.repeat(50) + '\n' + statsText;
+                }
+            }
+            
+            // Download file
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `chat_history_${timestamp}.${selectedExportFormat}`;
+            downloadFile(content, filename, getContentType(selectedExportFormat));
+            
+            showToast(`Chat history exported as ${selectedExportFormat.toUpperCase()}`, 'success');
+            hideExportModal();
+        }
+
+        function generateStatsText(stats) {
+            let text = `Total Messages: ${stats.total}\n\n`;
+            
+            text += 'Messages by Type:\n';
+            Object.entries(stats.byType).forEach(([type, count]) => {
+                text += `  ${type}: ${count}\n`;
+            });
+            
+            text += '\nMessages by Source:\n';
+            Object.entries(stats.bySource).forEach(([source, count]) => {
+                text += `  ${source}: ${count}\n`;
+            });
+            
+            if (stats.dateRange) {
+                text += `\nDate Range:\n`;
+                text += `  Oldest: ${new Date(stats.dateRange.oldest).toLocaleString()}\n`;
+                text += `  Newest: ${new Date(stats.dateRange.newest).toLocaleString()}\n`;
+            }
+            
+            return text;
+        }
+
+        function getContentType(format) {
+            const types = {
+                json: 'application/json',
+                csv: 'text/csv',
+                txt: 'text/plain',
+                html: 'text/html'
+            };
+            return types[format] || 'text/plain';
+        }
+
+        // Enhanced performance report
+        function showEnhancedPerformanceReport() {
             if (!performanceMonitor) {
                 showToast('Performance monitoring not available', 'warning');
                 return;
             }
             
             const report = performanceMonitor.getReport();
+            const stats = messageStore ? messageStore.getStats() : null;
+            const wsStatus = wsManager ? wsManager.getStatus() : null;
+            
             const modal = document.createElement('div');
-            modal.className = 'modal-overlay';
+            modal.className = 'modal-overlay large-modal';
             modal.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>📊 Performance Report</h3>
+                        <h3>📊 Enhanced Performance Report</h3>
                         <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <div class="performance-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                        <div class="performance-grid">
                             <div class="stat-group">
-                                <h4>Connection</h4>
-                                <p>Uptime: ${formatDuration(report.uptime)}</p>
-                                <p>Reconnections: ${report.reconnections}</p>
+                                <h4>🔗 Connection</h4>
+                                <p><strong>Uptime:</strong> ${formatDuration(report.uptime)}</p>
+                                <p><strong>Reconnections:</strong> ${report.reconnections}</p>
+                                <p><strong>Quality:</strong> ${wsStatus ? wsStatus.connectionQuality : 'Unknown'}</p>
+                                <p><strong>Latency:</strong> ${wsStatus ? wsStatus.latency : 0}ms</p>
+                                <p><strong>State:</strong> ${wsStatus ? getReadyStateText(wsStatus.readyState) : 'Unknown'}</p>
+                                <p><strong>Online:</strong> ${wsStatus ? (wsStatus.isOnline ? 'Yes' : 'No') : 'Unknown'}</p>
                             </div>
+                            
                             <div class="stat-group">
-                                <h4>Messages</h4>
-                                <p>Total: ${report.messageCount}</p>
-                                <p>Rate: ${report.messagesPerMinute.toFixed(2)}/min</p>
+                                <h4>💬 Messages</h4>
+                                <p><strong>Total:</strong> ${report.messageCount}</p>
+                                <p><strong>Rate:</strong> ${report.messagesPerMinute.toFixed(2)}/min</p>
+                                <p><strong>Queued:</strong> ${wsStatus ? wsStatus.queuedMessages : 0}</p>
+                                <p><strong>Sent:</strong> ${sentCount}</p>
+                                <p><strong>Received:</strong> ${receivedCount}</p>
+                                <p><strong>Errors:</strong> ${errorCount}</p>
                             </div>
+                            
                             <div class="stat-group">
-                                <h4>Performance</h4>
-                                <p>Avg Render: ${report.averageRenderTime.toFixed(2)}ms</p>
-                                <p>Memory Trend: ${report.memoryTrend}</p>
+                                <h4>⚡ Performance</h4>
+                                <p><strong>Avg Render:</strong> ${report.averageRenderTime.toFixed(2)}ms</p>
+                                <p><strong>Memory Trend:</strong> ${report.memoryTrend}</p>
+                                ${report.currentMemory ? `
+                                <p><strong>Memory Used:</strong> ${(report.currentMemory.used / 1024 / 1024).toFixed(2)} MB</p>
+                                <p><strong>Memory Total:</strong> ${(report.currentMemory.total / 1024 / 1024).toFixed(2)} MB</p>
+                                <p><strong>Memory Limit:</strong> ${(report.currentMemory.limit / 1024 / 1024).toFixed(2)} MB</p>
+                                ` : '<p><strong>Memory:</strong> Not available</p>'}
                             </div>
+                            
+                            ${stats ? `
+                            <div class="stat-group">
+                                <h4>📈 Message Store</h4>
+                                <p><strong>Stored:</strong> ${stats.total}</p>
+                                <p><strong>By Type:</strong></p>
+                                <ul>
+                                    ${Object.entries(stats.byType).map(([type, count]) => `<li>${type}: ${count}</li>`).join('')}
+                                </ul>
+                                <p><strong>By Source:</strong></p>
+                                <ul>
+                                    ${Object.entries(stats.bySource).map(([source, count]) => `<li>${source}: ${count}</li>`).join('')}
+                                </ul>
+                                ${stats.dateRange ? `
+                                <p><strong>Date Range:</strong></p>
+                                <p style="font-size: 0.8em;">From: ${new Date(stats.dateRange.oldest).toLocaleString()}</p>
+                                <p style="font-size: 0.8em;">To: ${new Date(stats.dateRange.newest).toLocaleString()}</p>
+                                ` : ''}
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div style="margin-top: 20px; text-align: center;">
+                            <button onclick="downloadPerformanceReport()" class="secondary-btn">Download Report</button>
                         </div>
                     </div>
                 </div>
@@ -663,6 +1129,112 @@
             document.body.appendChild(modal);
         }
 
+        function getReadyStateText(readyState) {
+            const states = {
+                0: 'CONNECTING',
+                1: 'OPEN',
+                2: 'CLOSING',
+                3: 'CLOSED'
+            };
+            return states[readyState] || 'UNKNOWN';
+        }
+
+        function downloadPerformanceReport() {
+            const report = performanceMonitor.getReport();
+            const stats = messageStore ? messageStore.getStats() : null;
+            const wsStatus = wsManager ? wsManager.getStatus() : null;
+            
+            const reportData = {
+                timestamp: new Date().toISOString(),
+                performance: report,
+                websocket: wsStatus,
+                messageStore: stats,
+                counters: {
+                    sent: sentCount,
+                    received: receivedCount,
+                    errors: errorCount
+                }
+            };
+            
+            const content = JSON.stringify(reportData, null, 2);
+            const filename = `performance_report_${new Date().toISOString().split('T')[0]}.json`;
+            downloadFile(content, filename, 'application/json');
+            
+            showToast('Performance report downloaded', 'success');
+        }
+
+        // Message display functions
+        function displayFilteredMessages(messages) {
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.innerHTML = '';
+            
+            if (messages.length === 0) {
+                messagesContainer.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <h3>No messages found</h3>
+                        <p>Try adjusting your search criteria</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            messages.forEach(message => {
+                const messageElement = createMessageElement(message);
+                messagesContainer.appendChild(messageElement);
+            });
+            
+            // Auto-scroll to bottom if enabled
+            if (autoScroll) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        function createMessageElement(message) {
+            const div = document.createElement('div');
+            div.className = getMessageClass(message);
+            div.dataset.messageId = message.id;
+            
+            const timestamp = new Date(message.timestamp || Date.now()).toLocaleTimeString();
+            const source = message.source || 'Unknown';
+            
+            // Format content
+            let content = '';
+            if (typeof message.content === 'object' && message.content !== null) {
+                content = `<pre>${JSON.stringify(message.content, null, 2)}</pre>`;
+            } else {
+                content = `<div class="text-content">${message.content || ''}</div>`;
+            }
+            
+            div.innerHTML = `
+                <div class="message-header">
+                    <div class="message-info">${source}</div>
+                    <span class="timestamp">${timestamp}</span>
+                    <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(message).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
+                </div>
+                <div class="message-content">${content}</div>
+            `;
+            
+            return div;
+        }
+
+        function getMessageClass(message) {
+            if (!message) return 'message legacy-message';
+            
+            if (message.source === 'user') return 'message user-message';
+            if (message.source === 'OMNI') return 'message bot-message';
+            if (message.source === 'email_manager') return 'message email-manager-message';
+            if (message.source === 'browser_manager') return 'message browser-manager-message';
+            if (message.source === 'python_developer') return 'message python-developer-message';
+            if (message.source === 'file_finder') return 'message file-finder-message';
+            if (message.source === 'image_generator') return 'message image-generator-message';
+            if (message.type === 'system') return 'message system-message';
+            if (message.type === 'completion') return 'message completion-message';
+            
+            return 'message legacy-message';
+        }
+
+        // Utility functions
         function formatDuration(ms) {
             const seconds = Math.floor((ms / 1000) % 60);
             const minutes = Math.floor((ms / (1000 * 60)) % 60);
@@ -677,120 +1249,122 @@
             }
         }
 
-        // Utility functions for message display
-        function getMessageClass(message) {
-            if (!message) return 'legacy-message';
+        // Panel Management Functions
+        function togglePanel(side) {
+            const panel = document.getElementById(side === 'left' ? 'leftPanel' : 'rightPanel');
+            const collapseBtn = document.getElementById(side === 'left' ? 'leftCollapseBtn' : 'rightCollapseBtn');
+            const collapseIcon = document.getElementById(side === 'left' ? 'leftCollapseIcon' : 'rightCollapseIcon');
             
-            if (message.source === 'user') return 'user-message';
-            if (message.source === 'OMNI') return 'bot-message';
-            if (message.source === 'email_manager') return 'email-manager-message';
-            if (message.source === 'browser_manager') return 'browser-manager-message';
-            if (message.source === 'python_developer') return 'python-developer-message';
-            if (message.source === 'file_finder') return 'file-finder-message';
-            if (message.source === 'image_generator') return 'image-generator-message';
-            if (message.type === 'system') return 'system-message';
-            if (message.type === 'completion') return 'completion-message';
+            if (!panel) return;
             
-            return 'legacy-message';
+            const isCollapsed = panel.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                // Expand panel
+                panel.classList.remove('collapsed');
+                if (side === 'left') {
+                    leftPanelCollapsed = false;
+                    collapseIcon.textContent = '◀';
+                    panel.style.width = leftPanelWidth + 'px';
+                } else {
+                    rightPanelCollapsed = false;
+                    collapseIcon.textContent = '▶';
+                }
+                localStorage.setItem(`${side}PanelCollapsed`, 'false');
+                showToast(`${side.charAt(0).toUpperCase() + side.slice(1)} panel expanded`, 'info', 1000);
+            } else {
+                // Collapse panel
+                panel.classList.add('collapsed');
+                if (side === 'left') {
+                    leftPanelCollapsed = true;
+                    collapseIcon.textContent = '▶';
+                } else {
+                    rightPanelCollapsed = true;
+                    collapseIcon.textContent = '◀';
+                }
+                localStorage.setItem(`${side}PanelCollapsed`, 'true');
+                showToast(`${side.charAt(0).toUpperCase() + side.slice(1)} panel collapsed`, 'info', 1000);
+            }
         }
 
-        function formatMessageContent(message) {
-            const timestamp = new Date(message.timestamp || Date.now()).toLocaleTimeString();
-            const content = typeof message.content === 'object' ? 
-                JSON.stringify(message.content, null, 2) : 
-                (message.content || '');
+        // Resize functionality
+        function setupResizablePanel() {
+            const resizeHandle = document.getElementById('resizeHandle');
+            const leftPanel = document.getElementById('leftPanel');
+            const rightPanel = document.getElementById('rightPanel');
             
-            return `
-                <div class="message-header">
-                    <div class="message-info">${message.source || 'Unknown'}</div>
-                    <span class="timestamp">${timestamp}</span>
-                    <button class="copy-message-btn" onclick="copyMessage(${JSON.stringify(message).replace(/"/g, '&quot;')})" title="Copy message">📋</button>
-                </div>
-                <div class="message-content">${content}</div>
-            `;
-        }
-
-        // Initialize when DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize theme and font size
-            initTheme();
+            if (!resizeHandle || !leftPanel || !rightPanel) return;
             
-            // Initialize enhanced features
-            initializeEnhancedClient();
+            let isResizing = false;
+            let startX = 0;
+            let startWidth = 0;
             
-            // Setup event listeners
-            const newChatBtn = document.getElementById("newChatBtn");
-            const connectBtn = document.getElementById("connectBtn");
-            const disconnectBtn = document.getElementById("disconnectBtn");
-            const sendBtn = document.getElementById("sendBtn");
-            const formatBtn = document.getElementById("formatBtn");
-            const clearBtn = document.getElementById("clearBtn");
-            const themeToggle = document.getElementById("themeToggle");
-            const shortcutsBtn = document.getElementById("shortcutsBtn");
-            const fontSizeBtn = document.getElementById("fontSizeBtn");
-            const performanceBtn = document.getElementById("performanceBtn");
-            const autoScrollBtn = document.getElementById("autoScrollBtn");
-            const exportBtn = document.getElementById("exportBtn");
-            const advancedSearchBtn = document.getElementById("advancedSearchBtn");
-
-            newChatBtn.addEventListener("click", createNewChat);
-            connectBtn.addEventListener("click", enhancedConnect);
-            disconnectBtn.addEventListener("click", disconnect);
-            sendBtn.addEventListener("click", enhancedSend);
-            formatBtn.addEventListener("click", formatJSON);
-            clearBtn.addEventListener("click", clearMessages);
-            themeToggle.addEventListener("click", toggleTheme);
-            shortcutsBtn.addEventListener("click", showShortcuts);
-            fontSizeBtn.addEventListener("click", cycleFontSize);
-            performanceBtn.addEventListener("click", showPerformanceReport);
-            autoScrollBtn.addEventListener("click", toggleAutoScroll);
-            exportBtn.addEventListener("click", exportChatHistory);
-            if (advancedSearchBtn) {
-                advancedSearchBtn.addEventListener("click", showAdvancedSearchModal);
-            }
-
-            // Setup other features
-            setupKeyboardShortcuts();
-            setupSearchAndFilter();
-            setupResizablePanel();
-            
-            // Load saved states
-            const savedLeftPanelWidth = localStorage.getItem('leftPanelWidth');
-            if (savedLeftPanelWidth) {
-                document.getElementById('leftPanel').style.width = savedLeftPanelWidth + 'px';
-            }
-            
-            // Restore panel states
-            if (localStorage.getItem('leftPanelCollapsed') === 'true') {
-                document.getElementById('leftPanel').classList.add('collapsed');
-            }
-            if (localStorage.getItem('rightPanelCollapsed') === 'true') {
-                document.getElementById('rightPanel').classList.add('collapsed');
-            }
-            
-            // Load chat history
-            displayChatHistory();
-            
-            // Auto-save drafts while typing
-            document.getElementById("jsonInput").addEventListener("input", () => {
-                clearTimeout(window.autoSaveTimeout);
-                window.autoSaveTimeout = setTimeout(autoSaveDraft, 2000);
+            resizeHandle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                startX = e.clientX;
+                startWidth = parseInt(window.getComputedStyle(leftPanel).width, 10);
+                
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                
+                e.preventDefault();
             });
             
-            // Load draft on startup
-            const savedDraft = localStorage.getItem('messageDraft');
-            if (savedDraft && savedDraft !== '{ "hello": "world" }') {
-                document.getElementById("jsonInput").value = savedDraft;
-            }
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                
+                const dx = e.clientX - startX;
+                const newWidth = startWidth + dx;
+                const minWidth = 250;
+                const maxWidth = window.innerWidth * 0.6;
+                
+                if (newWidth >= minWidth && newWidth <= maxWidth) {
+                    leftPanel.style.width = newWidth + 'px';
+                    leftPanelWidth = newWidth;
+                }
+            });
             
-            showToast('Enhanced WebSocket Client loaded', 'success', 2000);
-        });
+            document.addEventListener('mouseup', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    localStorage.setItem('leftPanelWidth', leftPanelWidth);
+                }
+            });
+            
+            // Touch support for mobile
+            resizeHandle.addEventListener('touchstart', (e) => {
+                isResizing = true;
+                startX = e.touches[0].clientX;
+                startWidth = parseInt(window.getComputedStyle(leftPanel).width, 10);
+                e.preventDefault();
+            });
+            
+            document.addEventListener('touchmove', (e) => {
+                if (!isResizing) return;
+                
+                const dx = e.touches[0].clientX - startX;
+                const newWidth = startWidth + dx;
+                const minWidth = 250;
+                const maxWidth = window.innerWidth * 0.6;
+                
+                if (newWidth >= minWidth && newWidth <= maxWidth) {
+                    leftPanel.style.width = newWidth + 'px';
+                    leftPanelWidth = newWidth;
+                }
+                e.preventDefault();
+            });
+            
+            document.addEventListener('touchend', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    localStorage.setItem('leftPanelWidth', leftPanelWidth);
+                }
+            });
+        }
 
-        // Include all the existing functions from the previous implementation
-        // (Toast system, theme management, connection functions, etc.)
-        // ... [Previous functions remain the same] ...
-
-        // Advanced keyboard shortcuts
+        // Keyboard shortcuts
         function setupKeyboardShortcuts() {
             document.addEventListener('keydown', (e) => {
                 // Ignore if typing in input fields
@@ -828,6 +1402,16 @@
                             e.preventDefault();
                             showShortcuts();
                             break;
+                        case 'b':
+                        case 'B':
+                            e.preventDefault();
+                            togglePanel('left');
+                            break;
+                        case 'm':
+                        case 'M':
+                            e.preventDefault();
+                            togglePanel('right');
+                            break;
                         case 'n':
                         case 'N':
                             e.preventDefault();
@@ -849,17 +1433,17 @@
                             case 'p':
                             case 'P':
                                 e.preventDefault();
-                                showPerformanceReport();
+                                showEnhancedPerformanceReport();
                                 break;
                             case 's':
                             case 'S':
                                 e.preventDefault();
-                                showAdvancedSearchModal();
+                                showAdvancedSearch();
                                 break;
                             case 'e':
                             case 'E':
                                 e.preventDefault();
-                                exportChatHistory();
+                                showExportModal();
                                 break;
                         }
                     }
@@ -884,39 +1468,172 @@
                 
                 if (e.key === 'Escape') {
                     hideShortcuts();
+                    hideAdvancedSearch();
+                    hideExportModal();
                 }
             });
         }
 
-        // Advanced search modal (placeholder - implement as needed)
-        function showAdvancedSearchModal() {
-            if (messageStore) {
-                // Implement advanced search UI
-                showToast('Advanced search opened', 'info');
-            } else {
-                showToast('Advanced search requires enhanced utilities', 'warning');
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize theme and font size
+            initTheme();
+            
+            // Initialize enhanced features
+            initializeEnhancedClient();
+            
+            // Setup event listeners
+            const newChatBtn = document.getElementById("newChatBtn");
+            const connectBtn = document.getElementById("connectBtn");
+            const disconnectBtn = document.getElementById("disconnectBtn");
+            const sendBtn = document.getElementById("sendBtn");
+            const formatBtn = document.getElementById("formatBtn");
+            const clearBtn = document.getElementById("clearBtn");
+            const themeToggle = document.getElementById("themeToggle");
+            const shortcutsBtn = document.getElementById("shortcutsBtn");
+            const fontSizeBtn = document.getElementById("fontSizeBtn");
+            const performanceBtn = document.getElementById("performanceBtn");
+            const autoScrollBtn = document.getElementById("autoScrollBtn");
+            const exportBtn = document.getElementById("exportBtn");
+            const advancedSearchBtn = document.getElementById("advancedSearchBtn");
+
+            newChatBtn.addEventListener("click", createNewChat);
+            connectBtn.addEventListener("click", enhancedConnect);
+            disconnectBtn.addEventListener("click", disconnect);
+            sendBtn.addEventListener("click", enhancedSend);
+            formatBtn.addEventListener("click", formatJSON);
+            clearBtn.addEventListener("click", clearMessages);
+            themeToggle.addEventListener("click", toggleTheme);
+            shortcutsBtn.addEventListener("click", showShortcuts);
+            fontSizeBtn.addEventListener("click", cycleFontSize);
+            performanceBtn.addEventListener("click", showEnhancedPerformanceReport);
+            autoScrollBtn.addEventListener("click", toggleAutoScroll);
+            exportBtn.addEventListener("click", showExportModal);
+            advancedSearchBtn.addEventListener("click", showAdvancedSearch);
+
+            // Setup search functionality
+            const searchInput = document.getElementById('searchInput');
+            const filterType = document.getElementById('filterType');
+            
+            if (searchInput) searchInput.addEventListener('input', performBasicSearch);
+            if (filterType) filterType.addEventListener('change', performBasicSearch);
+            
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            if (clearSearchBtn) {
+                clearSearchBtn.addEventListener('click', () => {
+                    if (searchInput) searchInput.value = '';
+                    if (filterType) filterType.value = 'all';
+                    performBasicSearch();
+                });
             }
-        }
 
-        // Expose enhanced API for external use
-        window.EnhancedWebSocketClient = {
-            wsManager,
-            messageStore,
-            virtualScroll,
-            performanceMonitor,
-            enhancedConnect,
-            enhancedSend,
-            updateVirtualScrollData,
-            showPerformanceReport
-        };
-
-        // Include all the existing basic functionality for fallback
-        // [Previous basic WebSocket implementation functions...]
+            // Setup other features
+            setupKeyboardShortcuts();
+            setupResizablePanel();
+            
+            // Restore panel states
+            const leftPanel = document.getElementById('leftPanel');
+            const rightPanel = document.getElementById('rightPanel');
+            
+            // Set initial width
+            if (leftPanel) {
+                leftPanel.style.width = leftPanelWidth + 'px';
+            }
+            
+            // Restore collapsed states
+            if (leftPanelCollapsed && leftPanel) {
+                leftPanel.classList.add('collapsed');
+                document.getElementById('leftCollapseIcon').textContent = '▶';
+            }
+            if (rightPanelCollapsed && rightPanel) {
+                rightPanel.classList.add('collapsed');
+                document.getElementById('rightCollapseIcon').textContent = '◀';
+            }
+            
+            // Load chat history
+            displayChatHistory();
+            
+            // Auto-save drafts while typing
+            document.getElementById("jsonInput").addEventListener("input", () => {
+                clearTimeout(window.autoSaveTimeout);
+                window.autoSaveTimeout = setTimeout(autoSaveDraft, 2000);
+            });
+            
+            // Load draft on startup
+            const savedDraft = localStorage.getItem('messageDraft');
+            if (savedDraft && savedDraft !== '{ "hello": "world" }') {
+                document.getElementById("jsonInput").value = savedDraft;
+            }
+            
+            showToast('Enhanced WebSocket Client loaded', 'success', 2000);
+        });
 
         // Basic connection function (fallback)
         function connect() {
-            // [Original connect implementation]
-            console.log('Using basic connection...');
+            const clientId = document.getElementById("clientId").value.trim();
+            if (!clientId) {
+                showToast("Please enter a valid UUID!", 'error');
+                return;
+            }
+
+            updateStatus("connecting", "🔄", "Connecting...");
+            updateButtons(false, false, false);
+
+            const url = `ws://${location.host}/ws/runs/${clientId}`;
+            ws = new WebSocket(url);
+
+            ws.onopen = function() {
+                updateStatus("connected", "✅", "Connected");
+                updateButtons(false, true, true);
+                startConnectionTimer();
+                showToast('Connected successfully', 'success');
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    receivedCount++;
+                    updateStats();
+                    showMessage("", data, getMessageClassBasic(data));
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                    errorCount++;
+                    updateStats();
+                }
+            };
+
+            ws.onclose = function(event) {
+                if (uptimeInterval) {
+                    clearInterval(uptimeInterval);
+                    uptimeInterval = null;
+                }
+                updateStatus("disconnected", "❌", "Disconnected");
+                updateButtons(true, false, false);
+                showToast('Connection closed', 'warning');
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                errorCount++;
+                updateStats();
+                showToast('Connection error', 'error');
+            };
+        }
+
+        function getMessageClassBasic(data) {
+            if (data.data && data.data.source) {
+                const source = data.data.source;
+                if (source === 'user') return 'user-message';
+                if (source === 'OMNI') return 'bot-message';
+                if (source === 'email_manager') return 'email-manager-message';
+                if (source === 'browser_manager') return 'browser-manager-message';
+                if (source === 'python_developer') return 'python-developer-message';
+                if (source === 'file_finder') return 'file-finder-message';
+                if (source === 'image_generator') return 'image-generator-message';
+            }
+            if (data.type === 'system') return 'system-message';
+            if (data.type === 'completion') return 'completion-message';
+            return 'legacy-message';
         }
 
         function disconnect() {
@@ -929,15 +1646,68 @@
         }
 
         function sendMessage() {
-            if (wsManager) {
-                enhancedSend();
-            } else {
-                // Basic send implementation
-                console.log('Using basic send...');
+            const raw = document.getElementById("jsonInput").value.trim();
+            if (!raw) {
+                showToast("Please enter a message to send.", 'warning');
+                return;
+            }
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showToast("Not connected to server", 'error');
+                return;
+            }
+
+            try {
+                const parsed = JSON.parse(raw);
+                const jsonText = JSON.stringify(parsed);
+                
+                ws.send(jsonText);
+                sentCount++;
+                updateStats();
+                showMessage("User", parsed, "user-message");
+                showToast('Message sent', 'success', 1000);
+            } catch (e) {
+                showToast(`Invalid JSON: ${e.message}`, 'error');
             }
         }
 
-        // [Include all other existing functions...]
+        // Fallback message filtering (when enhanced features not available)
+        function filterMessages() {
+            const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
+            const filterType = document.getElementById('filterType')?.value || 'all';
+            
+            const messageElements = document.querySelectorAll('#messages .message');
+            let visibleCount = 0;
+            
+            messageElements.forEach(element => {
+                const messageText = element.textContent.toLowerCase();
+                const matchesSearch = !searchTerm || messageText.includes(searchTerm);
+                
+                let matchesFilter = true;
+                if (filterType !== 'all') {
+                    const className = element.className;
+                    switch (filterType) {
+                        case 'sent':
+                            matchesFilter = className.includes('user-message');
+                            break;
+                        case 'received':
+                            matchesFilter = className.includes('bot-message') || className.includes('agent-message');
+                            break;
+                        case 'system':
+                            matchesFilter = className.includes('system-message') || className.includes('completion-message');
+                            break;
+                        case 'error':
+                            matchesFilter = className.includes('error') || element.textContent.toLowerCase().includes('error');
+                            break;
+                    }
+                }
+                
+                const isVisible = matchesSearch && matchesFilter;
+                element.style.display = isVisible ? 'block' : 'none';
+                if (isVisible) visibleCount++;
+            });
+        }
+
         // Toast notification system
         function showToast(message, type = 'info', duration = 3000) {
             const container = document.getElementById('toastContainer');
@@ -1020,7 +1790,6 @@
             document.getElementById('shortcutsModal').style.display = 'none';
         }
 
-        // Add other essential functions...
         function updateStatus(type, icon, text) {
             const status = document.getElementById("status");
             status.className = `status-container status-${type}`;
@@ -1062,7 +1831,6 @@
             document.getElementById('connectionTime').textContent = uptime;
         }
 
-        // Implement other necessary functions...
         function toggleAutoScroll() {
             autoScroll = !autoScroll;
             const btn = document.getElementById('autoScrollBtn');
@@ -1083,9 +1851,10 @@
         function copyMessage(messageContent) {
             let textToCopy = '';
             
-            if (typeof messageContent === 'object') {
-                textToCopy = JSON.stringify(messageContent, null, 2);
-            } else {
+            try {
+                const parsed = JSON.parse(messageContent);
+                textToCopy = JSON.stringify(parsed, null, 2);
+            } catch (e) {
                 textToCopy = messageContent.toString();
             }
             
@@ -1100,7 +1869,7 @@
         function autoSaveDraft() {
             const content = document.getElementById('jsonInput').value;
             localStorage.setItem('messageDraft', content);
-            showToast('Draft saved', 'success', 2000);
+            showToast('Draft saved', 'success', 1000);
         }
 
         function loadDraft() {
@@ -1110,73 +1879,6 @@
                 showToast('Draft loaded', 'success', 2000);
             } else {
                 showToast('No draft found', 'warning', 2000);
-            }
-        }
-
-        function setupSearchAndFilter() {
-            const searchInput = document.getElementById('searchInput');
-            const filterType = document.getElementById('filterType');
-            
-            if (searchInput) searchInput.addEventListener('input', filterMessages);
-            if (filterType) filterType.addEventListener('change', filterMessages);
-            
-            const clearSearchBtn = document.getElementById('clearSearchBtn');
-            if (clearSearchBtn) {
-                clearSearchBtn.addEventListener('click', () => {
-                    if (searchInput) searchInput.value = '';
-                    if (filterType) filterType.value = 'all';
-                    filterMessages();
-                });
-            }
-        }
-
-        function filterMessages() {
-            // Basic filtering implementation
-            const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
-            const filterType = document.getElementById('filterType')?.value || 'all';
-            
-            const messageElements = document.querySelectorAll('#messages > div:not(.empty-state)');
-            let visibleCount = 0;
-            
-            messageElements.forEach(element => {
-                const messageText = element.textContent.toLowerCase();
-                const matchesSearch = !searchTerm || messageText.includes(searchTerm);
-                
-                let matchesFilter = true;
-                if (filterType !== 'all') {
-                    const className = element.className;
-                    switch (filterType) {
-                        case 'sent':
-                            matchesFilter = className.includes('user-message');
-                            break;
-                        case 'received':
-                            matchesFilter = className.includes('bot-message') || className.includes('agent-message');
-                            break;
-                        case 'system':
-                            matchesFilter = className.includes('system-message') || className.includes('completion-message');
-                            break;
-                        case 'error':
-                            matchesFilter = className.includes('error') || element.textContent.toLowerCase().includes('error');
-                            break;
-                    }
-                }
-                
-                const isVisible = matchesSearch && matchesFilter;
-                element.style.display = isVisible ? 'block' : 'none';
-                if (isVisible) visibleCount++;
-            });
-        }
-
-        function setupResizablePanel() {
-            // Basic resizable panel implementation
-            console.log('Resizable panels initialized');
-        }
-
-        function togglePanel(side) {
-            const panel = document.getElementById(side === 'left' ? 'leftPanel' : 'rightPanel');
-            if (panel) {
-                panel.classList.toggle('collapsed');
-                localStorage.setItem(`${side}PanelCollapsed`, panel.classList.contains('collapsed'));
             }
         }
 
@@ -1384,37 +2086,214 @@
         }
 
         function showMessage(type, data, className) {
-            // Basic message display - can be enhanced with virtual scrolling
             const messages = document.getElementById("messages");
+            const timestamp = new Date().toLocaleTimeString();
+            
+            // Remove empty state if it exists
             const emptyState = document.getElementById('emptyState');
             if (emptyState) {
-                emptyState.style.display = 'none';
+                emptyState.remove();
             }
             
-            const timestamp = new Date().toLocaleTimeString();
-            const div = document.createElement("div");
-            div.className = `message ${className}`;
-            div.innerHTML = `
-                <div class="message-header">
-                    ${type || 'Message'} <span class="timestamp">${timestamp}</span>
-                </div>
-                <div class="message-content">${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}</div>
-            `;
+            // Try to parse the message and determine its type
+            let messageData = data;
+            if (typeof data === 'string') {
+                try {
+                    messageData = JSON.parse(data);
+                } catch (e) {
+                    // Keep as string if not valid JSON
+                }
+            }
             
+            const div = document.createElement("div");
+            
+            // Helper function to format JSON content beautifully
+            function formatJsonContent(content) {
+                if (typeof content === 'string') {
+                    // Try to parse if it's a JSON string
+                    try {
+                        const parsed = JSON.parse(content);
+                        return createJsonDisplay(parsed);
+                    } catch (e) {
+                        return `<div class="text-content">${content}</div>`;
+                    }
+                } else if (typeof content === 'object' && content !== null) {
+                    return createJsonDisplay(content);
+                } else {
+                    return `<div class="text-content">${String(content)}</div>`;
+                }
+            }
+
+            // Helper function to create beautiful JSON display
+            function createJsonDisplay(obj) {
+                if (typeof obj !== 'object' || obj === null) {
+                    return `<div class="text-content">${String(obj)}</div>`;
+                }
+
+                let html = '<div class="json-content">';
+                for (const [key, value] of Object.entries(obj)) {
+                    const valueType = getValueType(value);
+                    const formattedValue = formatValue(value);
+                    html += `<div class="json-key-value"><div class="json-key">${key.replace(/_/g, ' ')}</div><div class="json-value ${valueType}">${formattedValue}</div></div>`;
+                }
+                html += '</div>';
+                return html;
+            }
+
+            // Helper function to determine value type
+            function getValueType(value) {
+                if (value === null) return 'null';
+                if (typeof value === 'string') return 'string';
+                if (typeof value === 'number') return 'number';
+                if (typeof value === 'boolean') return 'boolean';
+                if (Array.isArray(value)) return 'array';
+                return 'object';
+            }
+
+            // Helper function to format values
+            function formatValue(value) {
+                if (value === null) return 'null';
+                if (typeof value === 'string') return value;
+                if (typeof value === 'number') return value.toString();
+                if (typeof value === 'boolean') return value.toString();
+                if (Array.isArray(value)) {
+                    if (value.length === 0) return '[]';
+                    return `[${value.length} items]`;
+                }
+                if (typeof value === 'object') return JSON.stringify(value, null, 2);
+                return String(value);
+            }
+
+            // Helper function to get message class and agent info based on source
+            function getAgentInfo(source) {
+                const agentMap = {
+                    'OMNI': { className: 'bot-message', icon: '🤖', name: 'OMNI' },
+                    'email_manager': { className: 'email-manager-message', icon: '📧', name: 'Email Manager' },
+                    'browser_manager': { className: 'browser-manager-message', icon: '🌐', name: 'Browser Manager' },
+                    'python_developer': { className: 'python-developer-message', icon: '🐍', name: 'Python Developer' },
+                    'file_finder': { className: 'file-finder-message', icon: '📁', name: 'File Finder' },
+                    'image_generator': { className: 'image-generator-message', icon: '🎨', name: 'Image Generator' }
+                };
+                return agentMap[source] || { className: 'bot-message', icon: '🤖', name: source };
+            }
+            
+            // Handle different message types based on structure
+            if (messageData && typeof messageData === 'object') {
+                if (messageData.type === 'system') {
+                    // System/notification message - compact display
+                    div.className = "message system-message";
+                    div.innerHTML = `
+                        <div class="message-header">
+                            System <span class="timestamp">${timestamp}</span>
+                        </div>
+                        <div class="message-content">${messageData.status || 'notification'}</div>
+                    `;
+                } else if (messageData.type === 'completion') {
+                    // Completion message - similar to system but with success styling
+                    div.className = "message completion-message";
+                    div.innerHTML = `
+                        <div class="message-header">
+                            ✅ Completed <span class="timestamp">${timestamp}</span>
+                        </div>
+                        <div class="message-content">${messageData.status || 'Task completed'}</div>
+                    `;
+                } else if (messageData.type === 'message' && messageData.data?.source === 'user') {
+                    // User message
+                    div.className = "message user-message";
+                    const content = messageData.data.content?.task || 
+                                  messageData.data.content?.content || 
+                                  formatJsonContent(messageData.data.content);
+                    div.innerHTML = `
+                        <div class="message-header">
+                            <div class="user-info">You</div>
+                            <span class="timestamp">${timestamp}</span>
+                        </div>
+                        <div class="message-content">${content}</div>
+                    `;
+                } else if (messageData.type === 'message' && messageData.data?.source) {
+                    // Bot/Agent message (OMNI or specialized agents)
+                    const source = messageData.data.source;
+                    const agentInfo = getAgentInfo(source);
+                    
+                    div.className = `message ${agentInfo.className}`;
+                    
+                    // Extract and format content properly
+                    let content = '';
+                    if (messageData.data.content?.content) {
+                        content = formatJsonContent(messageData.data.content.content);
+                    } else if (messageData.data.content?.task) {
+                        content = `<div class="text-content">${messageData.data.content.task}</div>`;
+                    } else {
+                        content = formatJsonContent(messageData.data.content);
+                    }
+                    
+                    const role = messageData.data.content?.role || 'assistant';
+                    const name = messageData.data.content?.name || agentInfo.name;
+                    
+                    div.innerHTML = `
+                        <div class="message-header">
+                            <div class="bot-info">${name} (${role})</div>
+                            <span class="timestamp">${timestamp}</span>
+                            <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(messageData).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
+                        </div>
+                        <div class="message-content">${content}</div>
+                    `;
+                } else {
+                    // Unknown structured message - use legacy display
+                    div.className = `message legacy-message ${className}`;
+                    div.innerHTML = `
+                        <div class="message-header">
+                            ${type} <span class="timestamp">${timestamp}</span>
+                            <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(messageData).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
+                        </div>
+                        <div class="message-content">${JSON.stringify(messageData, null, 2)}</div>
+                    `;
+                }
+            } else {
+                // Simple string message or legacy format
+                div.className = `message legacy-message ${className}`;
+                const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+                div.innerHTML = `
+                    <div class="message-header">
+                        ${type} <span class="timestamp">${timestamp}</span>
+                        <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(data).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
+                    </div>
+                    <div class="message-content">${content}</div>
+                `;
+            }
+            
+            // Add message to the DOM
             messages.appendChild(div);
             
+            // Auto-scroll if enabled
             if (autoScroll) {
                 messages.scrollTop = messages.scrollHeight;
             }
             
-            // Store in allMessages for basic functionality
+            // Store in allMessages array for fallback export
             allMessages.push({
                 timestamp: Date.now(),
                 type: type,
-                data: data,
+                data: messageData,
                 className: className
             });
         }
+
+        // Expose enhanced API for external use
+        window.EnhancedWebSocketClient = {
+            wsManager,
+            messageStore,
+            virtualScroll,
+            performanceMonitor,
+            enhancedConnect,
+            enhancedSend,
+            updateVirtualScrollData,
+            showEnhancedPerformanceReport,
+            showAdvancedSearch,
+            showExportModal,
+            performAdvancedSearch,
+            performExport
+        };
     </script>
 </body>
 </html>
