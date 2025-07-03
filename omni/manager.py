@@ -118,8 +118,8 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content}
         self.memory.push_main_message(db_content)
-        asyncio.run(self.send_websocket(db_content))
         db_content["raw_message"] = message
+        asyncio.run(self.send_websocket(db_content))
         asyncio.create_task(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
             
             

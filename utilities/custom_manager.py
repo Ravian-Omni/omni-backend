@@ -69,6 +69,6 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content}
         self.omni_memory.push_capability_message(db_content,self.capability,self.capability_id)
-        asyncio.run(self.send_websocket(db_content))
         db_content["raw_message"] = message
+        asyncio.run(self.send_websocket(db_content))
         asyncio.create_task(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability, capability_id=self.capability_id))

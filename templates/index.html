@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
-    <!-- <script src="/static/websocket-utils.js"></script> -->
 </head>
 <body data-theme="light">
     <!-- Toast Container -->
@@ -189,8 +188,8 @@
         <div class="header">
             <div class="header-content">
                 <div class="header-title">
-                    <h1><span class="emoji">🔌</span> Enhanced WebSocket Client</h1>
-                    <p>Advanced real-time messaging with modern UX features</p>
+                    <h1><span class="emoji">🚀</span> Ravian AI</h1>
+                    <p>Chat with Omni</p>
                 </div>
                 <div class="header-controls">
                     <button id="themeToggle" class="icon-btn" title="Toggle theme (Ctrl+D)">
@@ -250,7 +249,7 @@
                             <div class="form-group">
                                 <label for="clientId">Client UUID:</label>
                                 <div class="input-group">
-                                    <input id="clientId" value="550e8400-e29b-41d4-a716-446655440000" placeholder="Enter your client UUID" />
+                                    <input id="clientId" value="3b3c6993-ccdb-47d2-a568-d0f7e91d3f2f" placeholder="Enter your client UUID" />
                                     <button class="copy-btn-small" onclick="copyClientId()" title="Copy UUID">📋</button>
                                 </div>
                             </div>
@@ -291,7 +290,7 @@
                             <div class="form-group">
                                 <label for="jsonInput">JSON Message:</label>
                                 <div class="textarea-container">
-                                    <textarea id="jsonInput" placeholder='{ "type": "message", "data": "Hello World!" }'>{ "hello": "world" }</textarea>
+                                    <textarea id="jsonInput" placeholder='{"type": "start","task": "Your Query Here!","files": []}'>{"type": "start","task": "Your Query Here!","files": []}</textarea>
                                     <div class="textarea-controls">
                                         <button class="small-btn" onclick="autoSaveDraft()" title="Save draft">💾</button>
                                         <button class="small-btn" onclick="loadDraft()" title="Load draft">📁</button>
@@ -399,7 +398,7 @@
     </div>
 
     <script>
-        // Enhanced WebSocket Client with Advanced Features
+        // Ravian AI with Advanced Features
         // Global variables
         let ws;
         let wsManager;
@@ -452,7 +451,7 @@
                 touchHandler = new WebSocketUtils.TouchGestureHandler(document.body);
                 setupTouchGestureHandlers();
                 
-                console.log('✅ Enhanced WebSocket Client initialized with all advanced features');
+                console.log('✅ Ravian AI initialized with all advanced features');
             } else {
                 console.warn('⚠️ WebSocketUtils not loaded, using basic functionality');
             }
@@ -1565,7 +1564,7 @@
                 document.getElementById("jsonInput").value = savedDraft;
             }
             
-            showToast('Enhanced WebSocket Client loaded', 'success', 2000);
+            showToast('Ravian AI loaded', 'success', 2000);
         });
 
         // Basic connection function (fallback)
@@ -2124,7 +2123,7 @@
                 }
             }
 
-            // Helper function to create beautiful JSON display
+            // Helper function to create beautiful JSON display with FULL expansion
             function createJsonDisplay(obj) {
                 if (typeof obj !== 'object' || obj === null) {
                     return `<div class="text-content">${String(obj)}</div>`;
@@ -2150,7 +2149,7 @@
                 return 'object';
             }
 
-            // Helper function to format values
+            // Helper function to format values with FULL expansion
             function formatValue(value) {
                 if (value === null) return 'null';
                 if (typeof value === 'string') return value;
@@ -2158,9 +2157,21 @@
                 if (typeof value === 'boolean') return value.toString();
                 if (Array.isArray(value)) {
                     if (value.length === 0) return '[]';
-                    return `[${value.length} items]`;
+                    // Recursively display array contents
+                    let arrayHtml = '<div class="array-content">';
+                    value.forEach((item, index) => {
+                        arrayHtml += `<div class="array-item">
+                            <span class="array-index">[${index}]</span>
+                            <span class="array-value">${formatValue(item)}</span>
+                        </div>`;
+                    });
+                    arrayHtml += '</div>';
+                    return arrayHtml;
                 }
-                if (typeof value === 'object') return JSON.stringify(value, null, 2);
+                if (typeof value === 'object') {
+                    // Recursively display object contents
+                    return createJsonDisplay(value);
+                }
                 return String(value);
             }
 

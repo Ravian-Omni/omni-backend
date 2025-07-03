@@ -69,10 +69,10 @@ class LLMConfigManager:
                 api_key="06db08babf63e2c871ca8b7709d82f753728e7144e1e32d22b1469b0238a8331",
                 api_type="together"
             ),
-            # "gpt_4_1_mini": LLMConfig(
-            #     model="gpt-4.1-mini-2025-04-14",
-            #     api_key=cls._shared_config["openai_api_key"],
-            # ),
+            "gpt_4_1_mini": LLMConfig(
+                model="gpt-4.1-mini-2025-04-14",
+                api_key=cls._shared_config["openai_api_key"],
+            ),
             # "gpt_4_1_mini": LLMConfig(
             #     model="gpt-4.1-mini",
             #     api_key=cls._shared_config["azure_api_key"],
@@ -80,13 +80,13 @@ class LLMConfigManager:
             #     base_url="https://newton-aoi.openai.azure.com/",
             #     api_version="2025-01-01-preview"
             # ),
-            "gpt_4_1_mini": LLMConfig(
-                model="gpt-4o-mini",
-                api_key=cls._shared_config["azure_api_key"],
-                api_type="azure",
-                base_url="https://newton-aoi.openai.azure.com/",
-                api_version="2024-08-01-preview",
-            ),
+            # "gpt_4_1_mini": LLMConfig(
+            #     model="gpt-4o-mini",
+            #     api_key=cls._shared_config["azure_api_key"],
+            #     api_type="azure",
+            #     base_url="https://newton-aoi.openai.azure.com/",
+            #     api_version="2024-08-01-preview",
+            # ),
         
             # Add other configurations as needed...
         }
