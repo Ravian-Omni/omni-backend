@@ -79,7 +79,7 @@ class BrowserManager:
         
         # Initialize vision LLM
         self.vision_llm = ChatOpenAI(
-            model_name="gpt-4.1-2025-04-14",
+            model_name="gpt-4.1-mini-2025-04-14",
             temperature=0.1,
             api_key=settings.OPENAI_API_KEY,
         )

@@ -435,17 +435,12 @@
                 messageStore = new WebSocketUtils.MessageStore(5000);
                 performanceMonitor = new WebSocketUtils.PerformanceMonitor();
                 
-                // Expose updated references for external use
-                window.EnhancedWebSocketClient.messageStore = messageStore;
-                window.EnhancedWebSocketClient.performanceMonitor = performanceMonitor;
-                
                 // Setup performance monitoring
                 setupPerformanceMonitoring();
                 
                 // Setup virtual scrolling for better performance
                 const messagesContainer = document.getElementById('messages');
                 virtualScroll = new WebSocketUtils.VirtualScrollManager(messagesContainer, 60, 5);
-                window.EnhancedWebSocketClient.virtualScroll = virtualScroll;
                 
                 // Override the renderItem method for custom message rendering
                 virtualScroll.renderItem = function(message, index) {
@@ -518,15 +513,7 @@
 
         // Performance monitoring
         function setupPerformanceMonitoring() {
-            // Ensure performanceMonitor is set
-            if (!performanceMonitor) {
-                if (window.WebSocketUtils) {
-                    performanceMonitor = new WebSocketUtils.PerformanceMonitor();
-                    window.EnhancedWebSocketClient.performanceMonitor = performanceMonitor;
-                } else {
-                    return;
-                }
-            }
+            if (!performanceMonitor) return;
             
             // Check memory usage every minute
             setInterval(() => {
@@ -1061,10 +1048,6 @@
 
         // Enhanced performance report
         function showEnhancedPerformanceReport() {
-            // Ensure performanceMonitor is set
-            if (!performanceMonitor) {
-                initializeEnhancedClient();
-            }
             if (!performanceMonitor) {
                 showToast('Performance monitoring not available', 'warning');
                 return;
@@ -1226,7 +1209,7 @@
                 <div class="message-header">
                     <div class="message-info">${source}</div>
                     <span class="timestamp">${timestamp}</span>
-                    <button class="copy-message-btn" onclick="copyMessage('${encodeURIComponent(JSON.stringify(message))}')" title="Copy message">📋</button>
+                    <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(message).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
                 </div>
                 <div class="message-content">${content}</div>
             `;
@@ -1864,15 +1847,16 @@
             });
         }
 
-        function copyMessage(encodedMessageContent) {
+        function copyMessage(messageContent) {
             let textToCopy = '';
+            
             try {
-                const messageContent = decodeURIComponent(encodedMessageContent);
                 const parsed = JSON.parse(messageContent);
                 textToCopy = JSON.stringify(parsed, null, 2);
             } catch (e) {
-                textToCopy = encodedMessageContent.toString();
+                textToCopy = messageContent.toString();
             }
+            
             navigator.clipboard.writeText(textToCopy).then(() => {
                 showToast('Message copied to clipboard', 'success', 2000);
             }).catch(err => {
@@ -1989,6 +1973,23 @@
                 const chatId = data.chat_id;
                 
                 currentChatId = chatId;
+                document.getElementById("clientId").value = chatId;
+                
+                statusDiv.className = "chat-status success";
+                statusDiv.innerHTML = `✅ New chat created successfully! Chat ID: <strong>${chatId}</strong>`;
+                
+                addToChatHistory(chatId);
+                showToast(`New chat created: ${chatId}`, 'success');
+                
+                setTimeout(() => {
+                    statusDiv.style.display = "none";
+                }, 3000);
+
+            } catch (error) {
+                console.error('Error creating chat:', error);
+                statusDiv.className = "chat-status error";
+                statusDiv.innerHTML = `❌ Failed to create chat: ${error.message}`;
+                showToast(`Failed to create chat: ${error.message}`, 'error');
                 
                 setTimeout(() => {
                     statusDiv.style.display = "none";
@@ -2244,7 +2245,7 @@
                         <div class="message-header">
                             <div class="bot-info">${name} (${role})</div>
                             <span class="timestamp">${timestamp}</span>
-                            <button class="copy-message-btn" onclick="copyMessage('${encodeURIComponent(JSON.stringify(messageData))}')" title="Copy message">📋</button>
+                            <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(messageData).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
                         </div>
                         <div class="message-content">${content}</div>
                     `;
@@ -2254,7 +2255,7 @@
                     div.innerHTML = `
                         <div class="message-header">
                             ${type} <span class="timestamp">${timestamp}</span>
-                            <button class="copy-message-btn" onclick="copyMessage('${encodeURIComponent(JSON.stringify(messageData))}')" title="Copy message">📋</button>
+                            <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(messageData).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
                         </div>
                         <div class="message-content">${JSON.stringify(messageData, null, 2)}</div>
                     `;
@@ -2266,7 +2267,7 @@
                 div.innerHTML = `
                     <div class="message-header">
                         ${type} <span class="timestamp">${timestamp}</span>
-                        <button class="copy-message-btn" onclick="copyMessage('${encodeURIComponent(JSON.stringify(data))}')" title="Copy message">📋</button>
+                        <button class="copy-message-btn" onclick="copyMessage('${JSON.stringify(data).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
                     </div>
                     <div class="message-content">${content}</div>
                 `;
