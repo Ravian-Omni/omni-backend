@@ -146,6 +146,8 @@ ENV/
 env.bak/
 venv.bak/
 
+omniEnv/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -194,3 +196,6 @@ code/*
 images/*
 events/*
 logs/*
+
+
+
