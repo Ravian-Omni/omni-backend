@@ -41,7 +41,7 @@ async def run_websocket(
     #     return
 
     input_func = ws_manager._create_input_func(chat_id)
-    omni.manual_verification.set_input_function(input_func)
+    omni.user_input.set_input_function(input_func)
     # Connect websocket
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:

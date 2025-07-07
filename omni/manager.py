@@ -157,6 +157,7 @@ class CustomUserProxyAgent(UserProxyAgent):
 class Omni:
     def __init__(self,chat_id):
         self.chat_id=chat_id
+        self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
@@ -399,7 +400,7 @@ class Omni:
         return autogen.AssistantAgent(
             name="agent_caller",
             llm_config=llm_config_agent_caller,
-            system_message=prompts.agent_caller,
+            #system_message=prompts.agent_caller,
         )
 
     def get_agent_executor(self):
@@ -419,15 +420,21 @@ class Omni:
             description="""call this agent to check if the Task specified by the user has been completed""",
             system_message=prompts.prob_status_checker,
         )
-
+    
     def get_manual_verification(self):
-        return CustomUserProxyAgent(
+        return autogen.AssistantAgent(
             name="manual_verification",
+            llm_config=self.llm_config_mini,
+            system_message="Ask the question to the user and wait for the response. " 
+        )
+
+    def get_user_input(self):
+        return CustomUserProxyAgent(
+            name="user_input",
             llm_config=self.llm_config,
             default_auto_reply="Awaiting for manual verification",
             human_input_mode="ALWAYS",
             code_execution_config=False,
-            description="You will take input from user if needed for any manual intervention or verification ",
             system_message=prompts.manual_verification,
         )
 
@@ -475,6 +482,8 @@ class Omni:
         
         # inner loop manual verification agent will report back to aligner agent
         if last_speaker.name in ["manual_verification"]:
+            return groupchat.agent_by_name("user_input")
+        if last_speaker.name in ["user_input"]:
             return groupchat.agent_by_name("agent_aligner")
         
         # how the sequential processess will get called
@@ -500,6 +509,7 @@ class Omni:
         self.agent_executor = self.get_agent_executor()
         self.problem_status_checker = self.get_problem_status_checker()
         self.manual_verification = self.get_manual_verification()
+        self.user_input = self.get_user_input()
         self.process_completion = self.get_process_completion()
         self.questions_generator = self.get_questions_generator()
         return [
@@ -513,6 +523,7 @@ class Omni:
             self.agent_executor,
             self.problem_status_checker,
             self.manual_verification,
+            self.user_input,
             self.process_completion,
             self.questions_generator
         ]

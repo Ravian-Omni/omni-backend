@@ -370,14 +370,19 @@ agent_aligner = """
   </decision_logic>
 
   <response_format>
-    <template>&lt;Agent_Name&gt;</template>
-    <constraints>
-      <constraint>No explanations</constraint>
-      <constraint>No additional text</constraint>
-      <constraint>No thoughts or reasoning</constraint>
-      <constraint>Only agent name in specified format</constraint>
-    </constraints>
-  </response_format>
+    <requirement>You must respond with a valid JSON object in the exact format specified below</requirement>
+    <structure>
+    {
+    "steps": [
+    {
+       "question": "What specific question needs to be asked?",
+       "thought": "Your reasoning for this routing decision/question",
+       "action": "chosen_agent_name"
+     }
+   ],
+   "final_answer": "chosen_agent_name"
+ }
+ </response_format>
 
   <operational_rules>
     <rule>No task execution - routing only</rule>
