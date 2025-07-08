@@ -70,7 +70,9 @@ class BrowserManager:
         
         if self.save_results:
             self.results_dir = os.path.join(settings.ROOT_DIR, "browser")
-            self.browser_gif = os.path.join(self.results_dir, "gif", f"{self.chat_id}.gif")
+            browser_gif_dir = os.path.join(self.results_dir, "gif", self.chat_id)
+            os.makedirs(browser_gif_dir, exist_ok=True)
+            self.browser_gif = os.path.join(browser_gif_dir, f"{self.capability_id}.gif")
         
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
