@@ -195,4 +195,4 @@ images/*
 events/*
 logs/*
 omni_venv
-capabilities/.DS_Store
+capabilities/.DS_Store.DS_Store
