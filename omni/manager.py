@@ -367,7 +367,7 @@ class Omni:
     def get_planner(self):
         return autogen.AssistantAgent(
             name="planner_agent",
-            llm_config=self.llm_config_mini_planner,
+            llm_config=self.llm_config_mini_planner, #llm_config_mini
             system_message=Template(prompts.planner).substitute(today_date=today_date)
         )
 
@@ -399,7 +399,7 @@ class Omni:
     def get_agent_caller(self):
         return autogen.AssistantAgent(
             name="agent_caller",
-            llm_config=llm_config_agent_caller,
+            llm_config=llm_config_mini, #llm_config_mini.  llm_config_agent_caller
             #system_message=prompts.agent_caller,
         )
 

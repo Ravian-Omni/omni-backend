@@ -1,4 +1,6 @@
+import sys
 import os
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
 import asyncio
 import json
 from pathlib import Path
