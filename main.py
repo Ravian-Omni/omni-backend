@@ -16,10 +16,8 @@ from fastapi.openapi.utils import get_openapi
 import os
 from initialization import AppInitializer
 import nest_asyncio
+import sys
 from routers import ws
-# Initialize application
-app_file_path = os.path.dirname(os.path.abspath(__file__))
-initializer = AppInitializer(settings, app_file_path)
 
 load_dotenv()
 
@@ -187,6 +185,10 @@ if __name__ == "__main__":
         raise RuntimeError(
             f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
+    # Initialize application
+    app_file_path = os.path.dirname(os.path.abspath(__file__))
+    initializer = AppInitializer(settings, app_file_path)
+
     # Get the appropriate port based on execution mode
     preferred_port = initializer.get_port()
 
@@ -226,4 +228,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Failed to start server: {e}")
         print("💡 Tip: Check if the port is already in use or try a different port")
-        exit(1)
+        sys.exit(1)

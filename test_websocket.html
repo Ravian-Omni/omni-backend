@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test - Omni Backend</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+        
+        .input-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { 
+            background-color: #6c757d; 
+            cursor: not-allowed; 
+        }
+        .danger { background-color: #dc3545; }
+        .danger:hover { background-color: #c82333; }
+        
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .sent { background-color: #e3f2fd; }
+        .received { background-color: #f3e5f5; }
+        .error { background-color: #ffebee; color: #c62828; }
+        .system { background-color: #e8f5e8; color: #2e7d32; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebSocket Test - Omni Backend</h1>
+        
+        <div class="grid">
+            <!-- Connection Settings -->
+            <div>
+                <h3>Connection Settings</h3>
+                
+                <div class="input-group">
+                    <label for="wsUrl">WebSocket URL:</label>
+                    <input type="text" id="wsUrl" value="ws://localhost:8000/ws/runs/" placeholder="ws://localhost:8000/ws/runs/">
+                </div>
+                
+                <div class="input-group">
+                    <label for="chatId">Chat ID:</label>
+                    <input type="text" id="chatId" value="test-chat-123" placeholder="Enter chat ID">
+                </div>
+                
+                <div class="status disconnected" id="status">
+                    ❌ Disconnected
+                </div>
+                
+                <button onclick="connect()" id="connectBtn">Connect</button>
+                <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+                <button onclick="clearMessages()">Clear Messages</button>
+            </div>
+            
+            <!-- Message Testing -->
+            <div>
+                <h3>Send Messages</h3>
+                
+                <div class="input-group">
+                    <label for="messageType">Message Type:</label>
+                    <select id="messageType">
+                        <option value="start">Start</option>
+                        <option value="stop">Stop</option>
+                        <option value="ping">Ping</option>
+                        <option value="input_response">Input Response</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="messageData">Message Data:</label>
+                    <textarea id="messageData" rows="4" placeholder='{"task": "Hello, how are you?"}'></textarea>
+                </div>
+                
+                <button onclick="sendMessage()" id="sendBtn" disabled>Send Message</button>
+                <button onclick="sendPredefinedMessages()">Send Test Sequence</button>
+            </div>
+        </div>
+        
+        <!-- Messages Log -->
+        <div style="margin-top: 20px;">
+            <h3>Messages Log</h3>
+            <div class="messages" id="messages"></div>
+        </div>
+        
+        <!-- Quick Test Templates -->
+        <div style="margin-top: 20px;">
+            <h3>Quick Test Templates</h3>
+            <button onclick="loadStartMessage()">Load Start Message</button>
+            <button onclick="loadStopMessage()">Load Stop Message</button>
+            <button onclick="loadPingMessage()">Load Ping Message</button>
+            <button onclick="loadInputResponse()">Load Input Response</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function log(message, type = 'system') {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            messageCount++;
+        }
+
+        function updateStatus(status, text) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = text;
+        }
+
+        function updateButtons(connected) {
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('sendBtn').disabled = !connected;
+        }
+
+        function connect() {
+            const wsUrl = document.getElementById('wsUrl').value;
+            const chatId = document.getElementById('chatId').value;
+            
+            if (!chatId) {
+                alert('Please enter a Chat ID');
+                return;
+            }
+            
+            const fullUrl = wsUrl + chatId;
+            
+            log(`Attempting to connect to: ${fullUrl}`, 'system');
+            updateStatus('connecting', '🔄 Connecting...');
+            updateButtons(false);
+            
+            try {
+                ws = new WebSocket(fullUrl);
+                
+                ws.onopen = function() {
+                    log('✅ WebSocket connected successfully!', 'system');
+                    updateStatus('connected', '✅ Connected');
+                    updateButtons(true);
+                };
+                
+                ws.onmessage = function(event) {
+                    log(`📥 Received: ${event.data}`, 'received');
+                    
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'pong') {
+                            log('🏓 Pong received', 'system');
+                        }
+                    } catch (e) {
+                        // Non-JSON message, already logged above
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    log(`🔌 WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`, 'system');
+                    updateStatus('disconnected', '❌ Disconnected');
+                    updateButtons(false);
+                    ws = null;
+                };
+                
+                ws.onerror = function(error) {
+                    log(`❌ WebSocket error: ${error}`, 'error');
+                    updateStatus('disconnected', '❌ Error');
+                    updateButtons(false);
+                };
+                
+            } catch (error) {
+                log(`❌ Failed to create WebSocket: ${error}`, 'error');
+                updateStatus('disconnected', '❌ Failed to connect');
+                updateButtons(false);
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                log('🔌 Disconnecting...', 'system');
+            }
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('WebSocket is not connected');
+                return;
+            }
+            
+            const messageType = document.getElementById('messageType').value;
+            const messageData = document.getElementById('messageData').value;
+            
+            let message;
+            
+            if (messageType === 'custom') {
+                try {
+                    message = JSON.parse(messageData);
+                } catch (e) {
+                    alert('Invalid JSON in message data');
+                    return;
+                }
+            } else {
+                message = { type: messageType };
+                
+                if (messageType === 'start' && messageData) {
+                    try {
+                        const data = JSON.parse(messageData);
+                        Object.assign(message, data);
+                    } catch (e) {
+                        message.task = messageData;
+                    }
+                } else if (messageType === 'stop') {
+                    message.reason = messageData || "User requested stop";
+                } else if (messageType === 'input_response') {
+                    message.response = messageData;
+                }
+            }
+            
+            const messageStr = JSON.stringify(message);
+            ws.send(messageStr);
+            log(`📤 Sent: ${messageStr}`, 'sent');
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+            messageCount = 0;
+        }
+
+        // Quick templates
+        function loadStartMessage() {
+            document.getElementById('messageType').value = 'start';
+            document.getElementById('messageData').value = '{"task": "Hello! Please help me with a simple task."}';
+        }
+
+        function loadStopMessage() {
+            document.getElementById('messageType').value = 'stop';
+            document.getElementById('messageData').value = 'User requested stop';
+        }
+
+        function loadPingMessage() {
+            document.getElementById('messageType').value = 'ping';
+            document.getElementById('messageData').value = '';
+        }
+
+        function loadInputResponse() {
+            document.getElementById('messageType').value = 'input_response';
+            document.getElementById('messageData').value = 'Yes, please continue';
+        }
+
+        function sendPredefinedMessages() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('WebSocket is not connected');
+                return;
+            }
+            
+            const messages = [
+                { type: 'ping' },
+                { type: 'start', task: 'Test task for automated sequence' },
+                { type: 'ping' }
+            ];
+            
+            messages.forEach((msg, index) => {
+                setTimeout(() => {
+                    const messageStr = JSON.stringify(msg);
+                    ws.send(messageStr);
+                    log(`📤 Auto-sent: ${messageStr}`, 'sent');
+                }, index * 1000);
+            });
+        }
+
+        // Auto-populate URL based on current location
+        window.onload = function() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = location.host || 'localhost:8000';
+            document.getElementById('wsUrl').value = `${protocol}//${host}/ws/runs/`;
+        };
+    </script>
+</body>
+</html>
