@@ -207,7 +207,7 @@ class Omni:
         call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION, capability_id=capability_id)
-        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id)
+        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
         messages = image_generator.groupchat.messages
         for msg in reversed(messages):

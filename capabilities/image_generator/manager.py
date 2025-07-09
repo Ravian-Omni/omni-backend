@@ -18,63 +18,66 @@ from capabilities.image_generator import prompts
 from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
 from utilities.custom_manager import CustomGroupChatManager
-config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
-llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
-llm_config = LLMConfigManager.get_config("gpt4o")
-model_id = "4w59rxjq"
-baseten_api_key = "IPY0OlMw.q04XmZdd8TgEv3hgDawsZHGuiLkehyuc"
+from utilities.storage import ensure_path
 
+import requests
+from together import Together
 
-
-
-def flux_image_generator(prompt: Annotated[str, "The image generation prompt"]):
-    model_id = "4w59rxjq"
-    baseten_api_key = "IPY0OlMw.q04XmZdd8TgEv3hgDawsZHGuiLkehyuc"
-    data = {
-        "prompt": prompt
-        }
-
-    try:
-        res = httpx.post(
-            f"https://model-{model_id}.api.baseten.co/production/predict",
-            headers={"Authorization": f"Api-Key {baseten_api_key}"},
-            json=data,
-            timeout=300.0
-            )
-
-        res_json = res.json()
-        output = res_json.get("data")
-
-        if not output:
-            return "Error: No image data received from the model."
-
-        img = Image.open(BytesIO(base64.b64decode(output)))
-        timestamp = int(time.time())
-        filename = f"/Users/lokesh/Desktop/omni_app/omni_be/omni-backend/results/generated_image_{timestamp}.jpg" # to be updated with project creation path
-        img.save(filename)
-        return f"Image successfully generated and saved at {filename}"
-
-    except Exception as e:
-        error_message = f"Error generating image: {str(e)}"
-        return error_message
 
 
 class ImageGenerator:
-    def __init__(self, chat_id, call_id, capability_id):
+    def __init__(self, chat_id, call_id, capability_id, omni_memory):
         self.chat_id = chat_id
         self.call_id = call_id
         self.capability_id = capability_id
+        self.omni_memory = omni_memory
+        self.image_dir = ensure_path(os.path.join(settings.ROOT_DIR, "images", self.chat_id))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
-        autogen.register_function(
-            flux_image_generator,
+        self._register_functions()
+        self.get_chat_manager()
+        
+    def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"]):
+        try:
+            client = Together(api_key=settings.TOGETHER_API_KEY)
+            response = client.images.generate(
+                prompt=prompt,
+                model="black-forest-labs/FLUX.1-dev",
+                n=1,
+                width=768,
+                height=432,
+                steps=30
+            )
+
+            # Download and save the image with the generated filename
+            image_url = response.data[0].url
+            image_response = requests.get(image_url)
+            
+
+            filename = os.path.join(self.image_dir,f"{self.capability_id}_{int(time.time())}.jpg") # to be updated with project creation path
+            with open(filename, "wb") as f:
+                f.write(image_response.content)
+
+            return f"Image successfully generated and saved at {filename}"
+
+        except Exception as e:
+            error_message = f"Error generating image: {str(e)}"
+            return error_message
+        
+    def _register_functions(self):
+        
+        #Wrapper functions before registring to agents
+        
+        def flux_image_generator_wrapper(query: Annotated[str, "The image generation prompt"]):
+            return self.flux_image_generator(query)
+        
+        autogen.agentchat.register_function(
+            flux_image_generator_wrapper,
             caller=self.image_generator_caller,
             executor=self.image_generator,
             name="flux_image_generator",
             description="This tool will be used to generate images based on the information.",
         )
-        self.get_chat_manager()
-
 
     def get_user_intent_agent(self):
         return AssistantAgent(
@@ -158,6 +161,7 @@ class ImageGenerator:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
+            omni_memory=self.omni_memory,
             capability_name=settings.IMAGE_GENERATOR_COLLECTION,
             capability_id=self.capability_id,
             chat_id=self.chat_id,
