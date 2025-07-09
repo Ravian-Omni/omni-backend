@@ -28,7 +28,7 @@ from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import webprocess_completion
 from tavily import AsyncTavilyClient
 from .country_data import country_codes
-
+from utilities.storage import ensure_path
 
 
 
@@ -65,13 +65,11 @@ class BrowserManager:
         self.tavily_client = AsyncTavilyClient(settings.WEB_API)
         
         # Setup directories
-        self.browser_data_dir = browser_data_dir or str(Path.home() / "browser_use_data")
-        os.makedirs(self.browser_data_dir, exist_ok=True)
+        self.browser_data_dir = ensure_path(browser_data_dir) or str(Path.home() / "browser_use_data")
         
         if self.save_results:
             self.results_dir = os.path.join(settings.ROOT_DIR, "browser")
-            browser_gif_dir = os.path.join(self.results_dir, "gif", self.chat_id)
-            os.makedirs(browser_gif_dir, exist_ok=True)
+            browser_gif_dir = ensure_path(os.path.join(self.results_dir, "gif", self.chat_id))
             self.browser_gif = os.path.join(browser_gif_dir, f"{self.capability_id}.gif")
         
         # Initialize LLM configurations

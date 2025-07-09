@@ -9,7 +9,6 @@ from autogen.agentchat.agent import Agent
 from typing import List, Dict, Any
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from typing import List, Dict, Optional, Union
-from utilities.external_memory import get_last_entry, get_all_messages
 import os
 from pathlib import Path
 from typing import List, Dict, Set, Optional
@@ -207,7 +206,7 @@ class FileFinder:
         return autogen.AssistantAgent(
             name="file_finder_planner",
             llm_config=self.llm_config,
-            system_message=prompts.planner.format(get_last_entry=get_last_entry,get_all_messages=get_all_messages)
+            system_message=prompts.planner
         )
     def file_finder(self):
         return autogen.AssistantAgent(

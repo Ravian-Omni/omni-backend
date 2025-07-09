@@ -9,7 +9,6 @@ from typing import List, Dict, Any
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from typing import List, Dict, Optional, Union
 from typing import Annotated, List, Dict
-from utilities.external_memory import get_last_entry, get_all_messages
 from PIL import Image
 import httpx
 import time
@@ -25,9 +24,6 @@ llm_config = LLMConfigManager.get_config("gpt4o")
 model_id = "4w59rxjq"
 baseten_api_key = "IPY0OlMw.q04XmZdd8TgEv3hgDawsZHGuiLkehyuc"
 
-
-file_location = os.path.join(settings.ROOT_DIR, "images")
-os.makedirs(file_location, exist_ok=True)
 
 
 
@@ -83,7 +79,7 @@ class ImageGenerator:
     def get_user_intent_agent(self):
         return AssistantAgent(
             name="user_intent",
-            system_message=prompts.user_intent.format(get_last_entry=get_last_entry, get_all_messages=get_all_messages),
+            system_message=prompts.user_intent,
             llm_config=self.llm_config
         )
     

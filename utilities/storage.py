@@ -7,6 +7,10 @@ from configs.settings import settings
 import asyncio
 from loguru import logger
 
+import os
+from pathlib import Path
+from typing import Union
+
 async def update_db(chat_id, message, capability):
     mongodb = await get_mongodb_service()
     raw_message = {k: message[k] for k in ['role', 'name', 'raw_message']}
@@ -27,6 +31,70 @@ async def update_db(chat_id, message, capability):
     db_mongo_update = asyncio.create_task(mongodb.update_one(capability,{"chat_id":chat_id},mongo_update))
     logger.info(f"MongoDB updated for {chat_id} having status {db_mongo_update}")
     return True
+
+def ensure_path(path: Union[str, Path], create_if_missing: bool = True) -> str:
+    """
+    Ensure a directory path exists and return the absolute path.
+    
+    Args:
+        path: The directory path to check/create
+        create_if_missing: Whether to create the directory if it doesn't exist (default: True)
+    
+    Returns:
+        str: The absolute path of the directory
+        
+    Raises:
+        OSError: If path creation fails
+        FileExistsError: If path exists but is a file, not a directory
+    """
+    # Convert to Path object for easier handling
+    path_obj = Path(path)
+    
+    # Convert to absolute path
+    abs_path = path_obj.resolve()
+    
+    if abs_path.exists():
+        if abs_path.is_file():
+            raise FileExistsError(f"Path exists but is a file, not a directory: {abs_path}")
+        # Directory already exists
+        return str(abs_path)
+    
+    if create_if_missing:
+        try:
+            abs_path.mkdir(parents=True, exist_ok=True)
+            print(f"Created directory: {abs_path}")
+        except OSError as e:
+            raise OSError(f"Failed to create directory {abs_path}: {e}")
+    
+    return str(abs_path)
+
+def simple_ensure_path(path: Union[str, Path]) -> str:
+    """
+    Simple version: create directory if it doesn't exist and return absolute path.
+    
+    Args:
+        path: Directory path
+        
+    Returns:
+        str: Absolute path
+    """
+    abs_path = os.path.abspath(path)
+    os.makedirs(abs_path, exist_ok=True)
+    return abs_path
+
+def ensure_paths(*paths: Union[str, Path], create_if_missing: bool = True) -> list[str]:
+    """
+    Ensure multiple directory paths exist and return their absolute paths.
+    
+    Args:
+        *paths: Variable number of directory paths to check/create
+        create_if_missing: Whether to create directories if they don't exist (default: True)
+    
+    Returns:
+        list[str]: List of absolute paths
+    """
+    return [ensure_path(path, create_if_missing) for path in paths]
+
 
 
 class OmniStorage:

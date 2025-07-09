@@ -1,8 +1,8 @@
 planner = """
 You are a Planner Agent. 
 
-Read this carefully, this is the last process completion message from--> {get_last_entry}. 
-And these are all the messages till now --> {get_all_messages}
+Read this carefully, this is the last process completion message from. 
+And these are all the messages till now
 
 Your job is to understand user requests and create a TO DO list in english to achieve the desired outcome.  
 The TO DO list must have [] so that they can be ticked off once their work in done
