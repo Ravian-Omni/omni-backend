@@ -23,29 +23,14 @@ from huggingface_hub import InferenceClient
 from capabilities.python_developer import prompts
 from capabilities.python_developer.response_format import ProblemStatusResponse
 from autogen import config_list_from_json
-from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
 import autogen
 import asyncio
 from typing import List, Optional,Dict,Any
 from loguru import logger
-from utilities.storage import omni_storage, update_db
+from utilities.storage import omni_storage, update_db, ensure_path
 from utilities.custom_manager import CustomGroupChatManager
-
-
-llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-
-file_path = None  # Replace with your data file path
-
-results_dir = os.path.join(settings.ROOT_DIR, "code")
-os.makedirs(results_dir, exist_ok=True)
-
-file_location = os.path.join(settings.ROOT_DIR, "code","output")#
-
-coding_language = "python"
-question = None
-
 
 class LoopDetector:
         def __init__(self, window_size=3):
@@ -70,9 +55,9 @@ class PythonDeveloper:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
-        self.file_location = os.path.join(settings.ROOT_DIR, "code", "output")
+        self.file_location = ensure_path(os.path.join(settings.ROOT_DIR, "code", "output"))
         self.coding_language = "python"
-        self.results_dir = os.path.join(settings.ROOT_DIR, "code")
+        self.results_dir = ensure_path(os.path.join(settings.ROOT_DIR, "code"))
         self.agents = self.get_agents()
         self.get_chat_manager()
         
@@ -80,7 +65,7 @@ class PythonDeveloper:
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=self.llm_config,
-            system_message=prompts.planner.format(get_last_entry=get_last_entry,get_all_messages=get_all_messages,file_location=self.file_location,coding_language=self.coding_language)
+            system_message=prompts.planner.format(file_location=self.file_location,coding_language=self.coding_language)
         )
     
     def get_code_writer(self):

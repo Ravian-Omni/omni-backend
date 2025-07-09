@@ -43,7 +43,6 @@ from email.mime.base import MIMEBase
 from email import encoders
 import os
 from utilities.custom_manager import CustomGroupChatManager
-from utilities.external_memory import get_last_entry, get_all_messages
 from configs.settings import settings
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
@@ -544,7 +543,7 @@ class EmailManager:
 
     def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:
         messages = groupchat.messages
-        if len(messages) == 1:
+        if len(messages) == 1 or last_speaker.name == "chat_manager":
             print("Initial query received. Starting with intent_classifier.")
             return groupchat.agent_by_name("intent_classifier_agent")
         if last_speaker.name == "intent_classifier_agent":

@@ -7,7 +7,7 @@ from simplegmail import Gmail
 from configs.settings import settings
 import pandas as pd
 import autogen
-from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
+from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, ConversableAgent
 from autogen import config_list_from_json
 import os,json
 from typing import List, Dict, Any
@@ -122,7 +122,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         asyncio.run(self.send_websocket(db_content))
         asyncio.create_task(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))
             
-            
+
 class CustomUserProxyAgent(UserProxyAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -155,7 +155,8 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 
 class Omni:
-    def __init__(self,chat_id):
+    def __init__(self, chat_id):
+        # self.user_id=user_id
         self.chat_id=chat_id
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -183,15 +184,30 @@ class Omni:
         last_speaker = self.groupchat.messages[-1]
         if last_speaker.get("name") == "agent_caller":
             tool_calls = last_speaker.get("tool_calls")
-            result = {item['function']['name']: item['id'] for item in tool_calls}
+            result = {}
+            
+            for index, item in enumerate(tool_calls):
+                function_name = item['function']['name']
+                call_info = {
+                    'id': item['id'],
+                    'index': index,
+                    'arguments': item['function'].get('arguments', {})
+                }
+                
+                if function_name in result:
+                    result[function_name].append(call_info)
+                else:
+                    result[function_name] = [call_info]
+            
             return result
         return None
         
     async def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
-        call_id = self.get_last_call_id().get("image_generator")
+        call_ids = self.get_last_call_id().get("image_generator")
+        call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.IMAGE_GENERATOR_COLLECTION, capability_id=capability_id)
-        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id)
+        image_generator = ImageGenerator(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
         response = image_generator.manager.initiate_chat(image_generator.manager, message=query)
         messages = image_generator.groupchat.messages
         for msg in reversed(messages):
@@ -203,7 +219,8 @@ class Omni:
 
 
     async def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
-        call_id = self.get_last_call_id().get("web_browser")
+        call_ids = self.get_last_call_id().get("web_browser")
+        call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         result = await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.BROWSER_COLLECTION, capability_id=capability_id)
         browser_manager = BrowserManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
@@ -225,7 +242,8 @@ class Omni:
 
 
     async def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
-        call_id = self.get_last_call_id().get("python_coder")
+        call_ids = self.get_last_call_id().get("python_coder")
+        call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         await create_capability_chat(chat_id=self.chat_id, call_id=call_id, capability=settings.PYTHON_DEV_COLLECTION, capability_id=capability_id)
         python_dev= PythonDeveloper(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
@@ -248,7 +266,8 @@ class Omni:
 
 
     async def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
-        call_id = self.get_last_call_id().get("email_sender")
+        call_ids = self.get_last_call_id().get("email_sender")
+        call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.EMAIL_COLLECTION, capability_id=capability_id)
         emailer = EmailManager(chat_id=self.chat_id, call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
@@ -271,7 +290,8 @@ class Omni:
 
 
     async def get_file_finder(self, query: Annotated[str, "The search query"]):
-        call_id = self.get_last_call_id().get("file_finder")
+        call_ids = self.get_last_call_id().get("file_finder")
+        call_id = next((item['id'] for item in call_ids if query in item['arguments']), None)
         capability_id = str(uuid.uuid4())
         await create_capability_chat(chat_id=self.chat_id,call_id=call_id,capability=settings.FILE_FINDER_COLLECTION, capability_id=capability_id)
         file_finder = FileFinder(chat_id=self.chat_id,call_id=call_id, capability_id=capability_id, omni_memory=self.memory)
@@ -399,12 +419,12 @@ class Omni:
     def get_agent_caller(self):
         return autogen.AssistantAgent(
             name="agent_caller",
-            llm_config=llm_config_mini, #llm_config_mini.  llm_config_agent_caller
+            llm_config=llm_config_mini,
             #system_message=prompts.agent_caller,
         )
 
     def get_agent_executor(self):
-        return autogen.UserProxyAgent(
+        return UserProxyAgent(
             "agent_executor",
             human_input_mode="NEVER",
             #description="""This agent will execute the function which are group chat on their own""",
