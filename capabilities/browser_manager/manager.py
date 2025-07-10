@@ -67,7 +67,8 @@ class BrowserManager:
         self.tavily_client = AsyncTavilyClient(settings.WEB_API)
         
         # Setup directories
-        self.browser_data_dir = ensure_path(browser_data_dir) or str(Path.home() / "browser_use_data")
+        #self.browser_data_dir = ensure_path(browser_data_dir) or str(Path.home() / "browser_use_data")
+        self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")
         
         if self.save_results:
             self.results_dir = os.path.join(settings.ROOT_DIR, "browser")

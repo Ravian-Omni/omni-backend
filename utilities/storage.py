@@ -66,7 +66,7 @@ def ensure_path(path: Union[str, Path], create_if_missing: bool = True) -> str:
         except OSError as e:
             raise OSError(f"Failed to create directory {abs_path}: {e}")
     
-    return str(abs_path)
+    return abs_path
 
 def simple_ensure_path(path: Union[str, Path]) -> str:
     """

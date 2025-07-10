@@ -39,6 +39,7 @@ from utilities.custom_manager import create_capability_chat
 import uuid
 from omni.memory import OmniMemory
 import aioconsole
+
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
 llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
@@ -60,6 +61,10 @@ llm_config_agent_caller["response_format"] = AgentCallerResponse
 from managers.connection import WebSocketManager
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from dependencies import get_websocket_manager
+
+
+
+
 
 class OmniGroupChatManager(autogen.GroupChatManager):
     def __init__(self, groupchat, llm_config, memory: OmniMemory, human_input_mode: str = "NEVER", chat_id: str = None, queue: Optional[asyncio.Queue] = None):

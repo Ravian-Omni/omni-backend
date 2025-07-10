@@ -1,3 +1,4 @@
+
 get_request = """
 today's date is --> {today_date}
 as an agent you will get the initial request of the user. 
@@ -704,14 +705,6 @@ Analyze the user input and classify as:
      - `📁 FileOps`: For "find/edit" file commands  
   3. Output structured results  
 
-**Output Format**:  
-```json
-{
-"classification": "[Type]", 
-"confidence": "[Level]",
-"next_action": "[Tool/Response]",
-"reason": "[15-word rationale]"
-}
 """
 
 

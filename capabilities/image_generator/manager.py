@@ -37,28 +37,29 @@ class ImageGenerator:
         self._register_functions()
         self.get_chat_manager()
         
-    def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"]):
+    def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"], num_images: Annotated[int, "Number of images to generate"] = 1) -> str:
         try:
             client = Together(api_key=settings.TOGETHER_API_KEY)
             response = client.images.generate(
                 prompt=prompt,
                 model="black-forest-labs/FLUX.1-dev",
-                n=1,
+                n=num_images,
                 width=768,
                 height=432,
                 steps=30
             )
 
             # Download and save the image with the generated filename
-            image_url = response.data[0].url
-            image_response = requests.get(image_url)
-            
+            list_of_images = []
+            for i,image in enumerate(response.data):
+                image_url = image.url
+                image_response = requests.get(image_url)
+                filename = os.path.join(self.image_dir,f"{self.capability_id}_{i}_{int(time.time())}.jpg") # to be updated with project creation path
+                with open(filename, "wb") as f:
+                    f.write(image_response.content)
+                list_of_images.append(filename)
 
-            filename = os.path.join(self.image_dir,f"{self.capability_id}_{int(time.time())}.jpg") # to be updated with project creation path
-            with open(filename, "wb") as f:
-                f.write(image_response.content)
-
-            return f"Image successfully generated and saved at {filename}"
+                return f"Image successfully generated and saved at {list_of_images}"
 
         except Exception as e:
             error_message = f"Error generating image: {str(e)}"
@@ -68,8 +69,8 @@ class ImageGenerator:
         
         #Wrapper functions before registring to agents
         
-        def flux_image_generator_wrapper(query: Annotated[str, "The image generation prompt"]):
-            return self.flux_image_generator(query)
+        def flux_image_generator_wrapper(query: Annotated[str, "The image generation prompt"], num_images: Annotated[int, "Number of images to generate"] = 1) -> str:
+            return self.flux_image_generator(query,num_images)
         
         autogen.agentchat.register_function(
             flux_image_generator_wrapper,

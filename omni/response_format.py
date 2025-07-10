@@ -1,4 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
+from .country_data import country_codes
+from .omni_handlers import _get_user_country
+country = _get_user_country(country_codes)
 
 
 # omni_planner_response_format = {
@@ -372,6 +375,32 @@ class ConfidenceLevel(str, Enum):
     MEDIUM = "Medium"
     LOW = "Low"
 
+class UserCountry(BaseModel):
+    """
+    Pydantic model for user country information.
+    """
+    country_code: Optional[str] = Field(
+        None,
+        description="ISO country code (e.g., 'US', 'GB', 'IN')",
+        example="US"
+    )
+    country_name: Optional[str] = Field(
+        None,
+        description="Full country name",
+        example="Great Britain"
+    )
+    
+    @classmethod
+    def detect_country(cls) -> 'UserCountry':
+        """Detect user's country using the imported function."""
+        try:
+            country = _get_user_country(country_codes)
+            return cls(
+                country_code=country.get('code') if isinstance(country, dict) else None,
+                country_name=country.get('name') if isinstance(country, dict) else str(country) if country else None
+            )
+        except Exception:
+            return cls(country_code=None, country_name=None)
 
 class QuestionClassification(BaseModel):
     """
@@ -409,9 +438,11 @@ class QuestionClassification(BaseModel):
     original_question: str = Field(
         ...,
         min_length=1,
-        description="The original user question being classified",
+        description="The complete original user question ",
         example="How are you doing today?"
     )
+
+    
     complexity_score: Optional[int] = Field(
         None,
         ge=1,
@@ -432,6 +463,17 @@ class QuestionClassification(BaseModel):
         ),
         example="15-20 minutes"
     )
+
+
+    user_country_code: str = Field(
+        ...,
+        description=country["code"]
+    )
+    user_country_name: str = Field(
+        ...,
+        description=country["name"]
+    )
+
 
 
 # Alternative: Create a mapping that you can reference in your LLM prompt
