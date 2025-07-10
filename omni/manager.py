@@ -29,7 +29,7 @@ from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
 from omni import prompts
 from loguru import logger
-from utilities.storage import update_db
+from utilities.storage import update_db, a_speak
 import asyncio
 from string import Template
 from typing import List, Optional,Dict,Any
@@ -72,45 +72,11 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         await ws_manager.send_chat_message(session_id=self.chat_id, content=message, source="OMNI")
         return
         
-    def generate_reply(
-        self,
-        messages: Optional[list[dict[str, Any]]] = None,
-        sender: Optional["Agent"] = None,
-        **kwargs: Any,
-    ) -> Union[str, dict[str, Any], None]:
-        """Generate a reply based on the received messages.
-
-        Args:
-            messages (list[dict[str, Any]]): a list of messages received from other agents.
-                The messages are dictionaries that are JSON-serializable and
-                follows the OpenAI's ChatCompletion schema.
-            sender: sender of an Agent instance.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            str or dict or None: the generated reply. If None, no reply is generated.
-        """
-        super().generate_reply(messages, sender,**kwargs)
-
-    async def a_generate_reply(
-        self,
-        messages: Optional[list[dict[str, Any]]] = None,
-        sender: Optional["Agent"] = None,
-        **kwargs: Any,
-    ) -> Union[str, dict[str, Any], None]:
-        """(Async) Generate a reply based on the received messages.
-
-        Args:
-            messages (list[dict[str, Any]]): a list of messages received from other agents.
-                The messages are dictionaries that are JSON-serializable and
-                follows the OpenAI's ChatCompletion schema.
-            sender: sender of an Agent instance.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            str or dict or None: the generated reply. If None, no reply is generated.
-        """
-        await super().a_generate_reply(messages, sender, **kwargs)
+    async def voice_alert(self, agent_message):
+        if agent_message.get("name") == "manual_verification":
+            await a_speak(agent_message.get("content", ""))
+        elif agent_message.get("name") == "process_completion_agent":
+            await a_speak("Hey there! Ravian finished your task!")
     
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         logger.info(f"Received from {sender.name}: {message}")
@@ -118,6 +84,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         db_content = {"role":"user","name":sender.name,"content":content}
         self.memory.push_main_message(db_content)
+        asyncio.create_task(self.voice_alert(db_content))
         db_content["raw_message"] = message
         asyncio.run(self.send_websocket(db_content))
         asyncio.create_task(update_db(chat_id=self.chat_id,message=db_content,capability=settings.OMNI_COLLECTION))

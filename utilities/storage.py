@@ -11,6 +11,9 @@ import os
 from pathlib import Path
 from typing import Union
 
+import subprocess
+import sys
+
 async def update_db(chat_id, message, capability):
     mongodb = await get_mongodb_service()
     raw_message = {k: message[k] for k in ['role', 'name', 'raw_message']}
@@ -32,6 +35,73 @@ async def update_db(chat_id, message, capability):
     logger.info(f"MongoDB updated for {chat_id} having status {db_mongo_update}")
     return True
 
+async def a_speak(text, voice='Samantha'):
+    """
+    Asynchronously speak text using macOS 'say' command with Samantha voice by default.
+    Falls back to system default if Samantha is not available.
+    
+    Args:
+        text (str): The text to be spoken
+        voice (str): Voice to use (default: 'Samantha')
+    """
+    if sys.platform != 'darwin':
+        print("This function only works on macOS")
+        return
+    
+    try:
+        # Try with specified voice first
+        process = await asyncio.create_subprocess_exec(
+            'say', '-v', voice, text,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await process.wait()
+        
+        if process.returncode != 0:
+            raise Exception("Voice not available")
+            
+    except Exception:
+        # If specified voice fails, use system default
+        print(f"Voice '{voice}' not available, using system default")
+        process = await asyncio.create_subprocess_exec('say', text)
+        await process.wait()
+
+def speak(text, voice='Samantha'):
+    """
+    Speak text using macOS 'say' command with Samantha voice by default.
+    Falls back to system default if Samantha is not available.
+    
+    Args:
+        text (str): The text to be spoken
+        voice (str): Voice to use (default: 'Samantha')
+    """
+    if sys.platform != 'darwin':
+        print("This function only works on macOS")
+        return
+    
+    try:
+        # Try with specified voice first
+        subprocess.run(['say', '-v', voice, text], check=True, 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        # If specified voice fails, use system default
+        subprocess.run(['say', text], check=True)
+
+def list_available_voices():
+    """List all available voices on the system in a readable format."""
+    try:
+        if sys.platform != 'darwin':
+            print("This function only works on macOS")
+            return
+        
+        result = subprocess.run(['say', '-v', '?'], capture_output=True, text=True, check=True)
+        print("Available voices:")
+        print(result.stdout)
+        
+    except Exception as e:
+        print(f"Error listing voices: {e}")
+    
+        
 def ensure_path(path: Union[str, Path], create_if_missing: bool = True) -> str:
     """
     Ensure a directory path exists and return the absolute path.
