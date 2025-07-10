@@ -492,7 +492,7 @@ class EmailManager:
         return autogen.AssistantAgent(
             name="email_caller_agent",
             llm_config=self.llm_config,
-            system_message=prompts.email_caller,
+            # system_message=prompts.email_caller,
         )
 
     def get_code_executor(self):
