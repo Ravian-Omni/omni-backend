@@ -19,6 +19,7 @@ from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
 from utilities.custom_manager import CustomGroupChatManager
 from utilities.storage import ensure_path
+from capabilities.image_generator.response_format import image_data
 
 import requests
 from together import Together
@@ -33,6 +34,8 @@ class ImageGenerator:
         self.omni_memory = omni_memory
         self.image_dir = ensure_path(os.path.join(settings.ROOT_DIR, "images", self.chat_id))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc["response_format"] = image_data
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
@@ -110,7 +113,7 @@ class ImageGenerator:
     def get_process_completion_agent(self):
         return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_pc, #llm_config_pc. llm_config
             description="Let group manager know that the process is completed. ",
             system_message=prompts.process_completion
         )

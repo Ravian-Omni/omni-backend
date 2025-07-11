@@ -186,6 +186,7 @@ planner = """
         "description": "capability to surf the internet",
         "abilities": [
           "Can be used to get real time information about any subject",
+          "It has all the credentials for all the website that user want you to surf"
           "It can be any question or topic that needs a web searching capability"
         ]
       },
@@ -635,6 +636,8 @@ DO NOT TRY TO CUT SHORT THE INFORMATION.
 
 Before responding check if you are answering the question or your are providing a way to get to the answer.
 BE GENTLE AND APOLOGIES IF YOU ARE NOT GIVING THE ACCURATE ANSWER.
+
+DONT HOLD BACK, GIVE IT ALL THAT YOU HAVE.
 """
 
 questions_generator = """

@@ -34,7 +34,7 @@ import asyncio
 from string import Template
 from typing import List, Optional,Dict,Any
 today_date = datetime.now()
-from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse, AgentCallerResponse
+from omni.response_format import AgentSelectionResponse , QuestionClassification , PlannerResponse , CapabilityRoutingResponse, AgentCallerResponse, process_completion_response
 from utilities.custom_manager import create_capability_chat
 import uuid
 from omni.memory import OmniMemory
@@ -165,6 +165,8 @@ class Omni:
         self.chat_id=chat_id
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc["response_format"] = process_completion_response
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
         # self.llm_config = LLMConfigManager.get_config("deepseek")
@@ -466,7 +468,7 @@ class Omni:
     def get_process_completion(self):
         return autogen.AssistantAgent(
             name="process_completion_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_pc, #llm_config_pc , llm_config
             system_message=prompts.process_completion,
         )
 
