@@ -94,7 +94,7 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
-    detailed_result: str
+    exhaustive_report: str
     details_of_generated_files: Optional[str] = None
     complete_location_generated_files: Optional[str] = None
 

@@ -7,6 +7,7 @@ import types
 from autogen.code_utils import content_str
 from termcolor import colored
 from autogen.io import IOStream
+from email.utils import parseaddr
 
 # import autogen.coding
 import json
@@ -57,6 +58,7 @@ from email.header import decode_header
 from email.message import EmailMessage
 llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from langchain_openai import AzureChatOpenAI
+from capabilities.email_manager.response_format import email_process_completion, intent_class
 
 
 # token_path = os.path.join(settings.ROOT_DIR,"configs","gmail_token.json") 
@@ -93,6 +95,10 @@ class EmailManager:
         self.capability_id = capability_id
         self.omni_memory = omni_memory
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc["response_format"] = email_process_completion
+        self.llm_config_ic = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_ic["response_format"] = intent_class
         self.agents = self.get_agents()
         
         autogen.register_function(
@@ -102,13 +108,13 @@ class EmailManager:
             name="send_email_with_attachments",
             description="Sends an email with HTML and plain text content to one or more recipients, optionally including file attachments.",
         )
-        autogen.register_function(
-            self.read_latest_email_with_attachments,
-            caller=self.email_reader_agent,
-            executor=self.code_executor,
-            name="read_latest_email_with_attachments",
-            description="Search emails by criteria,  read the email content  and save attachments to local if needed."
-        )
+        # autogen.register_function(
+        #     self.read_latest_email_with_attachments,
+        #     caller=self.email_reader_agent,
+        #     executor=self.code_executor,
+        #     name="read_latest_email_with_attachments",
+        #     description="Search emails by criteria,  read the email content  and save attachments to local if needed."
+        # )
         autogen.register_function(
             self.send_reply_to_email,
             caller=self.email_reply_agent,
@@ -405,6 +411,7 @@ class EmailManager:
                                 subject = subject.decode(encoding if encoding else "utf-8")
                         
                         from_ = msg.get("From")
+                        name, email_address = parseaddr(from_)
                         date = msg.get("Date")
 
 
@@ -434,8 +441,10 @@ class EmailManager:
                             "subject": subject,
                             "from": from_,
                             "date": date,
+                            "from_email": email_address,
                             "body": body,
                             "message_id": msg.get("Message-ID")
+                            #"headers": list(msg.items())
                         })
             
             imap.logout()
@@ -451,7 +460,7 @@ class EmailManager:
     def get_intent_classifier(self):
         return autogen.AssistantAgent(
             name="intent_classifier_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config, #llm_config_ic , llm_config
             system_message=prompts.intent_classifier,
         )
     def get_email_reader(self):
@@ -513,7 +522,7 @@ class EmailManager:
     def get_process_completion(self):
         return autogen.AssistantAgent(
             name="process_completion_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_pc,  #llm_config_pc , llm_config
             system_message=prompts.process_completion,
         )
     # static custom speaker selection, no dynamic agent selection or conditional chat routing
@@ -551,7 +560,7 @@ class EmailManager:
             if "INTENT: SEND_EMAIL" in last_message:
                 return groupchat.agent_by_name("planner_agent")
             elif "INTENT: READ_EMAIL" in last_message:
-                return groupchat.agent_by_name("email_reader_agent")
+                return groupchat.agent_by_name("email_search_agent")
             elif "INTENT: SEARCH_EMAIL" in last_message:
                 return groupchat.agent_by_name("email_search_agent")
             elif "INTENT: REPLY_EMAIL" in last_message:
