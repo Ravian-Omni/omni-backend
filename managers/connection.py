@@ -97,14 +97,7 @@ class WebSocketManager:
                     },
                 )
 
-            # Create input function for this session
 
-            # Start the chat handler
-            # task = asyncio.create_task(
-            #     chat_handler(omni=omni, message=initial_message, function=input_func)
-            # )
-            # input_func = self._create_input_func(session_id)
-            # omni.manual_verification.set_input_function(input_func)
             task = asyncio.create_task(omni.manager.a_initiate_chat(omni.manager,message=initial_message.get("task"),clear_history=False))
             self._active_tasks[session_id] = task
 

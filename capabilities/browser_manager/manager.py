@@ -23,7 +23,7 @@ from browser_use.browser.context import BrowserContextConfig
 from configs.settings import settings
 from langchain_openai import ChatOpenAI
 from capabilities.browser_manager import prompts
-from utilities.custom_manager import CustomGroupChatManager
+from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.llm_configs_manager import LLMConfigManager
 from capabilities.browser_manager.response_format import webprocess_completion
 from tavily import AsyncTavilyClient
@@ -35,10 +35,7 @@ from utilities.storage import ensure_path
 class BrowserManager:
     def __init__(
         self, 
-        chat_id: str, 
-        call_id: str, 
-        capability_id: str, 
-        omni_memory,
+        context: ChatContext,
         headless: bool = False,
         window_size: Dict[str, int] = None,
         save_results: bool = True,
@@ -56,10 +53,7 @@ class BrowserManager:
         self.headless = headless
         self.window_size = window_size or {'width': 1280, 'height': 720}
         self.save_results = save_results
-        self.chat_id = chat_id
-        self.call_id = call_id
-        self.capability_id = capability_id
-        self.omni_memory = omni_memory
+        self.context = context
         
         # Initialize Tavily client
         self.tavily_client = AsyncTavilyClient(settings.WEB_API)
@@ -69,8 +63,8 @@ class BrowserManager:
         
         if self.save_results:
             self.results_dir = os.path.join(settings.ROOT_DIR, "browser")
-            browser_gif_dir = ensure_path(os.path.join(self.results_dir, "gif", self.chat_id))
-            self.browser_gif = os.path.join(browser_gif_dir, f"{self.capability_id}.gif")
+            browser_gif_dir = ensure_path(os.path.join(self.results_dir, "gif", self.context.chat_id))
+            self.browser_gif = os.path.join(browser_gif_dir, f"{self.context.capability_id}.gif")
         
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -327,11 +321,7 @@ class BrowserManager:
         manager = CustomGroupChatManager(
             groupchat=groupchat,
             llm_config=self.llm_config,
-            capability_name=settings.BROWSER_COLLECTION,
-            capability_id=self.capability_id,
-            chat_id=self.chat_id,
-            call_id=self.call_id,
-            omni_memory=self.omni_memory,
+            chat_context=self.context,
             human_input_mode="ALWAYS"
         )
 

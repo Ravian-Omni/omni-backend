@@ -29,8 +29,8 @@ import autogen
 import asyncio
 from typing import List, Optional,Dict,Any
 from loguru import logger
-from utilities.storage import omni_storage, update_db, ensure_path
-from utilities.custom_manager import CustomGroupChatManager
+from utilities.storage import ensure_path
+from utilities.custom_manager import CustomGroupChatManager, ChatContext
 
 class LoopDetector:
         def __init__(self, window_size=3):
@@ -47,11 +47,8 @@ class LoopDetector:
 loop_detector = LoopDetector()
 
 class PythonDeveloper:
-    def __init__(self, chat_id, call_id, capability_id, omni_memory):
-        self.chat_id = chat_id
-        self.call_id = call_id
-        self.capability_id = capability_id
-        self.omni_memory = omni_memory
+    def __init__(self, context: ChatContext):
+        self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
@@ -179,11 +176,7 @@ class PythonDeveloper:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            omni_memory=self.omni_memory,
-            capability_name=settings.PYTHON_DEV_COLLECTION,
-            capability_id=self.capability_id,
-            chat_id=self.chat_id,
-            call_id=self.call_id,
+            chat_context=self.context,
             human_input_mode="ALWAYS"
         )
         return self.groupchat , self.manager

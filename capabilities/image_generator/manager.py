@@ -17,21 +17,17 @@ import base64
 from capabilities.image_generator import prompts
 from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
-from utilities.custom_manager import CustomGroupChatManager
+from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from utilities.storage import ensure_path
-
 import requests
 from together import Together
 
 
 
 class ImageGenerator:
-    def __init__(self, chat_id, call_id, capability_id, omni_memory):
-        self.chat_id = chat_id
-        self.call_id = call_id
-        self.capability_id = capability_id
-        self.omni_memory = omni_memory
-        self.image_dir = ensure_path(os.path.join(settings.ROOT_DIR, "images", self.chat_id))
+    def __init__(self, context: ChatContext):
+        self.context = context
+        self.image_dir = ensure_path(os.path.join(settings.ROOT_DIR, "images", self.context.chat_id))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         self._register_functions()
@@ -54,7 +50,7 @@ class ImageGenerator:
             image_response = requests.get(image_url)
             
 
-            filename = os.path.join(self.image_dir,f"{self.capability_id}_{int(time.time())}.jpg") # to be updated with project creation path
+            filename = os.path.join(self.image_dir,f"{self.context.capability_id}_{int(time.time())}.jpg") # to be updated with project creation path
             with open(filename, "wb") as f:
                 f.write(image_response.content)
 
@@ -161,11 +157,7 @@ class ImageGenerator:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            omni_memory=self.omni_memory,
-            capability_name=settings.IMAGE_GENERATOR_COLLECTION,
-            capability_id=self.capability_id,
-            chat_id=self.chat_id,
-            call_id=self.call_id,
+            chat_context=self.context,
             human_input_mode="ALWAYS"
         )
         return  self.groupchat , self.manager

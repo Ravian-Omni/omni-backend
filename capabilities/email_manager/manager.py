@@ -42,7 +42,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import os
-from utilities.custom_manager import CustomGroupChatManager
+from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
@@ -87,11 +87,8 @@ def validate_attachments(file_paths):
 
 
 class EmailManager:
-    def __init__(self, chat_id, call_id, capability_id, omni_memory):
-        self.chat_id = chat_id
-        self.call_id = call_id
-        self.capability_id = capability_id
-        self.omni_memory = omni_memory
+    def __init__(self, context: ChatContext):
+        self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         
@@ -620,11 +617,7 @@ class EmailManager:
         self.manager = CustomGroupChatManager(
             groupchat=self.groupchat,
             llm_config=self.llm_config,
-            omni_memory = self.omni_memory,
-            capability_name=settings.EMAIL_COLLECTION,
-            capability_id=self.capability_id,
-            chat_id=self.chat_id,
-            call_id=self.call_id,
+            chat_context=self.context,
             human_input_mode="ALWAYS"
         )
         return

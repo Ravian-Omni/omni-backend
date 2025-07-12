@@ -11,26 +11,23 @@ from omni.manager import Omni
 
 router = APIRouter()
 
-async def omni_start_chat(omni, message, function):
-    response = await omni.manager.a_initiate_chat(omni.manager,message=message.get("task"),clear_history=False)
-    return
-
 @router.websocket("/runs/{chat_id}")
 async def run_websocket(
     websocket: WebSocket,
     chat_id: str,
+    user_id: str = "default_user",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
     db=Depends(get_mongodb_service),
 ):
     """WebSocket endpoint for run communication"""
     # Verify run exists and is in valid state
-    history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id})
+    history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
     if not history:
-        logger.warning(f"Run not found: {chat_id}")
+        logger.warning(f"Run not found: {user_id} & {chat_id}")
         await websocket.close(code=4004, reason="Run not found")
         return
     
-    omni = Omni(chat_id=chat_id)
+    omni = Omni(chat_id=chat_id,user_id=user_id)
     messages = history.get("messages",[])
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
@@ -60,12 +57,6 @@ async def run_websocket(
                     # Handle start message
                     logger.info(f"Received start request for run {chat_id}")
                     if message.get("task"):
-                        # await ws_manager.start_stream(chat_id, task, team_config)
-                        # asyncio.create_task(
-                        #     ws_manager.start_stream(
-                        #         chat_id, task, team_config, settings_config
-                        #     )
-                        # )
                         asyncio.create_task(ws_manager.start_chat_stream(session_id=chat_id,initial_message=message,omni=omni))
                     else:
                         logger.warning(f"Invalid start message format for run {chat_id}")
