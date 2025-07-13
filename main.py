@@ -13,7 +13,7 @@ from fastapi.openapi.utils import get_openapi
 import os
 from initialization import AppInitializer
 import nest_asyncio
-from routers import ws
+from routers import ws, config
 # Initialize application
 app_file_path = os.path.dirname(os.path.abspath(__file__))
 initializer = AppInitializer(settings, app_file_path)
@@ -97,7 +97,12 @@ app.include_router(
     tags=["websocket"],
     responses={404: {"description": "Not found"}},
 )
-
+app.include_router(
+    config.router,
+    prefix="/settings",
+    tags=["Settings Management"],
+    responses={404: {"description": "Not found"}},
+)
 
 
 # @app.get("/")

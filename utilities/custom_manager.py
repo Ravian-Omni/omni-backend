@@ -8,6 +8,7 @@ from dependencies import get_mongodb_service
 from dependencies import get_websocket_manager
 from dataclasses import dataclass
 from omni.memory import OmniMemory
+from collections import defaultdict
 
 
 @dataclass
@@ -61,7 +62,7 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
         mongodb_service = await get_mongodb_service()
         
         # Extract message fields safely
-        raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message'] if k in message}
+        raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message', 'usage'] if k in message}
         content_message = {k: message.get(k) for k in ['role', 'name', 'content'] if k in message}
         
         raw_message['timestamp'] = datetime.now(timezone.utc).isoformat()  # Add timestamp to raw message
@@ -111,6 +112,84 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.context = chat_context
         self.omni_memory = chat_context.omni_memory
+        # Track previous usage state for each agent to calculate deltas
+        self._agent_previous_usage = defaultdict(lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost": 0.0
+        })
+        
+        # Initialize tracking for all agents
+        self._initialize_agent_tracking()
+    
+    def _initialize_agent_tracking(self):
+        """Initialize usage tracking for all agents"""
+        for agent in self.groupchat.agents:
+            # Initialize with current usage if any
+            current_usage = self._get_agent_current_usage(agent)
+            self._agent_previous_usage[agent.name] = current_usage.copy()
+    
+    def _get_agent_current_usage(self, agent) -> Dict[str, Any]:
+        """Get current usage for a specific agent"""
+        default_usage = {
+            "model": "unknown",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost": 0.0
+        }
+        
+        # Check if agent has client and usage summary
+        if not hasattr(agent, "client") or not agent.client:
+            return default_usage
+        
+        usage_summary = getattr(agent.client, "total_usage_summary", None)
+        if not usage_summary:
+            return default_usage
+        
+        # Find the model key (first key that's not 'total_cost')
+        model_keys = [k for k in usage_summary.keys() if k != "total_cost"]
+        if not model_keys:
+            return default_usage
+        
+        model_key = model_keys[0]
+        model_usage = usage_summary.get(model_key, {})
+        
+        return {
+            "model": model_key,
+            "prompt_tokens": model_usage.get("prompt_tokens", 0),
+            "completion_tokens": model_usage.get("completion_tokens", 0),
+            "total_tokens": model_usage.get("total_tokens", 0),
+            "cost": model_usage.get("cost", 0.0)
+        }
+    
+    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> Dict[str, Any]:
+        """Calculate usage delta for a specific agent since last check"""
+        current_usage = self._get_agent_current_usage(agent)
+        previous_usage = self._agent_previous_usage[agent_name]
+        
+        # Calculate the delta (what changed since last check)
+        usage_delta = {
+            "prompt_tokens": current_usage["prompt_tokens"] - previous_usage["prompt_tokens"],
+            "completion_tokens": current_usage["completion_tokens"] - previous_usage["completion_tokens"],
+            "total_tokens": current_usage["total_tokens"] - previous_usage["total_tokens"],
+            "cost": current_usage["cost"] - previous_usage["cost"]
+        }
+        
+        # Update the previous usage for next calculation
+        self._agent_previous_usage[agent_name] = current_usage.copy()
+        
+        # Return both current total and delta for this message
+        return {
+            "current_total": current_usage,
+            "message_delta": usage_delta,
+            "agent_name": agent_name
+        }
+    
+    def _get_sender_agent_usage(self, sender) -> Dict[str, Any]:
+        """Get usage details for the sender agent when message is received"""
+        return self._calculate_agent_usage_delta(sender, sender.name)
         
     async def _send_websocket_message(self, message: Dict[str, Any]) -> None:
         """Send message to WebSocket clients"""
@@ -137,15 +216,24 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
         
+        # Get the sender's usage details (current total + delta for this message)
+        sender_usage = self._get_sender_agent_usage(sender)
+        
         # Prepare message data
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         message_data = {
             "role": "user",
             "name": sender.name,
             "content": content,
-            "raw_message": message
+            "raw_message": message,
+            "usage": sender_usage
         }
-        
+        websocket_message = {
+            "role": "user",
+            "name": sender.name,
+            "content": content,
+            "raw_message": message,
+        }
         # Store in memory (synchronous)
         memory_data = {k: message_data[k] for k in ['role', 'name', 'content']}
         self.omni_memory.push_capability_message(
@@ -155,8 +243,48 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         )
         
         # Process background tasks (async)
-        asyncio.create_task(self._send_websocket_message(message_data))
-        asyncio.create_task(update_chat_history(self.context,message_data))
+        asyncio.run(self._send_websocket_message(websocket_message))
+        asyncio.run(update_chat_history(self.context,message_data))
+        
+    # Additional utility methods for comprehensive usage tracking
+    
+    def get_all_agents_current_usage(self) -> Dict[str, Dict[str, Any]]:
+        """Get current usage for all agents in the group"""
+        all_usage = {}
+        for agent in self.groupchat.agents:
+            all_usage[agent.name] = self._get_agent_current_usage(agent)
+        return all_usage
+    
+    def get_group_usage_summary(self) -> Dict[str, Any]:
+        """Get aggregated usage summary for the entire group"""
+        all_usage = self.get_all_agents_current_usage()
+        
+        total_summary = {
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "agents_count": len(all_usage),
+            "models_used": set(),
+            "per_agent": all_usage
+        }
+        
+        for agent_name, usage in all_usage.items():
+            total_summary["total_prompt_tokens"] += usage["prompt_tokens"]
+            total_summary["total_completion_tokens"] += usage["completion_tokens"]
+            total_summary["total_tokens"] += usage["total_tokens"]
+            total_summary["total_cost"] += usage["cost"]
+            if usage["model"] != "unknown":
+                total_summary["models_used"].add(usage["model"])
+        
+        total_summary["models_used"] = list(total_summary["models_used"])
+        return total_summary
+    
+    def reset_usage_tracking(self):
+        """Reset usage tracking (useful for starting fresh tracking mid-conversation)"""
+        for agent in self.groupchat.agents:
+            current_usage = self._get_agent_current_usage(agent)
+            self._agent_previous_usage[agent.name] = current_usage.copy()
 
 # async def update_db(chat_id, call_id, message, capability, capability_id):
 #     mongodb = await get_mongodb_service()

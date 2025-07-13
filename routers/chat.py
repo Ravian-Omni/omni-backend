@@ -5,7 +5,7 @@ from dependencies import get_mongodb_service
 from utilities.mongodb_service import MongoDBService
 import uuid
 import json
-from configs.settings import settings
+from configs.settings import settings, CapabilityType
 from omni.manager import Omni
 from fastapi import HTTPException, Depends, status
 from datetime import datetime, timezone
@@ -14,6 +14,9 @@ from fastapi import FastAPI, HTTPException, Query, Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from bson import ObjectId
+import time
+
+
 
 router = APIRouter()
 
@@ -25,27 +28,6 @@ class Message(BaseModel):
     role: str
     name: str
     content: str
-
-class RawMessage(BaseModel):
-    role: str
-    name: str
-    raw_message: Any
-
-class ChatHistory(BaseModel):
-    id: str = Field(alias="_id")
-    chat_id: str
-    messages: List[Message]
-    raw_messages: List[RawMessage]
-    created_at: datetime
-    updated_at: datetime
-    user_id: str
-
-    class Config:
-        populate_by_name = True
-        json_encoders = {
-            ObjectId: str,
-            datetime: lambda v: v.isoformat()
-        }
 
 @router.post("/new_chat")
 async def create_new_chat(request:Request, mongodb: MongoDBService = Depends(get_mongodb_service)):
@@ -105,6 +87,7 @@ async def chat_endpoint(request:Request, chat_request: ChatRequest, mongodb: Mon
     response = await omni.manager.a_initiate_chat(omni.manager,message=chat_request.message,clear_history=False)
     return omni.groupchat.messages[-1]
 
+
 def serialize_document(doc: Dict[Any, Any]) -> Dict[str, Any]:
     """Convert MongoDB document to JSON serializable format"""
     if doc is None:
@@ -123,13 +106,26 @@ def serialize_document(doc: Dict[Any, Any]) -> Dict[str, Any]:
     
     return doc
 
-@router.get("/chat-history/{user_id}/{chat_id}", response_model=ChatHistory)
+class RawMessage(BaseModel):
+    role: str
+    name: str
+    raw_message: Any
+    timestamp: str
+
+
+# Modified response model to only include chat_id and raw_messages
+class SimplifiedChatHistory(BaseModel):
+    chat_id: str
+    raw_messages: List[RawMessage]
+
+
+@router.get("/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory)
 async def get_specific_chat(
     user_id: str = Path(..., description="User ID"),
     chat_id: str = Path(..., description="Chat ID"),
     mongodb: MongoDBService = Depends(get_mongodb_service)
 ):
-    """Get a specific chat by user_id and chat_id"""
+    """Get a specific chat by user_id and chat_id - returns only chat_id and raw_messages"""
     try:
         query = {"user_id": user_id, "chat_id": chat_id}
         document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
@@ -140,7 +136,84 @@ async def get_specific_chat(
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
             )
         
-        return serialize_document(document)
+        # Serialize the full document first
+        serialized_doc = serialize_document(document)
+        
+        # Transform messages to raw_messages format
+        raw_messages = []
+        if "raw_messages" in serialized_doc:
+            for message in serialized_doc["raw_messages"]:
+                raw_messages.append({
+                    "role": message.get("role", ""),
+                    "name": message.get("name", ""),
+                    "raw_message": message.get("raw_message", ""),  # Using content as raw_message
+                    "timestamp": message.get("timestamp", "")  # Using content as raw_message
+                })
+        
+        # Return only chat_id and raw_messages
+        return {
+            "chat_id": serialized_doc.get("chat_id", ""),
+            "raw_messages": raw_messages
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+
+class EnhancedChatHistory(BaseModel):
+    call_id: str
+    capability_name: str
+    chat_id: str
+    raw_messages: List[RawMessage]
+
+@router.get("/chat-history/capability/{user_id}/{chat_id}", response_model=EnhancedChatHistory)
+async def get_specific_chat(
+    user_id: str = Path(..., description="User ID"),
+    chat_id: str = Path(..., description="Chat ID"),
+    call_id: str = Query(..., description="Call ID"),
+    capability_name: str = Query(..., description="Capability name"),
+    mongodb: MongoDBService = Depends(get_mongodb_service)
+):
+    """Get a specific chat by user_id and chat_id - returns call_id, capability_name, chat_id and raw_messages"""
+    try:
+        query = {"user_id": user_id, "chat_id": chat_id, "call_id": call_id}
+        if capability_name not in CapabilityType._value2member_map_:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid capability name: {capability_name}. Must be one of the valid capability names"
+            )
+        capability = CapabilityType._value2member_map_.get(capability_name)
+        collection_name = capability.collection 
+        document = await mongodb.find_one(collection_name, query)
+        
+        if not document:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
+            )
+        
+        # Serialize the full document first
+        serialized_doc = serialize_document(document)
+        
+        # Transform messages to raw_messages format
+        raw_messages = []
+        if "raw_messages" in serialized_doc:
+            for message in serialized_doc["raw_messages"]:
+                raw_messages.append({
+                    "role": message.get("role", ""),
+                    "name": message.get("name", ""),
+                    "raw_message": message.get("raw_message", ""),
+                    "timestamp": message.get("timestamp", "")
+                })
+        
+        # Return call_id, capability_name, chat_id and raw_messages
+        return {
+            "call_id": call_id,
+            "capability_name": capability_name,
+            "chat_id": serialized_doc.get("chat_id", ""),
+            "raw_messages": raw_messages
+        }
         
     except HTTPException:
         raise

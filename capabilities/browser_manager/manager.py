@@ -56,7 +56,7 @@ class BrowserManager:
         self.context = context
         
         # Initialize Tavily client
-        self.tavily_client = AsyncTavilyClient(settings.WEB_API)
+        self.tavily_client = AsyncTavilyClient(settings.TAVILY_API_KEY)
         
         # Setup directories
         self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")

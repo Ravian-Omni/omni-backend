@@ -59,7 +59,7 @@ class CapabilityManager:
                 chat_id=self.chat_id,
                 call_id=call_id,
                 capability_id=str(uuid.uuid4()),
-                capability_name=config.collection,
+                capability_name=config.name,
                 collection_name=config.collection,
                 omni_memory=self.memory,
                 manager_kwargs=config.manager_kwargs

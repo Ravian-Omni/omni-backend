@@ -2,9 +2,8 @@ import autogen
 from typing import List, Dict, Any, Union
 from omni import prompts
 from configs.llm_configs_manager import LLMConfigManager
-from configs.settings import settings
+from configs.settings import settings, CapabilityType
 from simplegmail import Gmail
-from configs.settings import settings
 import pandas as pd
 import autogen
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, ConversableAgent
@@ -21,6 +20,7 @@ from capabilities.python_developer.manager import PythonDeveloper
 from capabilities.email_manager.manager import EmailManager
 from capabilities.browser_manager.manager import BrowserManager
 from configs.llm_configs_manager import LLMConfigManager
+from collections import defaultdict
 from omni import prompts
 from loguru import logger
 from utilities.storage import update_chat_history, a_speak
@@ -42,6 +42,84 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.chat_id = chat_id
         self.memory = memory
+        # Track previous usage state for each agent to calculate deltas
+        self._agent_previous_usage = defaultdict(lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost": 0.0
+        })
+        
+        # Initialize tracking for all agents
+        self._initialize_agent_tracking()
+    
+    def _initialize_agent_tracking(self):
+        """Initialize usage tracking for all agents"""
+        for agent in self.groupchat.agents:
+            # Initialize with current usage if any
+            current_usage = self._get_agent_current_usage(agent)
+            self._agent_previous_usage[agent.name] = current_usage.copy()
+    
+    def _get_agent_current_usage(self, agent) -> Dict[str, Any]:
+        """Get current usage for a specific agent"""
+        default_usage = {
+            "model": "unknown",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost": 0.0
+        }
+        
+        # Check if agent has client and usage summary
+        if not hasattr(agent, "client") or not agent.client:
+            return default_usage
+        
+        usage_summary = getattr(agent.client, "total_usage_summary", None)
+        if not usage_summary:
+            return default_usage
+        
+        # Find the model key (first key that's not 'total_cost')
+        model_keys = [k for k in usage_summary.keys() if k != "total_cost"]
+        if not model_keys:
+            return default_usage
+        
+        model_key = model_keys[0]
+        model_usage = usage_summary.get(model_key, {})
+        
+        return {
+            "model": model_key,
+            "prompt_tokens": model_usage.get("prompt_tokens", 0),
+            "completion_tokens": model_usage.get("completion_tokens", 0),
+            "total_tokens": model_usage.get("total_tokens", 0),
+            "cost": model_usage.get("cost", 0.0)
+        }
+    
+    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> Dict[str, Any]:
+        """Calculate usage delta for a specific agent since last check"""
+        current_usage = self._get_agent_current_usage(agent)
+        previous_usage = self._agent_previous_usage[agent_name]
+        
+        # Calculate the delta (what changed since last check)
+        usage_delta = {
+            "prompt_tokens": current_usage["prompt_tokens"] - previous_usage["prompt_tokens"],
+            "completion_tokens": current_usage["completion_tokens"] - previous_usage["completion_tokens"],
+            "total_tokens": current_usage["total_tokens"] - previous_usage["total_tokens"],
+            "cost": current_usage["cost"] - previous_usage["cost"]
+        }
+        
+        # Update the previous usage for next calculation
+        self._agent_previous_usage[agent_name] = current_usage.copy()
+        
+        # Return both current total and delta for this message
+        return {
+            "current_total": current_usage,
+            "message_delta": usage_delta,
+            "agent_name": agent_name
+        }
+    
+    def _get_sender_agent_usage(self, sender) -> Dict[str, Any]:
+        """Get usage details for the sender agent when message is received"""
+        return self._calculate_agent_usage_delta(sender, sender.name)
         
     async def _send_websocket_message(self, message_data: dict) -> None:
         """Send message to WebSocket clients."""
@@ -50,7 +128,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             await websocket_manager.send_chat_message(
                 session_id=self.chat_id, 
                 content=message_data, 
-                source="OMNI"
+                source=CapabilityType.OMNI.value.upper()
             )
         except Exception as e:
             logger.error(f"WebSocket send failed for chat_id {self.chat_id}: {e}")
@@ -76,18 +154,77 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
         
+        # Get the sender's usage details (current total + delta for this message)
+        sender_usage = self._get_sender_agent_usage(sender)
+        
         content = message.get("content", "") if isinstance(message, dict) else str(message)
         message_data = {
             "role": "user",
             "name": sender.name,
             "content": content,
+            "raw_message": message,
+            "usage": sender_usage
+        }
+        websocket_message = {
+            "role": "user",
+            "name": sender.name,
+            "content": content,
             "raw_message": message
         }
+        # Log the usage information for debugging
+        logger.info(f"Agent {sender.name} usage - "
+                   f"Delta: {sender_usage['message_delta']['total_tokens']} tokens, "
+                   f"${sender_usage['message_delta']['cost']:.4f} | "
+                   f"Total: {sender_usage['current_total']['total_tokens']} tokens, "
+                   f"${sender_usage['current_total']['cost']:.4f}")
+        
         # Store in memory synchronously
         self.memory.push_main_message({k: message_data[k] for k in ['role', 'name', 'content']})
         
         # Process async operations
-        asyncio.create_task(self._process_message_async(message_data))
+        asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
+        asyncio.run(self._send_websocket_message(websocket_message))
+        asyncio.run(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
+        
+    # Additional utility methods for comprehensive usage tracking
+    
+    def get_all_agents_current_usage(self) -> Dict[str, Dict[str, Any]]:
+        """Get current usage for all agents in the group"""
+        all_usage = {}
+        for agent in self.groupchat.agents:
+            all_usage[agent.name] = self._get_agent_current_usage(agent)
+        return all_usage
+    
+    def get_group_usage_summary(self) -> Dict[str, Any]:
+        """Get aggregated usage summary for the entire group"""
+        all_usage = self.get_all_agents_current_usage()
+        
+        total_summary = {
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "agents_count": len(all_usage),
+            "models_used": set(),
+            "per_agent": all_usage
+        }
+        
+        for agent_name, usage in all_usage.items():
+            total_summary["total_prompt_tokens"] += usage["prompt_tokens"]
+            total_summary["total_completion_tokens"] += usage["completion_tokens"]
+            total_summary["total_tokens"] += usage["total_tokens"]
+            total_summary["total_cost"] += usage["cost"]
+            if usage["model"] != "unknown":
+                total_summary["models_used"].add(usage["model"])
+        
+        total_summary["models_used"] = list(total_summary["models_used"])
+        return total_summary
+    
+    def reset_usage_tracking(self):
+        """Reset usage tracking (useful for starting fresh tracking mid-conversation)"""
+        for agent in self.groupchat.agents:
+            current_usage = self._get_agent_current_usage(agent)
+            self._agent_previous_usage[agent.name] = current_usage.copy()
             
 
 class CustomUserProxyAgent(UserProxyAgent):
@@ -218,7 +355,7 @@ class Omni:
     async def get_image_generator(self, query: Annotated[str, "The detailed image generation prompt"]):
         call_id = self.find_call_id("image_generator", query)
         self.image_gen_config = CapabilityConfig(
-            name="image_generator",
+            name=CapabilityType.IMAGE_GENERATOR.value,
             collection=settings.IMAGE_GENERATOR_COLLECTION,
             manager_class=ImageGenerator,
             completion_agent_name="process_completion"
@@ -228,7 +365,7 @@ class Omni:
     async def get_web_browser(self, query: Annotated[str,"The complete search query with all the details like subject relationship with the message",],) -> Annotated[str,"The complete search query with all the details like subject relationship with the message",]:
         call_id = self.find_call_id("web_browser", query)
         self.web_browser_config = CapabilityConfig(
-            name="web_browser",
+            name=CapabilityType.BROWSER_MANAGER.value,
             collection=settings.BROWSER_COLLECTION,
             manager_class=BrowserManager,
             completion_agent_name="process_completion",
@@ -241,7 +378,7 @@ class Omni:
     async def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
         call_id = self.find_call_id("python_coder", query)
         self.python_coder_config = CapabilityConfig(
-            name="python_coder",
+            name=CapabilityType.PYTHON_DEVELOPER.value,
             collection=settings.PYTHON_DEV_COLLECTION,
             manager_class=PythonDeveloper,
             completion_agent_name="process_completion_agent",
@@ -253,7 +390,7 @@ class Omni:
     async def get_email_sender(self, query: Annotated[str, "The complete user query"]) -> dict:
         call_id = self.find_call_id("email_sender", query)
         self.email_sender_config = CapabilityConfig(
-            name="email_sender",
+            name=CapabilityType.EMAIL_MANAGER.value,
             collection=settings.EMAIL_COLLECTION,
             manager_class=EmailManager,
             completion_agent_name="process_completion_agent",
@@ -266,7 +403,7 @@ class Omni:
     async def get_file_finder(self, query: Annotated[str, "The search query"]):
         call_id = self.find_call_id("file_finder", query)
         self.file_finder_config = CapabilityConfig(
-            name="file_finder",
+            name=CapabilityType.FILE_FINDER.value,
             collection=settings.FILE_FINDER_COLLECTION,
             manager_class=FileFinder,
             completion_agent_name="process_completion",

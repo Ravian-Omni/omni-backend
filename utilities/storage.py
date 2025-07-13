@@ -3,7 +3,6 @@ from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
 from dependencies import get_mongodb_service
 from datetime import datetime, timezone
-from configs.settings import settings
 import asyncio
 from loguru import logger
 
@@ -33,7 +32,7 @@ async def update_chat_history(chat_id: str, message: dict, collection_name: str)
         mongodb_service = await get_mongodb_service()
         
         # Extract required fields for different message types
-        required_fields = ['role', 'name', 'raw_message']
+        required_fields = ['role', 'name', 'raw_message', 'usage']
         content_fields = ['role', 'name', 'content']
         
         raw_message_data = {field: message[field] for field in required_fields if field in message}
