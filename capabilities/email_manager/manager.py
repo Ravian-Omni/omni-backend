@@ -1,39 +1,14 @@
-import sys
 import os
-# Add the project root directory to Python path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 import autogen
-import types
-from autogen.code_utils import content_str
-from termcolor import colored
-from autogen.io import IOStream
-
-# import autogen.coding
-import json
 import os
 import datetime
-import subprocess
-import time
-import uuid
 from typing import List, Dict, Any, Union
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
 from configs.settings import settings
-from simplegmail import Gmail
-
-
-
-from simplegmail import Gmail
-from oauth2client.file import Storage
-from pathlib import Path
 import os
-from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
-from autogen import config_list_from_json
 from typing import Annotated, List, Dict, Any, Union
 from datetime import datetime
-from autogen.agentchat.agent import Agent
-from autogen import register_function
-from autogen.coding import LocalCommandLineCodeExecutor
 
 today_date = datetime.now()
 import smtplib
@@ -46,10 +21,6 @@ from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
-from typing import Optional
-import asyncio
-from loguru import logger
-
 #new imports
 import imaplib
 import email
@@ -59,8 +30,6 @@ llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from langchain_openai import AzureChatOpenAI
 
 
-# token_path = os.path.join(settings.ROOT_DIR,"configs","gmail_token.json") 
-# secret_path = os.path.join(settings.ROOT_DIR,"configs","client_secret.json")
 username = settings.USER_EMAIL
 password = settings.USER_EMAIL_PASSWORD
 # print(f"username is {username} and password is {password}")
@@ -90,6 +59,8 @@ class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.username = settings.USER_EMAIL
+        self.password = settings.USER_EMAIL_PASSWORD
         self.agents = self.get_agents()
         
         autogen.register_function(
@@ -123,49 +94,6 @@ class EmailManager:
         )
 
         self.get_chat_manager()
-        
-
-    # @staticmethod
-    # def send_email_with_attachments(to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
-    #                             attachments: Union[List[str], None] = None, sender: str = settings.USER_EMAIL):
-    #     """
-    #     Sends an email with optional attachments using simplegmail.
-
-    #     :param to: List of recipient email addresses or a single email as a string.
-    #     :param subject: Subject of the email.
-    #     :param msg_html: HTML content of the email.
-    #     :param msg_plain: Plain text content of the email.
-    #     :param attachments: List of file paths to attach or None.
-    #     :param sender: Sender email address (default: codelokiyt@gmail.com).
-    #     :return: Sent message details.
-    #     """
-
-    #     import os
-    #     if attachments:
-    #         invalid_paths = validate_attachments(attachments)
-    #         if invalid_paths:
-    #             return f"Error: The following attachment paths are invalid: {invalid_paths}"
-    #     gmail = Gmail(client_secret_file=secret_path, creds_file=token_path)
-
-    #     # The issue is with how we're handling the 'to' parameter
-    #     # For simplegmail, 'to' should be a single string (for one recipient) 
-    #     # or a comma-separated string (for multiple recipients)
-    #     if isinstance(to, list):
-    #         to = ", ".join(to)  # Convert list to comma-separated string
-
-    #     params = {
-    #         "to": to,
-    #         "sender": sender,
-    #         "subject": subject,
-    #         "msg_html": msg_html,
-    #         "msg_plain": msg_plain,
-    #         "attachments": attachments or [],
-    #         "signature": False  # Use account signature
-    #         }
-
-    #     message = gmail.send_message(**params)
-    #     return message
-
 
 
     @staticmethod
@@ -513,29 +441,6 @@ class EmailManager:
             llm_config=self.llm_config,
             system_message=prompts.process_completion,
         )
-    # static custom speaker selection, no dynamic agent selection or conditional chat routing
-    # def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:
-    #     messages = groupchat.messages
-    #     # Proceed based on the last speaker
-    #     if last_speaker.name == "chat_manager":
-    #         print("Initial query received. Starting with user_proxy.")
-    #         # rint(f"last_agent_msg is --> {get_last_msg()}")
-    #         return groupchat.agent_by_name("planner_agent")
-    #     if last_speaker.name == "planner_agent":
-    #         return groupchat.agent_by_name("content_writer_agent")
-    #     if last_speaker.name == "content_writer_agent":
-    #         return groupchat.agent_by_name("email_caller_agent")
-    #     elif last_speaker.name == "email_caller_agent":
-    #         return groupchat.agent_by_name("code_executor_agent")
-    #     elif last_speaker.name == "code_executor_agent":
-    #         if "exitcode: 1" in messages[-1]["content"]:
-    #             return groupchat.agent_by_name("debugger_agent")
-    #         elif "exitcode: 0" in messages[-1]["content"]:
-    #             return groupchat.agent_by_name("process_completion_agent")
-    #         else:
-    #             return groupchat.agent_by_name("process_completion_agent")
-    #     elif last_speaker.name == "debugger_agent":
-    #         return groupchat.agent_by_name("email_caller_agent")
         
 
     def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:

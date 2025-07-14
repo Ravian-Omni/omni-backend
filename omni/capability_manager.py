@@ -22,9 +22,10 @@ class CapabilityConfig:
 class CapabilityManager:
     """Generic manager for handling capability operations"""
     
-    def __init__(self, user_id: str, chat_id: str, memory):
+    def __init__(self, user_id: str, chat_id: str, chat_dir: str, memory):
         self.user_id = user_id
         self.chat_id = chat_id
+        self.chat_dir = chat_dir
         self.memory = memory
     
     async def execute_capability(
@@ -57,6 +58,7 @@ class CapabilityManager:
             context = ChatContext(
                 user_id=self.user_id,
                 chat_id=self.chat_id,
+                chat_dir=self.chat_dir,
                 call_id=call_id,
                 capability_id=str(uuid.uuid4()),
                 capability_name=config.name,

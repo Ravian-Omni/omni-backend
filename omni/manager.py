@@ -259,9 +259,10 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 
 class Omni:
-    def __init__(self, chat_id: str, user_id: str = "default_user"):
+    def __init__(self, chat_id: str, user_id: str = "default_user", chat_dir:str = os.path.join(settings.ROOT_DIR, "ravian")):
         self.user_id=user_id
         self.chat_id=chat_id
+        self.chat_dir = chat_dir
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
@@ -282,6 +283,7 @@ class Omni:
         self.capability_manager = CapabilityManager(
             user_id=self.user_id,
             chat_id=self.chat_id,
+            chat_dir=self.chat_dir,
             memory=self.memory
         )
 

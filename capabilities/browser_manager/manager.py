@@ -62,9 +62,9 @@ class BrowserManager:
         self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")
         
         if self.save_results:
-            self.results_dir = os.path.join(settings.ROOT_DIR, "browser")
-            browser_gif_dir = ensure_path(os.path.join(self.results_dir, "gif", self.context.chat_id))
-            self.browser_gif = os.path.join(browser_gif_dir, f"{self.context.capability_id}.gif")
+            self.results_dir = ensure_path(os.path.join(self.context.chat_dir, "browser"))
+            # browser_gif_dir = ensure_path(os.path.join(self.results_dir, "gif", self.context.chat_id))
+            self.browser_gif = os.path.join(self.results_dir, f"{self.context.capability_id}.gif")
         
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -209,7 +209,7 @@ class BrowserManager:
             return
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(self.results_dir, f"search_result_{self.chat_id}_{timestamp}.json")
+        filename = os.path.join(self.results_dir, f"search_result_{self.context.chat_id}_{timestamp}.json")
         
         result_data = {
             "task": task,

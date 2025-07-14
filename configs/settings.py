@@ -75,9 +75,9 @@ settings = Settings()
 class CapabilityType(Enum):
     """Enumeration of all available capabilities"""
     OMNI = "omni"
-    EMAIL_MANAGER = "email_manager"
-    BROWSER_MANAGER = "browser_manager"
-    PYTHON_DEVELOPER = "python_developer"
+    EMAIL_MANAGER = "email_sender"
+    BROWSER_MANAGER = "web_browser"
+    PYTHON_DEVELOPER = "python_coder"
     FILE_FINDER = "file_finder"
     IMAGE_GENERATOR = "image_generator"
     

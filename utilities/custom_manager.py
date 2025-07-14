@@ -16,6 +16,7 @@ class ChatContext:
     """Chat context containing all necessary identifiers"""
     user_id: str
     chat_id: str
+    chat_dir: str
     call_id: str
     capability_id: str
     capability_name: str

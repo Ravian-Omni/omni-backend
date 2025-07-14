@@ -27,7 +27,7 @@ from together import Together
 class ImageGenerator:
     def __init__(self, context: ChatContext):
         self.context = context
-        self.image_dir = ensure_path(os.path.join(settings.ROOT_DIR, "images", self.context.chat_id))
+        self.image_dir = ensure_path(os.path.join(self.context.chat_dir, "images"))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         self._register_functions()

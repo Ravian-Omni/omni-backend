@@ -196,3 +196,4 @@ events/*
 logs/*
 omni_venv
 capabilities/.DS_Store
+ravian/
