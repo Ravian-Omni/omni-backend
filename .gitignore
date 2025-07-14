@@ -146,6 +146,8 @@ ENV/
 env.bak/
 venv.bak/
 
+omniEnv/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -196,3 +198,4 @@ events/*
 logs/*
 omni_venv
 capabilities/.DS_Store
+omniEnv

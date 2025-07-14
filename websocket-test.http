@@ -1,0 +1,109 @@
+# WebSocket API Testing for Omni Backend
+# Use this file with VS Code REST Client extension
+# Install: https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+
+### Variables
+@baseUrl = http://localhost:8000
+@wsUrl = ws://localhost:8000
+@chatId = test-vscode-{{$timestamp}}
+
+### 1. Check if server is running
+GET {{baseUrl}}/
+
+### 2. Get API documentation
+GET {{baseUrl}}/autogen/api/v1/docs
+
+### 3. Test WebSocket connection (This won't work in REST Client, use the HTML file instead)
+# WebSocket connections cannot be tested directly with REST Client
+# Use the test_websocket.html file in a browser instead
+# URL: {{wsUrl}}/ws/runs/{{chatId}}
+
+### 4. Health check endpoint (if available)
+GET {{baseUrl}}/health
+
+### 5. Check WebSocket endpoint in browser
+# Open this URL in browser for testing:
+# file:///{{$workspaceRoot}}/test_websocket.html
+
+### 6. Alternative: Test with curl (copy and paste into terminal)
+# curl -i -N -H "Connection: Upgrade" \
+#      -H "Upgrade: websocket" \
+#      -H "Sec-WebSocket-Version: 13" \
+#      -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" \
+#      {{wsUrl}}/ws/runs/test-curl-client
+
+### 7. Test with Node.js script
+# Run in terminal: node test_websocket.js
+
+### 8. Test with Python script  
+# Run in terminal: python test_websocket.py
+
+###############################################
+# WEBSOCKET MESSAGE EXAMPLES
+# Use these in the HTML test client
+###############################################
+
+### Ping Message
+#{
+#  "type": "ping"
+#}
+
+### Start Message
+#{
+#  "type": "start",
+#  "task": "Hello! Can you help me with a simple task?"
+#}
+
+### Stop Message
+#{
+#  "type": "stop",
+#  "reason": "User requested stop"
+#}
+
+### Input Response Message
+#{
+#  "type": "input_response", 
+#  "response": "Yes, please continue"
+#}
+
+### Custom Message
+#{
+#  "type": "custom_action",
+#  "data": {
+#    "action": "test",
+#    "parameters": ["param1", "param2"]
+#  }
+#}
+
+###############################################
+# TESTING INSTRUCTIONS
+###############################################
+
+# 1. Make sure your Omni Backend is running:
+#    python main.py
+#
+# 2. Open test_websocket.html in a browser to test WebSocket connections
+#
+# 3. For automated testing, run:
+#    node test_websocket.js (requires: npm install ws)
+#    python test_websocket.py (requires: pip install websockets)
+#
+# 4. Expected WebSocket URL format:
+#    ws://localhost:8000/ws/runs/{chat_id}
+#
+# 5. Valid message types your server accepts:
+#    - ping: Simple ping message
+#    - start: Start a new task/conversation
+#    - stop: Stop current task
+#    - input_response: Respond to server input request
+#
+# 6. Server responses you might receive:
+#    - pong: Response to ping
+#    - error: Error messages
+#    - Various task-specific responses
+#
+# 7. Troubleshooting:
+#    - Check if server is running on port 8000
+#    - Verify WebSocket route is properly configured
+#    - Check browser console for JavaScript errors
+#    - Monitor server logs for connection attempts

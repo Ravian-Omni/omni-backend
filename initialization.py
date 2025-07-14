@@ -1,5 +1,6 @@
 # api/initialization.py
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,11 +34,34 @@ class AppInitializer:
             app_path (str): Path to the application code directory
         """
         self.settings = settings
-        self._app_path = Path(app_path)
+        self.is_executable = self._is_running_as_executable()
+        self._app_path = self._get_app_path(app_path)
         self._paths = self._init_paths()
         self._create_directories()
         self._load_environment()
         logger.info(f"Initializing application data folder: {self.app_root} ")
+        logger.info(f"Running as executable: {self.is_executable}")
+        logger.info(f"App path: {self._app_path}")
+
+    def _is_running_as_executable(self) -> bool:
+        """Check if the application is running as a PyInstaller executable"""
+        return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+    def _get_app_path(self, app_path: str) -> Path:
+        """Get the appropriate app path based on execution mode"""
+        if self.is_executable:
+            # For executable, use the directory where the executable is located
+            return Path(sys.executable).parent
+        else:
+            # For development, use the provided app_path
+            return Path(app_path)
+
+    def get_port(self) -> int:
+        """Get the appropriate port based on execution mode"""
+        if self.is_executable:
+            return 8001  # Executable runs on port 8001
+        else:
+            return 8000  # Development runs on port 8000
 
     def _get_app_root(self) -> Path:
         """Determine application root directory"""
@@ -68,7 +92,8 @@ class AppInitializer:
     def _create_directories(self) -> None:
         """Create all required directories"""
         self.app_root.mkdir(parents=True, exist_ok=True)
-        dirs = [self.browser_root, self.browser_gif, self.python_coder_root, self.image_gen_root]
+        dirs = [self.browser_root, self.browser_gif,
+                self.python_coder_root, self.image_gen_root]
         for path in dirs:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -89,7 +114,7 @@ class AppInitializer:
     def browser_root(self) -> Path:
         """Directory for static files"""
         return self._paths.browser_root
-    
+
     @property
     def browser_gif(self) -> Path:
         """Directory for static files"""
