@@ -151,9 +151,83 @@ from fastapi.responses import HTMLResponse
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_html():
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
+
+
+def start_server():
+    """Start the server based on execution mode"""
+    import uvicorn
+    import socket
+
+    def is_port_available(port: int, host: str = "0.0.0.0") -> bool:
+        """Check if a port is available for binding"""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((host, port))
+                return True
+        except OSError:
+            return False
+
+    # Initialize application
+    app_file_path = os.path.dirname(os.path.abspath(__file__))
+    initializer = AppInitializer(settings, app_file_path)
+    port = initializer.get_port()  # 8000 for dev, 8001 for executable
+
+    print(f"🚀 Starting server...")
+    print(f"📁 App directory: {initializer.app_root}")
+    print(f"🔧 Running as executable: {initializer.is_executable}")
+    print(f"🌐 Target port: {port}")
+
+    # Check if the required port is available - fail fast if not
+    if not is_port_available(port):
+        print(f"❌ Port {port} is not available!")
+        if initializer.is_executable:
+            print(f"💡 The executable requires port {port} to be free.")
+            print(f"💡 Use the flush_ports.py script to clear port conflicts:")
+            print(f"💡 python flush_ports.py")
+        else:
+            print(f"💡 Development mode requires port {port} to be free.")
+            print(
+                f"💡 Kill any process using port {port} or use flush_ports.py")
+        sys.exit(1)
+
+    try:
+        print(f"✅ Port {port} is available, starting server...")
+
+        if initializer.is_executable:
+            # For executable, pass the app object directly with no restart capability
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=port,
+                log_level="info",
+                reload=False,
+                access_log=False
+            )
+        else:
+            # For development, use module string for hot reload
+            uvicorn.run(
+                "main:app",
+                host="0.0.0.0",
+                port=port,
+                reload=True,
+                log_level="info"
+            )
+    except KeyboardInterrupt:
+        print("🛑 Server stopped by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ Failed to start server: {e}")
+        print("💡 Check the logs for more details")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    start_server()
