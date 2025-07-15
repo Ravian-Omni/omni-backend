@@ -6,6 +6,7 @@ from pathlib import Path
 import threading
 from enum import Enum
 
+
 load_dotenv()
 
 class Settings:
@@ -16,6 +17,8 @@ class Settings:
     def _load_settings(self):
         """Load settings from environment"""
         self.PROJECT_NAME = "OMNI"
+        self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+        self.USER_TOKEN = None
         self.ROOT_DIR = os.path.join(Path.home(),".ravian")
         self.USER_EMAIL = os.getenv("email_username")
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
@@ -69,6 +72,8 @@ class Settings:
 
 # Create global settings instance
 settings = Settings()
+
+
 class CapabilityType(Enum):
     """Enumeration of all available capabilities"""
     OMNI = "omni"
@@ -77,6 +82,15 @@ class CapabilityType(Enum):
     PYTHON_DEVELOPER = "python_coder"
     FILE_FINDER = "file_finder"
     IMAGE_GENERATOR = "image_generator"
+    
+    @classmethod
+    def from_string(cls, capability_name: str):
+        """Get CapabilityType instance from string, raises ValueError if invalid"""
+        try:
+            return cls(capability_name)
+        except ValueError:
+            valid_names = [cap.value for cap in cls]
+            raise ValueError(f"Invalid capability name: {capability_name}. Valid names: {valid_names}")
     
     @property
     def collection(self):
@@ -89,3 +103,11 @@ class CapabilityType(Enum):
             CapabilityType.FILE_FINDER: settings.FILE_FINDER_COLLECTION,
             CapabilityType.IMAGE_GENERATOR: settings.IMAGE_GENERATOR_COLLECTION,
         }[self]
+    
+    @classmethod
+    def from_collection(cls, collection_name: str):
+        """Get CapabilityType instance from collection name."""
+        for capability in cls:
+            if capability.collection == collection_name:
+                return capability
+        raise ValueError(f"No capability found for collection: {collection_name}")

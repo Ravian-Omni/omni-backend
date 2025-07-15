@@ -1059,7 +1059,7 @@
             updateStatus("connecting", "🔄", "Connecting...");
             updateButtons(false, false, false);
 
-            const url = `ws://${location.host}/ws/runs/${clientId}`;
+            const url = `ws://${location.host}/ws/omni/${clientId}`;
             ws = new WebSocket(url);
 
             ws.onopen = function() {

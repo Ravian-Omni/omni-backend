@@ -154,3 +154,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_html():
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
+
+@app.get("/capability", response_class=HTMLResponse)
+async def serve_html():
+    html_content = Path("templates/capability.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html_content)
