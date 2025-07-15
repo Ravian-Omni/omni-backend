@@ -1290,9 +1290,9 @@
             const copyCodeBtns = div.querySelectorAll('.copy-code-btn');
             copyCodeBtns.forEach(btn => {
                 btn.addEventListener('click', function() {
-                    const codeData = this.getAttribute('data-code');
-                    if (codeData) {
-                        copyCodeFromData(codeData);
+                    const codeId = this.getAttribute('data-code-id');
+                    if (codeId && window.codeMap && window.codeMap[codeId]) {
+                        copyCodeFromMap(codeId);
                     }
                 });
             });
@@ -1311,7 +1311,7 @@
             });
         }
 
-        // Remove debug logs and simplify content extraction
+        // Extract meaningful content from nested message structure
         function extractMessageContent(content) {
             if (typeof content === 'string') {
                 try {
@@ -1385,13 +1385,16 @@
             return `<div class="text-base">${escapeHtml(String(content))}</div>`;
         }
 
-        // Parse and format markdown content - simplified approach
+        // Parse and format markdown content
         function formatMarkdownContent(text) {
-            // Handle code blocks first and replace them immediately
-            let html = text.replace(/```(\w+)?\n?([\s\S]*?)```/g, (match, language, code) => {
+            // Handle code blocks first with a much simpler approach
+            let html = text;
+            
+            // Find and replace code blocks directly without placeholders
+            html = html.replace(/```(\w+)?\s*\n?([\s\S]*?)```/g, (match, language, code) => {
                 const lang = language || 'text';
                 const codeId = 'code_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                return createCodeBlockHtml(code.trim(), lang, codeId);
+                return createCodeBlockHtml(code.trim(), lang.toLowerCase(), codeId);
             });
             
             // Handle inline code (`code`)
@@ -1413,13 +1416,13 @@
             // Handle links [text](url)
             html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-300 hover:text-blue-200 underline" target="_blank">$1</a>');
             
-            // Handle line breaks
+            // Handle line breaks LAST
             html = html.replace(/\n/g, '<br>');
             
             return `<div class="text-base leading-relaxed">${html}</div>`;
         }
 
-        // Create HTML for code block
+        // Create HTML for code block - proper code block formatting
         function createCodeBlockHtml(code, language, codeId) {
             const languageLabels = {
                 'python': 'Python',
@@ -1442,30 +1445,47 @@
                 'text': 'Text'
             };
             
-            const displayLang = languageLabels[language.toLowerCase()] || language.toUpperCase();
-            const languageIcon = getLanguageIcon(language.toLowerCase());
+            const displayLang = languageLabels[language] || language.toUpperCase();
+            const languageIcon = getLanguageIcon(language);
             
-            return `
-                <div class="code-block-container my-4 rounded-lg border border-opacity-30 border-gray-300 overflow-hidden bg-black bg-opacity-40">
-                    <div class="flex items-center justify-between px-4 py-2 bg-black bg-opacity-30 border-b border-opacity-20 border-gray-300">
-                        <div class="flex items-center gap-2">
-                            <span class="text-lg">${languageIcon}</span>
-                            <span class="text-sm font-semibold">${displayLang}</span>
-                        </div>
-                        <button 
-                            class="copy-code-btn flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                            data-code="${escapeHtml(code)}"
-                            title="Copy code"
-                        >
-                            📋 <span>Copy</span>
+            // Store the code in a global map for copy functionality
+            window.codeMap = window.codeMap || {};
+            window.codeMap[codeId] = code;
+            
+            return `<div class="code-block-container my-6 bg-gray-900 rounded-lg border border-gray-700 overflow-hidden shadow-lg">
+                <div class="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
+                    <div class="flex items-center gap-3">
+                        <span class="text-xl">${languageIcon}</span>
+                        <span class="text-sm font-bold text-gray-200">${displayLang}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-xs rounded transition-colors" onclick="toggleWrap('${codeId}')">
+                            <span class="mr-1">↔</span>Wrap
+                        </button>
+                        <button class="copy-code-btn px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors" data-code-id="${codeId}" title="Copy code">
+                            <span class="mr-1">📋</span>Copy
                         </button>
                     </div>
-                    <div class="relative">
-                        <pre class="p-4 overflow-x-auto text-sm font-mono leading-relaxed text-gray-100 whitespace-pre-wrap"><code class="language-${language}">${escapeHtml(code)}</code></pre>
-                    </div>
                 </div>
-            `;
+                <div class="relative">
+                    <pre id="${codeId}" class="p-4 text-sm leading-relaxed text-gray-100 bg-gray-900 overflow-x-auto"><code class="language-${language}">${escapeHtml(code)}</code></pre>
+                </div>
+            </div>`;
         }
+
+        // Toggle word wrap for code blocks
+        window.toggleWrap = function(codeId) {
+            const codeElement = document.getElementById(codeId);
+            if (codeElement) {
+                if (codeElement.style.whiteSpace === 'pre-wrap') {
+                    codeElement.style.whiteSpace = 'pre';
+                    codeElement.style.overflowX = 'auto';
+                } else {
+                    codeElement.style.whiteSpace = 'pre-wrap';
+                    codeElement.style.overflowX = 'visible';
+                }
+            }
+        };
 
         // Get appropriate icon for programming language
         function getLanguageIcon(language) {
@@ -1562,6 +1582,18 @@
                 showToast('Client ID copied to clipboard', 'success', 2000);
             }).catch(err => {
                 showToast('Failed to copy Client ID', 'error');
+            });
+        }
+
+        function copyCodeFromMap(codeId) {
+            const code = window.codeMap[codeId];
+            if (!code) return;
+            
+            navigator.clipboard.writeText(code).then(() => {
+                showToast('Code copied to clipboard', 'success', 2000);
+            }).catch(err => {
+                console.error('Failed to copy code:', err);
+                showToast('Failed to copy code', 'error');
             });
         }
 

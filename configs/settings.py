@@ -8,9 +8,6 @@ from enum import Enum
 
 load_dotenv()
 
-# Get the directory where the current file is located
-current_file_path = Path(__file__).resolve()
-
 class Settings:
     def __init__(self):
         self._lock = threading.RLock()  # Thread safety
@@ -19,7 +16,7 @@ class Settings:
     def _load_settings(self):
         """Load settings from environment"""
         self.PROJECT_NAME = "OMNI"
-        self.ROOT_DIR = os.path.dirname(current_file_path.parent)
+        self.ROOT_DIR = os.path.join(Path.home(),".ravian")
         self.USER_EMAIL = os.getenv("email_username")
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
