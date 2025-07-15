@@ -18,7 +18,7 @@ from initialization import AppInitializer
 import nest_asyncio
 import sys
 from routers import ws, config
-
+# Initialize application
 load_dotenv()
 
 base = "/autogen/"
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     # Startup: Setup logging first
     logger = setup_logging(log_file="app.log")
     logger.info("🚀 Starting FastAPI application...")
-
+    os.environ["HOME"] = os.path.expanduser("~")
     try:
         # Startup: Connect to databases
         logger.info("📊 Connecting to MongoDB...")

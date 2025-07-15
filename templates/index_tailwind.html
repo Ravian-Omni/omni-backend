@@ -71,11 +71,68 @@
         .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.5);
         }
+
+        /* Collapsed panel toggle buttons */
+        .panel-toggle-collapsed {
+            position: fixed;
+            z-index: 40;
+            background: rgba(59, 130, 246, 0.9);
+            backdrop-filter: blur(4px);
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .panel-toggle-collapsed:hover {
+            background: rgba(59, 130, 246, 1);
+            transform: scale(1.05);
+        }
+        .panel-toggle-left {
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .panel-toggle-right {
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
     </style>
 </head>
 <body class="h-screen bg-gray-50 dark:bg-gray-900 font-sans transition-colors duration-300">
+    <!-- Collapsed Panel Toggle Buttons -->
+    <div id="leftPanelToggle" class="panel-toggle-collapsed panel-toggle-left hidden" onclick="togglePanel('left')" title="Show controls panel">
+        ▶
+    </div>
+    <div id="rightPanelToggle" class="panel-toggle-collapsed panel-toggle-right hidden" onclick="togglePanel('right')" title="Show messages panel">
+        ◀
+    </div>
+
     <!-- Toast Container -->
     <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Performance Modal -->
+    <div id="performanceModal" class="fixed inset-0 z-50 hidden">
+        <div class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm" onclick="hidePerformanceModal()"></div>
+        <div class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-4xl w-full mx-4 max-h-[80vh] overflow-auto">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">📊 Performance Report</h3>
+                <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xl" onclick="hidePerformanceModal()">&times;</button>
+            </div>
+            <div class="p-6">
+                <div id="performanceContent" class="space-y-6">
+                    <!-- Performance content will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Keyboard Shortcuts Modal -->
     <div id="shortcutsModal" class="fixed inset-0 z-50 hidden">
@@ -186,9 +243,9 @@
                                 <option value="all">All sources</option>
                                 <option value="user">User</option>
                                 <option value="OMNI">OMNI</option>
-                                <option value="email_manager">Email Manager</option>
-                                <option value="browser_manager">Browser Manager</option>
-                                <option value="python_developer">Python Developer</option>
+                                <option value="email_sender">Email Sender</option>
+                                <option value="web_browser">Web Browser</option>
+                                <option value="python_coder">Python Coder</option>
                                 <option value="file_finder">File Finder</option>
                                 <option value="image_generator">Image Generator</option>
                             </select>
@@ -507,15 +564,9 @@
     </div>
 
     <script>
-        // Ravian AI with Tailwind CSS - All JavaScript functionality preserved
+        // Enhanced Ravian AI with all requested fixes
         // Global variables
         let ws;
-        let wsManager;
-        let messageStore;
-        let virtualScroll;
-        let performanceMonitor;
-        let touchHandler;
-        
         let sentCount = 0;
         let receivedCount = 0;
         let errorCount = 0;
@@ -531,7 +582,23 @@
         // Panel state management
         let leftPanelCollapsed = localStorage.getItem('leftPanelCollapsed') === 'true';
         let rightPanelCollapsed = localStorage.getItem('rightPanelCollapsed') === 'true';
-        let leftPanelWidth = parseInt(localStorage.getItem('leftPanelWidth')) || 384; // 24rem in pixels
+        let leftPanelWidth = parseInt(localStorage.getItem('leftPanelWidth')) || 384;
+
+        // Performance tracking
+        let performanceMetrics = {
+            messagesPerSecond: 0,
+            averageLatency: 0,
+            connectionStability: 100,
+            memoryUsage: 0,
+            messageHistory: [],
+            latencyHistory: [],
+            connectionEvents: []
+        };
+
+        // WebSocket ping/pong
+        let pingInterval = null;
+        let lastPongTime = null;
+        let connectionQuality = 100;
 
         // Current search and export state
         let currentSearchResults = [];
@@ -628,6 +695,164 @@
             showToast(`Font size: ${currentFontSize}`, 'info', 2000);
         }
 
+        // Performance tracking functions
+        function updatePerformanceMetrics() {
+            // Update messages per second
+            const now = Date.now();
+            const recentMessages = performanceMetrics.messageHistory.filter(time => now - time < 1000);
+            performanceMetrics.messagesPerSecond = recentMessages.length;
+
+            // Update average latency
+            if (performanceMetrics.latencyHistory.length > 0) {
+                const sum = performanceMetrics.latencyHistory.reduce((a, b) => a + b, 0);
+                performanceMetrics.averageLatency = Math.round(sum / performanceMetrics.latencyHistory.length);
+            }
+
+            // Update memory usage estimate
+            performanceMetrics.memoryUsage = Math.round(JSON.stringify(allMessages).length / 1024); // KB
+
+            // Clean old data
+            performanceMetrics.messageHistory = performanceMetrics.messageHistory.filter(time => now - time < 60000);
+            if (performanceMetrics.latencyHistory.length > 100) {
+                performanceMetrics.latencyHistory = performanceMetrics.latencyHistory.slice(-50);
+            }
+        }
+
+        function showPerformanceModal() {
+            updatePerformanceMetrics();
+            const modal = document.getElementById('performanceModal');
+            const content = document.getElementById('performanceContent');
+            
+            content.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg">
+                        <h4 class="font-semibold text-blue-800 dark:text-blue-200 mb-2">Connection Health</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Quality:</span>
+                                <span class="font-mono text-blue-600 dark:text-blue-400">${connectionQuality}%</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Avg Latency:</span>
+                                <span class="font-mono text-blue-600 dark:text-blue-400">${performanceMetrics.averageLatency}ms</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Stability:</span>
+                                <span class="font-mono text-blue-600 dark:text-blue-400">${performanceMetrics.connectionStability}%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-green-50 dark:bg-green-900 p-4 rounded-lg">
+                        <h4 class="font-semibold text-green-800 dark:text-green-200 mb-2">Message Stats</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Total Sent:</span>
+                                <span class="font-mono text-green-600 dark:text-green-400">${sentCount}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Total Received:</span>
+                                <span class="font-mono text-green-600 dark:text-green-400">${receivedCount}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Msg/Second:</span>
+                                <span class="font-mono text-green-600 dark:text-green-400">${performanceMetrics.messagesPerSecond}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-purple-50 dark:bg-purple-900 p-4 rounded-lg">
+                        <h4 class="font-semibold text-purple-800 dark:text-purple-200 mb-2">Memory Usage</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Messages Cache:</span>
+                                <span class="font-mono text-purple-600 dark:text-purple-400">${performanceMetrics.memoryUsage} KB</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Total Messages:</span>
+                                <span class="font-mono text-purple-600 dark:text-purple-400">${allMessages.length}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Errors:</span>
+                                <span class="font-mono text-purple-600 dark:text-purple-400">${errorCount}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-orange-50 dark:bg-orange-900 p-4 rounded-lg">
+                        <h4 class="font-semibold text-orange-800 dark:text-orange-200 mb-2">Session Info</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Current Chat:</span>
+                                <span class="font-mono text-orange-600 dark:text-orange-400 text-xs">${currentChatId ? currentChatId.substring(0, 8) + '...' : 'None'}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Theme:</span>
+                                <span class="font-mono text-orange-600 dark:text-orange-400">${currentTheme}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600 dark:text-gray-300">Font Size:</span>
+                                <span class="font-mono text-orange-600 dark:text-orange-400">${currentFontSize}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <h4 class="font-semibold text-gray-800 dark:text-gray-200 mb-2">Recent Activity</h4>
+                    <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                        ${performanceMetrics.connectionEvents.slice(-5).map(event => 
+                            `<div>• ${event.time}: ${event.event}</div>`
+                        ).join('')}
+                    </div>
+                </div>
+            `;
+            
+            modal.classList.remove('hidden');
+        }
+
+        function hidePerformanceModal() {
+            document.getElementById('performanceModal').classList.add('hidden');
+        }
+
+        // WebSocket ping/pong functionality
+        function startPing() {
+            if (pingInterval) clearInterval(pingInterval);
+            
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const pingTime = Date.now();
+                    ws.send(JSON.stringify({ type: 'ping', timestamp: pingTime }));
+                    
+                    // Check if we haven't received a pong in a while
+                    if (lastPongTime && Date.now() - lastPongTime > 10000) {
+                        connectionQuality = Math.max(0, connectionQuality - 10);
+                    }
+                }
+            }, 5000); // Ping every 5 seconds
+        }
+
+        function stopPing() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+
+        function handlePong(timestamp) {
+            const now = Date.now();
+            lastPongTime = now;
+            const latency = now - timestamp;
+            
+            performanceMetrics.latencyHistory.push(latency);
+            
+            // Update connection quality based on latency
+            if (latency < 100) connectionQuality = Math.min(100, connectionQuality + 1);
+            else if (latency > 500) connectionQuality = Math.max(0, connectionQuality - 5);
+            
+            document.getElementById('qualityIndicator').textContent = connectionQuality + '%';
+        }
+
         // Modal functions
         function showShortcuts() {
             document.getElementById('shortcutsModal').classList.remove('hidden');
@@ -674,14 +899,15 @@
             document.getElementById('exportButton').disabled = false;
         }
 
-        // Panel Management Functions
+        // Panel Management Functions with fixed toggle visibility
         function togglePanel(side) {
             const panel = document.getElementById(side === 'left' ? 'leftPanel' : 'rightPanel');
             const collapseIcon = document.getElementById(side === 'left' ? 'leftCollapseIcon' : 'rightCollapseIcon');
+            const toggleButton = document.getElementById(side === 'left' ? 'leftPanelToggle' : 'rightPanelToggle');
             
             if (!panel) return;
             
-            const isCollapsed = panel.classList.contains('collapsed') || (side === 'left' ? leftPanelCollapsed : rightPanelCollapsed);
+            const isCollapsed = side === 'left' ? leftPanelCollapsed : rightPanelCollapsed;
             
             if (isCollapsed) {
                 // Expand panel
@@ -694,6 +920,7 @@
                     rightPanelCollapsed = false;
                     collapseIcon.textContent = '▶';
                 }
+                toggleButton.classList.add('hidden');
                 localStorage.setItem(`${side}PanelCollapsed`, 'false');
                 showToast(`${side.charAt(0).toUpperCase() + side.slice(1)} panel expanded`, 'info', 1000);
             } else {
@@ -706,6 +933,7 @@
                     rightPanelCollapsed = true;
                     collapseIcon.textContent = '◀';
                 }
+                toggleButton.classList.remove('hidden');
                 localStorage.setItem(`${side}PanelCollapsed`, 'true');
                 showToast(`${side.charAt(0).toUpperCase() + side.slice(1)} panel collapsed`, 'info', 1000);
             }
@@ -785,6 +1013,10 @@
         function startConnectionTimer() {
             connectionStartTime = Date.now();
             uptimeInterval = setInterval(updateUptime, 1000);
+            performanceMetrics.connectionEvents.push({
+                time: new Date().toLocaleTimeString(),
+                event: 'Connection established'
+            });
         }
 
         function updateUptime() {
@@ -834,14 +1066,24 @@
                 updateStatus("connected", "✅", "Connected");
                 updateButtons(false, true, true);
                 startConnectionTimer();
+                startPing();
                 showToast('Connected successfully', 'success');
             };
 
             ws.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
+                    
+                    // Handle ping/pong
+                    if (data.type === 'pong') {
+                        handlePong(data.timestamp);
+                        return;
+                    }
+                    
                     receivedCount++;
+                    performanceMetrics.messageHistory.push(Date.now());
                     updateStats();
+                    updatePerformanceMetrics();
                     showMessage("", data, getMessageClassBasic(data));
                 } catch (error) {
                     console.error('Error parsing message:', error);
@@ -855,8 +1097,13 @@
                     clearInterval(uptimeInterval);
                     uptimeInterval = null;
                 }
+                stopPing();
                 updateStatus("disconnected", "❌", "Disconnected");
                 updateButtons(true, false, false);
+                performanceMetrics.connectionEvents.push({
+                    time: new Date().toLocaleTimeString(),
+                    event: 'Connection closed'
+                });
                 showToast('Connection closed', 'warning');
             };
 
@@ -864,6 +1111,10 @@
                 console.error('WebSocket error:', error);
                 errorCount++;
                 updateStats();
+                performanceMetrics.connectionEvents.push({
+                    time: new Date().toLocaleTimeString(),
+                    event: 'Connection error'
+                });
                 showToast('Connection error', 'error');
             };
         }
@@ -893,7 +1144,9 @@
                 
                 ws.send(jsonText);
                 sentCount++;
+                performanceMetrics.messageHistory.push(Date.now());
                 updateStats();
+                updatePerformanceMetrics();
                 showMessage("User", parsed, "user-message");
                 showToast('Message sent', 'success', 1000);
             } catch (e) {
@@ -906,9 +1159,9 @@
                 const source = data.data.source;
                 if (source === 'user') return 'user-message';
                 if (source === 'OMNI') return 'bot-message';
-                if (source === 'email_manager') return 'email-manager-message';
-                if (source === 'browser_manager') return 'browser-manager-message';
-                if (source === 'python_developer') return 'python-developer-message';
+                if (source === 'email_sender') return 'email-sender-message';
+                if (source === 'web_browser') return 'web-browser-message';
+                if (source === 'python_coder') return 'python-coder-message';
                 if (source === 'file_finder') return 'file-finder-message';
                 if (source === 'image_generator') return 'image-generator-message';
             }
@@ -917,7 +1170,7 @@
             return 'legacy-message';
         }
 
-        // Message display
+        // Message display with improved JSON formatting
         function showMessage(type, data, className) {
             const messages = document.getElementById("messages");
             const timestamp = new Date().toLocaleTimeString();
@@ -951,15 +1204,16 @@
                 div.classList.add('bg-gray-800', 'bg-opacity-50', 'border-gray-600');
             }
             
-            // Create message content
+            // Create properly formatted JSON content
             let content = '';
             if (typeof messageData === 'object' && messageData !== null) {
-                content = `<pre class="text-xs bg-gray-800 bg-opacity-50 p-2 rounded overflow-x-auto">${JSON.stringify(messageData, null, 2)}</pre>`;
+                const formattedJson = JSON.stringify(messageData, null, 2);
+                content = `<pre class="text-xs bg-gray-800 bg-opacity-50 p-2 rounded overflow-x-auto whitespace-pre-wrap">${escapeHtml(formattedJson)}</pre>`;
             } else {
-                content = `<div class="text-gray-100">${String(messageData)}</div>`;
+                content = `<div class="text-gray-100">${escapeHtml(String(messageData))}</div>`;
             }
             
-            // Determine source and icon
+            // Determine source and icon with updated mappings
             let source = type || 'Unknown';
             let icon = '💬';
             
@@ -968,9 +1222,9 @@
                 const iconMap = {
                     'user': '👤',
                     'OMNI': '🤖',
-                    'email_manager': '📧',
-                    'browser_manager': '🌐',
-                    'python_developer': '🐍',
+                    'email_sender': '📧',
+                    'web_browser': '🌐',
+                    'python_coder': '🐍',
                     'file_finder': '📁',
                     'image_generator': '🎨'
                 };
@@ -985,11 +1239,14 @@
                     </div>
                     <div class="flex items-center gap-2">
                         <span class="text-xs text-gray-500">${timestamp}</span>
-                        <button class="text-gray-400 hover:text-gray-200 text-sm px-2 py-1 rounded hover:bg-gray-700 transition-colors" onclick="copyMessage('${JSON.stringify(messageData).replace(/'/g, '\\\'')}')" title="Copy message">📋</button>
+                        <button class="text-gray-400 hover:text-gray-200 text-sm px-2 py-1 rounded hover:bg-gray-700 transition-colors" onclick="copyMessage(this)" title="Copy message">📋</button>
                     </div>
                 </div>
                 <div class="message-content">${content}</div>
             `;
+            
+            // Store the message data as a data attribute for copying
+            div.setAttribute('data-message', JSON.stringify(messageData));
             
             messages.appendChild(div);
             
@@ -1007,6 +1264,16 @@
             });
         }
 
+        // Utility function to escape HTML
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         // Utility functions
         function copyClientId() {
             const clientId = document.getElementById('clientId').value;
@@ -1017,14 +1284,17 @@
             });
         }
 
-        function copyMessage(messageContent) {
+        function copyMessage(button) {
+            const messageDiv = button.closest('.mb-4');
+            const messageData = messageDiv.getAttribute('data-message');
+            
             let textToCopy = '';
             
             try {
-                const parsed = JSON.parse(messageContent);
+                const parsed = JSON.parse(messageData);
                 textToCopy = JSON.stringify(parsed, null, 2);
             } catch (e) {
-                textToCopy = messageContent.toString();
+                textToCopy = messageData;
             }
             
             navigator.clipboard.writeText(textToCopy).then(() => {
@@ -1063,6 +1333,7 @@
             receivedCount = 0;
             errorCount = 0;
             allMessages = [];
+            performanceMetrics.messageHistory = [];
             updateStats();
             showToast('Messages cleared', 'info', 2000);
         }
@@ -1072,7 +1343,7 @@
             try {
                 const parsed = JSON.parse(textarea.value);
                 textarea.value = JSON.stringify(parsed, null, 2);
-                showToast('JSON formatted', 'success', 1000);
+                showToast('JSON formatted successfully', 'success', 1000);
             } catch (e) {
                 showToast(`Invalid JSON: ${e.message}`, 'error');
             }
@@ -1216,7 +1487,7 @@
             showToast('Manual verification template loaded', 'info', 1000);
         }
 
-        // Search and export functions (simplified versions)
+        // Search and export functions
         function performBasicSearch() {
             const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
             const filterType = document.getElementById('filterType')?.value || 'all';
@@ -1230,7 +1501,6 @@
                 
                 let matchesFilter = true;
                 if (filterType !== 'all') {
-                    const className = element.className;
                     switch (filterType) {
                         case 'sent':
                             matchesFilter = messageText.includes('👤') || messageText.includes('user');
@@ -1306,10 +1576,6 @@
             URL.revokeObjectURL(url);
         }
 
-        function showEnhancedPerformanceReport() {
-            showToast('Performance report functionality would be implemented here', 'info');
-        }
-
         // Keyboard shortcuts
         function setupKeyboardShortcuts() {
             document.addEventListener('keydown', (e) => {
@@ -1376,7 +1642,7 @@
                             case 'p':
                             case 'P':
                                 e.preventDefault();
-                                showEnhancedPerformanceReport();
+                                showPerformanceModal();
                                 break;
                         }
                     }
@@ -1386,6 +1652,7 @@
                     hideShortcuts();
                     hideAdvancedSearch();
                     hideExportModal();
+                    hidePerformanceModal();
                 }
             });
         }
@@ -1419,7 +1686,7 @@
             themeToggle.addEventListener("click", toggleTheme);
             shortcutsBtn.addEventListener("click", showShortcuts);
             fontSizeBtn.addEventListener("click", cycleFontSize);
-            performanceBtn.addEventListener("click", showEnhancedPerformanceReport);
+            performanceBtn.addEventListener("click", showPerformanceModal);
             autoScrollBtn.addEventListener("click", toggleAutoScroll);
             exportBtn.addEventListener("click", showExportModal);
             advancedSearchBtn.addEventListener("click", showAdvancedSearch);
@@ -1443,14 +1710,16 @@
             // Setup keyboard shortcuts
             setupKeyboardShortcuts();
             
-            // Restore panel states
+            // Restore panel states and show/hide toggle buttons accordingly
             if (leftPanelCollapsed) {
                 document.getElementById('leftPanel').classList.add('w-0', 'overflow-hidden');
                 document.getElementById('leftCollapseIcon').textContent = '▶';
+                document.getElementById('leftPanelToggle').classList.remove('hidden');
             }
             if (rightPanelCollapsed) {
                 document.getElementById('rightPanel').classList.add('w-0', 'overflow-hidden');
                 document.getElementById('rightCollapseIcon').textContent = '◀';
+                document.getElementById('rightPanelToggle').classList.remove('hidden');
             }
             
             // Load chat history
@@ -1472,7 +1741,10 @@
             cycleFontSize();
             cycleFontSize(); // Reset to medium
             
-            showToast('Ravian AI loaded with Tailwind CSS', 'success', 2000);
+            // Initialize performance tracking
+            setInterval(updatePerformanceMetrics, 1000);
+            
+            showToast('Enhanced Ravian AI loaded successfully', 'success', 2000);
         });
     </script>
 </body>

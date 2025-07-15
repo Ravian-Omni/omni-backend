@@ -1,29 +1,10 @@
 import autogen
-import requests
-import openai
-import re
 import os
-import time
-import asyncio
-import pandas as pd
 from autogen.agentchat.agent import Agent
 from typing import List, Dict, Any
-from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, ConversableAgent
-import logging
-import json
-from datetime import datetime
-
-current_datetime = datetime.now()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-import uuid
-import io
-from PIL import Image
-from typing_extensions import Annotated
-from huggingface_hub import InferenceClient
+from autogen import UserProxyAgent, GroupChat
 from capabilities.python_developer import prompts
 from capabilities.python_developer.response_format import ProblemStatusResponse
-from autogen import config_list_from_json
-from configs.settings import settings
 from configs.llm_configs_manager import LLMConfigManager
 import autogen
 import asyncio
@@ -52,9 +33,9 @@ class PythonDeveloper:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
-        self.file_location = ensure_path(os.path.join(settings.ROOT_DIR, "code", "output"))
         self.coding_language = "python"
-        self.results_dir = ensure_path(os.path.join(settings.ROOT_DIR, "code"))
+        self.results_dir = ensure_path(os.path.join(self.context.chat_dir, ".code"))
+        self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
         self.agents = self.get_agents()
         self.get_chat_manager()
         

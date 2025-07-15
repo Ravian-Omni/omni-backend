@@ -8,6 +8,7 @@ from dependencies import get_websocket_manager, get_mongodb_service
 from managers.connection import WebSocketManager
 from configs.settings import settings
 from omni.manager import Omni
+import os
 
 router = APIRouter()
 
@@ -27,7 +28,9 @@ async def run_websocket(
         await websocket.close(code=4004, reason="Run not found")
         return
     
-    omni = Omni(chat_id=chat_id,user_id=user_id)
+    chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
+    
+    omni = Omni(chat_id=chat_id,user_id=user_id, chat_dir=chat_dir)
     messages = history.get("messages",[])
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)

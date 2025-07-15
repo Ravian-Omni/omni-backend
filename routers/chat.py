@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from fastapi import Request
 from dependencies import get_mongodb_service
 from utilities.mongodb_service import MongoDBService
+from utilities.storage import ensure_path
 import uuid
 import json
 from configs.settings import settings, CapabilityType
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from bson import ObjectId
 import time
-
+import os
 
 
 router = APIRouter()
@@ -30,15 +31,17 @@ class Message(BaseModel):
     content: str
 
 @router.post("/new_chat")
-async def create_new_chat(request:Request, mongodb: MongoDBService = Depends(get_mongodb_service)):
+async def create_new_chat(request:Request, user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian"), mongodb: MongoDBService = Depends(get_mongodb_service)):
     try:
+        chat_dir = ensure_path(chat_dir)
         # Generate unique chat identifier
         chat_id = str(uuid.uuid4())
+        
         
         # Check if the chat_id already exists for this user
         existing_chat = await mongodb.find_one(
             settings.OMNI_COLLECTION,
-            {"chat_id": chat_id}
+            {"user_id": user_id, "chat_id": chat_id}
         )
         
         if existing_chat:
@@ -49,8 +52,9 @@ async def create_new_chat(request:Request, mongodb: MongoDBService = Depends(get
         
         # Prepare chat document
         chat_document = {
-            "user_id": "default_user",  # Placeholder for user_id, can be replaced with actual user ID logic
+            "user_id": user_id,  # Placeholder for user_id, can be replaced with actual user ID logic
             "chat_id": chat_id,
+            "chat_dir": chat_dir,
             "messages": [],
             "raw_messages": [],
             "created_at": datetime.now(timezone.utc),
@@ -116,6 +120,7 @@ class RawMessage(BaseModel):
 # Modified response model to only include chat_id and raw_messages
 class SimplifiedChatHistory(BaseModel):
     chat_id: str
+    chat_dir: Optional[str] = None
     raw_messages: List[RawMessage]
 
 
@@ -153,6 +158,7 @@ async def get_specific_chat(
         # Return only chat_id and raw_messages
         return {
             "chat_id": serialized_doc.get("chat_id", ""),
+            "chat_dir": serialized_doc.get("chat_dir", ""),
             "raw_messages": raw_messages
         }
         
