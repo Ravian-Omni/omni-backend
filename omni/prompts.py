@@ -187,7 +187,7 @@ planner = """
         "abilities": [
           "Can be used to get real time information about any subject",
           "It has all the credentials for all the website that user want you to surf"
-          "It can be any question or topic that needs a web searching capability"
+          "It can be used for any question or topic that needs a web searching capability"
         ]
       },
       "image_generator": {

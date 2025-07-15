@@ -5,13 +5,22 @@ import platform
 
 from langchain_openai import AzureChatOpenAI
 
+# llm = AzureChatOpenAI(
+#     azure_deployment="gpt-4o-mini",  # or your deployment
+#     api_version="2023-06-01-preview",  # or your api version
+#     temperature=0,
+#     azure_endpoint= "https://newton-aoi.openai.azure.com/",
+#     api_key="Cq3mVjQS5sBySSyMhRTGkoI8okh0HbOjB4UxuV4txdBkB4ANUCflJQQJ99BCACYeBjFXJ3w3AAABACOG2GEt",
+# )
+
 llm = AzureChatOpenAI(
-    azure_deployment="gpt-4o-mini",  # or your deployment
-    api_version="2023-06-01-preview",  # or your api version
-    temperature=0,
-    azure_endpoint= "https://newton-aoi.openai.azure.com/",
+    azure_deployment="gpt-4.1-mini",
+    api_version="2025-01-01-preview",
+    temperature=0.1,
+    azure_endpoint="https://newton-aoi.openai.azure.com/",
     api_key="Cq3mVjQS5sBySSyMhRTGkoI8okh0HbOjB4UxuV4txdBkB4ANUCflJQQJ99BCACYeBjFXJ3w3AAABACOG2GEt",
 )
+
 
 
 # Shared DataFrame with initial empty row

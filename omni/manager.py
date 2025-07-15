@@ -39,6 +39,32 @@ from utilities.custom_manager import create_capability_chat
 import uuid
 from omni.memory import OmniMemory
 import aioconsole
+from omni.capabilities_descriptions import capability_descriptions
+
+
+all_capabilities = capability_descriptions()
+
+
+def get_capability_description(capability_name: str) -> str:
+    """
+    Retrieves the description for a given capability.
+
+    Args:
+        capability_name: The name of the capability (e.g., "python_coder").
+
+    Returns:
+        The description string for the given capability, or a
+        "Capability not found" message if the name does not exist.
+    """
+    return all_capabilities.get(capability_name, "Capability not found.")
+
+email_description = get_capability_description("email_manager")
+python_description = get_capability_description("python_coder")
+file_finder_description = get_capability_description("file_finder")
+web_browser_description = get_capability_description("web_browser")
+image_generator_description = get_capability_description("image_generator")
+
+
 
 # Load configuration
 config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
@@ -341,7 +367,7 @@ class Omni:
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="python_coder",
-            description="This tool will be used to write any sort of python code.",
+            description=python_description,
         )
 
         autogen.agentchat.register_function(
@@ -349,7 +375,7 @@ class Omni:
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="email_sender",
-            description="This tool will be used to send emails as per the user's request.",
+            description=email_description,
         )
 
         autogen.agentchat.register_function(
@@ -357,7 +383,7 @@ class Omni:
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="file_finder",
-            description="This tool will be used to find any file as per the user's request.",
+            description=file_finder_description,
         )
 
 
@@ -366,7 +392,7 @@ class Omni:
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="web_browser",
-            description="This tool will be used to search the web.",
+            description=web_browser_description,
         )
 
         autogen.agentchat.register_function(
@@ -374,7 +400,7 @@ class Omni:
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="image_generator",
-            description="This tool will be used to generate images form textual input.",
+            description=image_generator_description,
         )
     def get_judge_question(self):
         return autogen.AssistantAgent(
@@ -406,6 +432,17 @@ class Omni:
             description="""This agent will get the initial request from the user""",
             system_message=prompts.get_request.format(today_date=today_date),
         )
+    
+
+    def get_user_acceptance(self):
+        return autogen.AssistantAgent(
+            name="get_user_acceptance",
+            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
+            llm_config=self.llm_config,
+            system_message="Please ask user if they accept the plan or not.",
+        )
+    
+
 
     def get_agent_aligner(self):
         return autogen.AssistantAgent(
@@ -454,7 +491,7 @@ class Omni:
             llm_config=self.llm_config_mini,
             system_message="Ask the question to the user and wait for the response. " 
         )
-
+    
     def get_user_input(self):
         return CustomUserProxyAgent(
             name="user_input",
@@ -505,8 +542,18 @@ class Omni:
 
         # inner loop planner agent will report back to aligner agent
         if last_speaker.name in ["planner_agent"]:
-            return groupchat.agent_by_name("agent_aligner")
+            if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
+                return groupchat.agent_by_name("get_user_acceptance")
+            else:
+                return groupchat.agent_by_name("agent_aligner")
         
+        # inner loop planner agent will report back to aligner agent
+        if last_speaker.name in ["get_user_acceptance"]:
+            return groupchat.agent_by_name("user_input")
+        # if last_speaker.name in ["user_input"]:
+        #     return groupchat.agent_by_name("agent_aligner")
+
+
         # inner loop manual verification agent will report back to aligner agent
         if last_speaker.name in ["manual_verification"]:
             return groupchat.agent_by_name("user_input")
@@ -536,6 +583,7 @@ class Omni:
         self.agent_executor = self.get_agent_executor()
         self.problem_status_checker = self.get_problem_status_checker()
         self.manual_verification = self.get_manual_verification()
+        self.get_user_acceptance = self.get_user_acceptance()
         self.user_input = self.get_user_input()
         self.process_completion = self.get_process_completion()
         self.questions_generator = self.get_questions_generator()
@@ -549,6 +597,7 @@ class Omni:
             self.agent_caller,
             self.agent_executor,
             self.problem_status_checker,
+            self.get_user_acceptance,
             self.manual_verification,
             self.user_input,
             self.process_completion,
