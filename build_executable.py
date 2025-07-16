@@ -2,11 +2,36 @@
 import subprocess
 import sys
 import os
+from pathlib import Path
+
+
+def create_base_venv():
+    """Create base virtual environment for bundling"""
+    print("📦 Creating base virtual environment...")
+
+    try:
+        # Run the base venv creation script
+        result = subprocess.run([
+            sys.executable, "create_base_venv.py", "--for-build"
+        ], check=True, capture_output=True, text=True)
+
+        print("✅ Base virtual environment created successfully!")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to create base virtual environment: {e}")
+        print(f"stdout: {e.stdout}")
+        print(f"stderr: {e.stderr}")
+        return False
 
 
 def build_executable():
     """Build the FastAPI executable using PyInstaller"""
     print("🚀 Building FastAPI executable...")
+
+    # First create the base virtual environment
+    if not create_base_venv():
+        return False
 
     try:
         # Run PyInstaller with the spec file

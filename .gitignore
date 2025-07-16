@@ -201,3 +201,5 @@ capabilities/.DS_Store
 omniEnv
 
 ravian/
+base_venv/
+bundled_python/
