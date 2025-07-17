@@ -127,7 +127,7 @@ class EmailManager:
             return f"Error sending email: {e}"
         
 
-    async def read_latest_email_with_attachments(self, sender_details:str = None, attachment_dir="attachments"):
+    async def read_latest_email_with_attachments(self, sender_details:str = None, attachment_dir:str = None):
 
         try:
             # Connect and login
@@ -151,7 +151,10 @@ class EmailManager:
         status, msg_data = imap.fetch(latest_email_id, "(RFC822)")
 
         # Create folder to save attachments
-        os.makedirs(attachment_dir, exist_ok=True)
+        if attachment_dir is None:
+            attachment_dir = ensure_path(os.path.join(self.context.chat_dir, "attachments"))
+        else:
+            os.makedirs(attachment_dir, exist_ok=True)
 
         # Initialize variables
         subject = ""
@@ -351,7 +354,7 @@ class EmailManager:
                                     attachments: List[str] = None, sender: str = None):
             return await self.send_email_with_attachments(to, subject, msg_html, msg_plain, attachments, sender)
         
-        async def read_latest_email_with_attachments_wrapper(sender_details:str = None, attachment_dir="attachments"):
+        async def read_latest_email_with_attachments_wrapper(sender_details:str = None, attachment_dir:str = None):
             return await self.read_latest_email_with_attachments(sender_details, attachment_dir)
         
         async def send_reply_to_email_wrapper(message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
