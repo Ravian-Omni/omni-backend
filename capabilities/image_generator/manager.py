@@ -21,7 +21,7 @@ from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from utilities.storage import ensure_path
 import requests
 from together import Together
-
+from capabilities.image_generator.response_format import ProcessCompletionResponse
 
 
 class ImageGenerator:
@@ -29,11 +29,13 @@ class ImageGenerator:
         self.context = context
         self.image_dir = ensure_path(os.path.join(self.context.chat_dir, "images"))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_pc["response_format"] = ProcessCompletionResponse
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
         
-    def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"]):
+    def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"], filename: Annotated[str, "The filename to save the image as"]):
         try:
             client = Together(api_key=settings.TOGETHER_API_KEY)
             response = client.images.generate(
@@ -49,12 +51,13 @@ class ImageGenerator:
             image_url = response.data[0].url
             image_response = requests.get(image_url)
             
+            filename = filename if filename else f"{self.context.capability_id}_{int(time.time())}.jpg"  # Use current timestamp if no filename provided
 
-            filename = os.path.join(self.image_dir,f"{self.context.capability_id}_{int(time.time())}.jpg") # to be updated with project creation path
-            with open(filename, "wb") as f:
+            file_name = os.path.join(self.image_dir, filename) # to be updated with project creation path
+            with open(file_name, "wb") as f:
                 f.write(image_response.content)
 
-            return f"Image successfully generated and saved at {filename}"
+            return f"Image successfully generated and saved at {file_name}"
 
         except Exception as e:
             error_message = f"Error generating image: {str(e)}"
@@ -64,8 +67,8 @@ class ImageGenerator:
         
         #Wrapper functions before registring to agents
         
-        def flux_image_generator_wrapper(query: Annotated[str, "The image generation prompt"]):
-            return self.flux_image_generator(query)
+        def flux_image_generator_wrapper(query: Annotated[str, "The image generation prompt"], filename: Annotated[str, "The filename to save the image as"]):
+            return self.flux_image_generator(query, filename)
         
         autogen.agentchat.register_function(
             flux_image_generator_wrapper,
@@ -105,7 +108,7 @@ class ImageGenerator:
     def get_process_completion_agent(self):
         return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_pc,
             description="Let group manager know that the process is completed. ",
             system_message=prompts.process_completion
         )
