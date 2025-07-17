@@ -185,7 +185,7 @@ planner = """
         "description": "capability to surf the internet",
         "abilities": [
           "Can be used to get real time information about any subject",
-          "It can be any question or topic that needs a web searching capability"
+          "It can be user for any question or topic that needs a web searching capability"
         ]
       },
       "image_generator": {
