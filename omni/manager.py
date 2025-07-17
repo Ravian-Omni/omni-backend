@@ -206,7 +206,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         self.memory.push_main_message({k: message_data[k] for k in ['role', 'name', 'content']})
         
         # Process async operations
-        asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
+        # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
         asyncio.run(self._send_websocket_message(websocket_message))
         asyncio.run(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
         
@@ -639,9 +639,9 @@ class Omni:
 
         # inner loop planner agent will report back to aligner agent
         if last_speaker.name in ["planner_agent"]:
-            if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
-                return groupchat.agent_by_name("get_user_acceptance")
-            else:
+            # if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
+            #     return groupchat.agent_by_name("get_user_acceptance")
+            # else:
                 return groupchat.agent_by_name("agent_aligner")
 
         # inner loop planner agent will report back to aligner agent

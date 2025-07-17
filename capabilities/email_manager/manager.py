@@ -52,14 +52,14 @@ class EmailManager:
         self.llm_config_pc["response_format"] = email_process_completion
         self.llm_config_ic = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_ic["response_format"] = intent_class
-        config = LLMConfigManager.get_config("gpt4_mini")
-        self.llm = AzureChatOpenAI(
-            azure_deployment=config["config_list"][0]["model"],
-            api_version=config["config_list"][0]["api_version"],
-            temperature=config["config_list"][0].get("temperature", 0.15),
-            azure_endpoint=config["config_list"][0]["base_url"],
-            api_key=config["config_list"][0]["api_key"]
-        )
+        # config = LLMConfigManager.get_config("gpt4_mini")
+        # self.llm = AzureChatOpenAI(
+        #     azure_deployment=config["config_list"][0]["model"],
+        #     api_version=config["config_list"][0]["api_version"],
+        #     temperature=config["config_list"][0].get("temperature", 0.15),
+        #     azure_endpoint=config["config_list"][0]["base_url"],
+        #     api_key=config["config_list"][0]["api_key"]
+        # )
         self.username = settings.USER_EMAIL
         self.password = settings.USER_EMAIL_PASSWORD
         self.agents = self.get_agents()
