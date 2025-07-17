@@ -30,19 +30,6 @@ llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from langchain_openai import AzureChatOpenAI
 
 
-username = settings.USER_EMAIL
-password = settings.USER_EMAIL_PASSWORD
-# print(f"username is {username} and password is {password}")
-
-
-llm = AzureChatOpenAI(
-    azure_deployment="gpt-4o-mini",
-    api_version="2023-06-01-preview",
-    temperature=0,
-    azure_endpoint="https://newton-aoi.openai.azure.com/",
-    api_key="Cq3mVjQS5sBySSyMhRTGkoI8okh0HbOjB4UxuV4txdBkB4ANUCflJQQJ99BCACYeBjFXJ3w3AAABACOG2GEt",
-)
-
 
 def validate_attachments(file_paths):
     """Validate if all attachment files exist before sending."""
@@ -59,49 +46,26 @@ class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        config = LLMConfigManager.get_config("gpt4_mini")
+        self.llm = AzureChatOpenAI(
+            azure_deployment=config["config_list"][0]["model"],
+            api_version=config["config_list"][0]["api_version"],
+            temperature=config["config_list"][0].get("temperature", 0.15),
+            azure_endpoint=config["config_list"][0]["base_url"],
+            api_key=config["config_list"][0]["api_key"]
+        )
         self.username = settings.USER_EMAIL
         self.password = settings.USER_EMAIL_PASSWORD
         self.agents = self.get_agents()
-        
-        autogen.register_function(
-            self.send_email_with_attachments,
-            caller=self.email_caller,
-            executor=self.code_executor,
-            name="send_email_with_attachments",
-            description="Sends an email with HTML and plain text content to one or more recipients, optionally including file attachments.",
-        )
-        autogen.register_function(
-            self.read_latest_email_with_attachments,
-            caller=self.email_reader_agent,
-            executor=self.code_executor,
-            name="read_latest_email_with_attachments",
-            description="Search emails by criteria,  read the email content  and save attachments to local if needed."
-        )
-        autogen.register_function(
-            self.send_reply_to_email,
-            caller=self.email_reply_agent,
-            executor=self.code_executor,
-            name="send_reply_to_email",
-            description="Send reply to a specific email"
-        )
-
-        autogen.register_function(
-            self.search_emails_by_criteria,
-            caller=self.email_search_agent,
-            executor=self.code_executor,
-            name="search_emails_by_criteria",
-            description="Search emails by criteria"
-        )
-
+        self._register_functions()
         self.get_chat_manager()
-
-
-    @staticmethod
-    def send_email_with_attachments(to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
+        
+    
+    async def send_email_with_attachments(self, to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
                                     attachments: List[str] = None, sender: str = None):
 
         if sender is None:
-            sender = username
+            sender = self.username
             
         if attachments:
             invalid_paths = validate_attachments(attachments)
@@ -148,7 +112,7 @@ class EmailManager:
             
             # Send email using SMTP
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(username, password)
+                server.login(self.username, self.password)
                 server.send_message(msg, from_addr=sender, to_addrs=recipients)
             
             return f"Email sent successfully to {msg['To']}"
@@ -157,19 +121,19 @@ class EmailManager:
             return f"Error sending email: {e}"
         
 
-    @staticmethod
-    def read_latest_email_with_attachments( username=username, password=password, sender_details=str, attachment_dir="attachments"):
+    async def read_latest_email_with_attachments(self, sender_details:str = None, attachment_dir="attachments"):
 
         try:
             # Connect and login
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
-            imap.login(username, password)
+            imap.login(self.username, self.password)
             imap.select("inbox")
         except Exception as e:
             return f"Error connecting to email: {e}"
 
         # Search for emails from a specific sender
-        status, messages = imap.search(None, f'FROM "{sender_details}"')
+        filtered_sender = f'FROM "{sender_details}"' if sender_details else 'ALL'
+        status, messages = imap.search(None, filtered_sender)
         email_ids = messages[0].split()
 
         if not email_ids:
@@ -251,18 +215,18 @@ class EmailManager:
         
         # Return structured data that can be easily parsed by agents
         return f"""EMAIL_DETAILS:
-    message_id: {message_id}
-    subject: {subject}
-    from: {from_}
-    body: {body}
-    attachments_count: {len(attachment_paths)}
-    attachment_paths: {attachment_paths}
-    STATUS: Email read successfully"""
+                    message_id: {message_id}
+                    subject: {subject}
+                    from: {from_}
+                    body: {body}
+                    attachments_count: {len(attachment_paths)}
+                    attachment_paths: {attachment_paths}
+                    STATUS: Email read successfully
+                    """
 
 
 
-    @staticmethod
-    def send_reply_to_email(message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
+    async def send_reply_to_email(self, message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
         """
         Send a reply to a specific email.
         """
@@ -273,7 +237,7 @@ class EmailManager:
             original_message_id = message_id
             msg = EmailMessage()
             msg["Subject"] = "Re: " + subject
-            msg["From"] = username
+            msg["From"] = self.username
             msg["To"] = from_
             msg["In-Reply-To"] = original_message_id
             msg["References"] = original_message_id
@@ -282,12 +246,12 @@ class EmailManager:
                 msg.set_content(reply_content)
             else:
                 # Use LLM to generate reply
-                response = llm.invoke(f"reply to the email with a short message to the user,--> {body}")
+                response = self.llm.invoke(f"reply to the email with a short message to the user,--> {body}")
                 msg.set_content(response.content)
 
             # Send via Gmail SMTP
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                smtp.login(username, password)
+                smtp.login(self.username, self.password)
                 smtp.send_message(msg)
 
             return "Reply sent successfully."
@@ -295,14 +259,14 @@ class EmailManager:
             return f"Error sending reply: {e}"
 
 
-    @staticmethod
-    def search_emails_by_criteria(search_criteria: str, limit: int = 5):
+
+    async def search_emails_by_criteria(self, search_criteria: str, limit: int = 5):
         """
         Search emails based on criteria (sender, subject, etc.)
         """
         try:
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
-            imap.login(username, password)
+            imap.login(self.username, self.password)
             imap.select("inbox")
             
             status, messages = imap.search(None, search_criteria)
@@ -368,11 +332,55 @@ class EmailManager:
             
         except Exception as e:
             return f"Error searching emails: {e}"  
+        
+    def _register_functions(self):
+        
+        #Wrapper functions before registring to agents
+        
+        async def send_email_with_attachments_wrapper(to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
+                                    attachments: List[str] = None, sender: str = None):
+            return await self.send_email_with_attachments(to, subject, msg_html, msg_plain, attachments, sender)
+        
+        async def read_latest_email_with_attachments_wrapper(sender_details:str = None, attachment_dir="attachments"):
+            return await self.read_latest_email_with_attachments(sender_details, attachment_dir)
+        
+        async def send_reply_to_email_wrapper(message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
+            return await self.send_reply_to_email(message_id, subject, from_, body, reply_content)
+        
+        async def search_emails_by_criteria_wrapper(search_criteria: str, limit: int = 5):
+            return await self.search_emails_by_criteria(search_criteria, limit)
+        
+        autogen.register_function(
+            send_email_with_attachments_wrapper,
+            caller=self.email_caller,
+            executor=self.code_executor,
+            name="send_email_with_attachments",
+            description="Sends an email with HTML and plain text content to one or more recipients, optionally including file attachments.",
+        )
+        autogen.register_function(
+            read_latest_email_with_attachments_wrapper,
+            caller=self.email_reader_agent,
+            executor=self.code_executor,
+            name="read_latest_email_with_attachments",
+            description="Search emails by criteria,  read the email content  and save attachments to local if needed."
+        )
+        autogen.register_function(
+            send_reply_to_email_wrapper,
+            caller=self.email_reply_agent,
+            executor=self.code_executor,
+            name="send_reply_to_email",
+            description="Send reply to a specific email"
+        )
+
+        autogen.register_function(
+            search_emails_by_criteria_wrapper,
+            caller=self.email_search_agent,
+            executor=self.code_executor,
+            name="search_emails_by_criteria",
+            description="Search emails by criteria"
+        )
 
 
-
-
-    
     def get_intent_classifier(self):
         return autogen.AssistantAgent(
             name="intent_classifier_agent",
