@@ -434,12 +434,58 @@ We have the below mentioned capabilities- Based on the plan made by planner call
 </image_generator>
 
 
-Based on the plan made by planner DECIDE WISELY 
-If one task has dependency on another task then call the capability one by one or 
-if there are no dependency of capabilities then call multiple at a time.
+{
+  "task_execution_system": {
+    "instruction": {
+      "primary_directive": "DECIDE WISELY based on the outcome of the selected task",
+      "decision_logic": {
+        "dependency_handling": {
+          "with_dependencies": "call the capability one by one",
+          "without_dependencies": "call multiple at a time"
+        },
+        "execution_modes": {
+          "sequential": {
+            "description": "only select one task",
+            "selection_rule": "single_task_execution"
+          },
+          "parallel": {
+            "description": "you can select all the task that can be executed parallely",
+            "selection_rule": "multiple_task_execution"
+          }
+        }
+      }
+    },
+    "execution_strategy": {
+      "selection_criteria": {
+        "sequential_execution": {
+          "condition": "tasks have dependencies",
+          "action": "select_single_task",
+          "execution_order": "one_by_one"
+        },
+        "parallel_execution": {
+          "condition": "tasks have no dependencies",
+          "action": "select_multiple_tasks",
+          "execution_order": "simultaneous"
+        }
+      }
+    },
+    "xml_structure": {
+      "task_definition": "<task id='task_id' name='task_name' priority='high|medium|low'>",
+      "capability_mapping": "<capability id='capability_id' name='capability_name' type='sequential|parallel'>",
+      "dependency_graph": "<dependencies><task_id depends_on='prerequisite_task_id'/></dependencies>",
+      "execution_plan": "<execution mode='sequential|parallel'><step order='1' task='task_id' capability='capability_id'/></execution>"
+    },
+    "decision_workflow": {
+      "step_1": "analyze_planner_agent_output",
+      "step_2": "identify_task_dependencies",
+      "step_3": "determine_execution_mode",
+      "step_4": "select_appropriate_task_or_tasks",
+      "step_5": "map_tasks_to_capabilities",
+      "step_6": "execute_based_on_strategy"
+    }
+  }
+}
 
-###RESPONSE TEMPLATE
-Task <task1> --> Capability <Capability1>
 """
 
 # agent_caller = """
