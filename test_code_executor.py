@@ -14,15 +14,15 @@ from capabilities.python_developer.manager import PythonDeveloper
 
 def test_code_executor():
     """Test the new code executor with virtual environment isolation."""
-    
+
     # Create a temporary directory for testing
     with tempfile.TemporaryDirectory() as temp_dir:
         print(f"Testing in temporary directory: {temp_dir}")
-        
+
         # Create a mock OmniMemory instance
         from omni.memory import OmniMemory
         mock_memory = OmniMemory("test-user")
-        
+
         # Create a mock chat context
         chat_context = ChatContext(
             user_id="test-user",
@@ -55,7 +55,7 @@ def test_code_executor():
                 print("❌ Virtual environment not found")
                 return False            # Test code execution
             print("\nTesting code execution...")
-            
+
             test_code = """
 print("Hello from isolated virtual environment!")
 import sys
@@ -66,11 +66,12 @@ print(f"Python version: {sys.version}")
 result = sum(range(1, 11))
 print(f"Sum of 1-10: {result}")
 """
-            
+
             # Get the actual LocalCommandLineCodeExecutor from the agent
             from autogen.coding import CodeBlock
             code_block = CodeBlock(language="python", code=test_code)
-            result = python_dev.local_executor.execute_code_blocks([code_block])
+            result = python_dev.local_executor.execute_code_blocks([
+                                                                   code_block])
 
             print(f"Code execution result:")
             print(f"  Exit code: {result.exit_code}")
@@ -92,14 +93,14 @@ print(f"Sum of 1-10: {result}")
 
 def test_package_installation():
     """Test package installation in virtual environment."""
-    
+
     with tempfile.TemporaryDirectory() as temp_dir:
         print(f"\nTesting package installation in: {temp_dir}")
-        
+
         # Create a mock OmniMemory instance
         from omni.memory import OmniMemory
         mock_memory = OmniMemory("test-user")
-        
+
         chat_context = ChatContext(
             user_id="test-user",
             chat_id="test-chat-002",
@@ -133,7 +134,8 @@ except ImportError as e:
 
                 from autogen.coding import CodeBlock
                 code_block = CodeBlock(language="python", code=test_code)
-                result = python_dev.local_executor.execute_code_blocks([code_block])
+                result = python_dev.local_executor.execute_code_blocks([
+                                                                       code_block])
 
                 print(f"Import test result:")
                 print(f"  Exit code: {result.exit_code}")

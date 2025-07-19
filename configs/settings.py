@@ -9,7 +9,52 @@ from enum import Enum
 import sys
 
 
-load_dotenv()
+# Smart environment loading for executable and development modes
+
+
+def load_environment():
+    """Load environment variables with fallback for executable mode"""
+    env_loaded = False
+
+    # Check if running as PyInstaller executable
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running as executable - look for .env in executable directory and temp dir
+        executable_dir = Path(sys.executable).parent
+        temp_dir = Path(sys._MEIPASS)
+
+        # Try loading from executable directory first
+        env_path = executable_dir / '.env'
+        if env_path.exists():
+            load_dotenv(env_path)
+            env_loaded = True
+            print(f"📄 Loaded .env from: {env_path}")
+        else:
+            # Try loading from temporary extraction directory
+            env_path = temp_dir / '.env'
+            if env_path.exists():
+                load_dotenv(env_path)
+                env_loaded = True
+                print(f"📄 Loaded .env from temp: {env_path}")
+    else:
+        # Running in development mode - use standard loading
+        current_dir = Path(__file__).resolve().parent.parent
+        env_path = current_dir / '.env'
+        if env_path.exists():
+            load_dotenv(env_path)
+            env_loaded = True
+            print(f"📄 Loaded .env from: {env_path}")
+
+    if not env_loaded:
+        print("⚠️  No .env file found, using system environment variables")
+        # Try loading from current working directory as fallback
+        load_dotenv()
+
+
+# Load environment at module import
+load_environment()
+
+# Get the directory where the current file is located
+current_file_path = Path(__file__).resolve()
 
 
 class Settings:

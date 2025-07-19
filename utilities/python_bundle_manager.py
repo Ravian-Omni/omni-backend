@@ -16,7 +16,7 @@ class PythonBundleManager:
     def get_bundled_python_path() -> Optional[Path]:
         """
         Get the path to the bundled Python executable.
-        
+
         Returns:
             Path to bundled Python executable, or None if not found.
         """
@@ -28,7 +28,7 @@ class PythonBundleManager:
             else:
                 # Other bundling methods
                 bundle_dir = Path(sys.executable).parent
-                
+
             # Look for bundled Python in various possible locations
             possible_paths = [
                 bundle_dir / "bundled_python" / "python-darwin-arm64" / "python" / "bin" / "python3",
@@ -36,19 +36,20 @@ class PythonBundleManager:
                 bundle_dir / "python" / "bin" / "python3",
                 bundle_dir / "Python.framework" / "Versions" / "3.12" / "bin" / "python3",
             ]
-            
+
             for python_path in possible_paths:
                 if python_path.exists() and python_path.is_file():
                     return python_path
-                    
+
         else:
             # Development mode - look for bundled Python in project directory
             project_root = Path(__file__).parent.parent
-            bundled_python = project_root / "bundled_python" / "python-darwin-arm64" / "python" / "bin" / "python3"
-            
+            bundled_python = project_root / "bundled_python" / \
+                "python-darwin-arm64" / "python" / "bin" / "python3"
+
             if bundled_python.exists():
                 return bundled_python
-                
+
         return None
 
     @staticmethod
@@ -62,24 +63,24 @@ class PythonBundleManager:
             "/usr/bin/python3",                 # System Python
             "python",                           # Fallback
         ]
-        
+
         import subprocess
-        
+
         for python_cmd in possible_pythons:
             try:
                 # Test if this Python works and is ARM64 compatible
                 result = subprocess.run([
-                    python_cmd, "-c", 
+                    python_cmd, "-c",
                     "import platform; print(f'{platform.python_version()}:{platform.machine()}')"
                 ], check=True, capture_output=True, text=True)
-                
+
                 version_arch = result.stdout.strip()
                 if "arm64" in version_arch or "aarch64" in version_arch:
                     return python_cmd
-                    
+
             except (subprocess.CalledProcessError, FileNotFoundError):
                 continue
-                
+
         # Final fallback - just use python3
         return "python3"
 
@@ -87,7 +88,7 @@ class PythonBundleManager:
     def get_best_python_executable() -> str:
         """
         Get the best available Python executable.
-        
+
         Returns:
             Path to Python executable (bundled if available, system fallback).
         """
@@ -95,7 +96,7 @@ class PythonBundleManager:
         bundled_python = PythonBundleManager.get_bundled_python_path()
         if bundled_python:
             return str(bundled_python)
-            
+
         # Fall back to system Python
         return PythonBundleManager.get_system_python_fallback()
 
@@ -103,19 +104,19 @@ class PythonBundleManager:
 if __name__ == "__main__":
     # Test the bundle manager
     print("🔍 Testing Python Bundle Manager...")
-    
+
     bundled = PythonBundleManager.get_bundled_python_path()
     if bundled:
         print(f"✅ Found bundled Python: {bundled}")
     else:
         print("❌ No bundled Python found")
-        
+
     system = PythonBundleManager.get_system_python_fallback()
     print(f"🔄 System Python fallback: {system}")
-    
+
     best = PythonBundleManager.get_best_python_executable()
     print(f"🏆 Best Python executable: {best}")
-    
+
     # Test the chosen Python
     import subprocess
     try:

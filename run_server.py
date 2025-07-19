@@ -6,7 +6,7 @@ This script handles server startup logic and port management.
 import os
 import sys
 import socket
-import fcntl
+import multiprocessing
 from pathlib import Path
 
 
@@ -21,18 +21,6 @@ def is_port_available(port: int, host: str = "0.0.0.0") -> bool:
         return False
 
 
-def create_lock_file(lock_path: str) -> bool:
-    """Create a lock file to prevent multiple instances. Returns True if successful."""
-    try:
-        lock_file = open(lock_path, 'w')
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        return True
-    except (IOError, OSError):
-        return False
-
-
 def is_running_as_executable() -> bool:
     """Check if the application is running as a PyInstaller executable"""
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
@@ -41,7 +29,7 @@ def is_running_as_executable() -> bool:
 def get_port() -> int:
     """Get the appropriate port based on execution mode"""
     if is_running_as_executable():
-        return 8001  # Executable runs on port 8001
+        return 58392  # Executable runs on unique port for Electron app
     else:
         return 8000  # Development runs on port 8000
 
@@ -58,6 +46,11 @@ def get_app_path() -> Path:
 
 def main():
     """Main entry point for the server"""
+    
+    # Critical: Set multiprocessing start method for PyInstaller compatibility
+    if is_running_as_executable():
+        multiprocessing.set_start_method('spawn', force=True)
+    
     import uvicorn
 
     # Initialize paths and configuration
@@ -70,18 +63,6 @@ def main():
     print(f"🔧 Running as executable: {is_executable}")
     print(f"🌐 Target port: {port}")
 
-    # For executable mode, implement single-instance check
-    if is_executable:
-        lock_file_path = app_path / "omni-backend.lock"
-
-        if not create_lock_file(str(lock_file_path)):
-            print(f"❌ Another instance of the application is already running!")
-            print(
-                f"💡 If you're sure no other instance is running, delete: {lock_file_path}")
-            sys.exit(1)
-
-        print(f"🔒 Lock file created: {lock_file_path}")
-
     # Check if the required port is available - fail fast if not
     if not is_port_available(port):
         print(f"❌ Port {port} is not available!")
@@ -91,8 +72,7 @@ def main():
             print(f"💡 python flush_ports.py")
         else:
             print(f"💡 Development mode requires port {port} to be free.")
-            print(
-                f"💡 Kill any process using port {port} or use flush_ports.py")
+            print(f"💡 Kill any process using port {port} or use flush_ports.py")
         sys.exit(1)
 
     try:
@@ -107,7 +87,8 @@ def main():
                 port=port,
                 log_level="info",
                 reload=False,
-                access_log=False
+                access_log=False,
+                workers=1  # Force single worker to prevent multiple processes
             )
         else:
             # For development, use module string for hot reload
@@ -128,4 +109,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # Critical: Protect against multiprocessing issues in PyInstaller
+    multiprocessing.freeze_support()
     main()

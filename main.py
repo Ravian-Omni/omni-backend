@@ -1,7 +1,6 @@
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.responses import HTMLResponse
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from starlette.responses import RedirectResponse
 # from routers import apis
@@ -11,16 +10,21 @@ from fastapi.middleware import Middleware
 from utilities.logging import setup_logging, cleanup_logging
 from contextlib import asynccontextmanager
 from dependencies import mongodb_service, init_managers
-from configs.settings import settings
+from configs.settings import settings  # This will trigger environment loading
 from fastapi.openapi.utils import get_openapi
 import os
 from initialization import AppInitializer
 import nest_asyncio
 import sys
+import multiprocessing
 from routers import ws, config
-# Initialize application
-load_dotenv()
 
+# Critical: Protect against multiprocessing issues in PyInstaller
+if getattr(sys, 'frozen', False):
+    multiprocessing.freeze_support()
+    multiprocessing.set_start_method('spawn', force=True)
+
+# Initialize application
 base = "/autogen/"
 prefix = base + "api/v1"
 openapi_url = prefix + "/openapi.json"

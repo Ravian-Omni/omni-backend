@@ -46,11 +46,14 @@ class VenvManager:
                 # For executable mode, don't copy the venv (it has broken paths)
                 # Instead, create fresh and install packages from requirements
                 if self._is_running_as_executable():
-                    logger.info(f"Creating fresh venv and installing packages from base venv at {self.base_venv_path}")
+                    logger.info(
+                        f"Creating fresh venv and installing packages from base venv at {self.base_venv_path}")
                     self._create_fresh_venv(venv_path)
-                    self._install_packages_from_base_venv(venv_path, self.base_venv_path)
+                    self._install_packages_from_base_venv(
+                        venv_path, self.base_venv_path)
                 else:
-                    logger.info(f"Copying base venv from {self.base_venv_path} to {venv_path}")
+                    logger.info(
+                        f"Copying base venv from {self.base_venv_path} to {venv_path}")
                     self._copy_venv(self.base_venv_path, venv_path)
             else:
                 logger.info(f"Creating new virtual environment at {venv_path}")
@@ -63,7 +66,7 @@ class VenvManager:
         try:
             # Get the appropriate Python executable
             python_executable = self._get_system_python()
-            
+
             # Create the venv using the system Python
             subprocess.run([
                 python_executable, "-m", "venv", str(venv_path)
@@ -128,15 +131,15 @@ class VenvManager:
         try:
             # Get the pip path for the target venv
             pip_path = self._get_pip_path(target_venv)
-            
+
             # First, upgrade pip in the target venv
             subprocess.run([
                 str(pip_path), "install", "--upgrade", "pip"
             ], check=True, capture_output=True, text=True)
-            
+
             # Try to get list of packages from base venv's pip freeze
             base_pip = self._get_pip_path(base_venv)
-            
+
             # Use a simpler approach - install common packages directly
             # This avoids issues with freeze from a potentially broken base venv
             common_packages = [
@@ -144,14 +147,14 @@ class VenvManager:
                 "matplotlib", "seaborn", "pillow", "openpyxl", "python-dateutil",
                 "urllib3", "certifi", "charset-normalizer", "idna", "six", "pytz"
             ]
-            
+
             logger.info(f"Installing common packages in {target_venv}")
             subprocess.run([
                 str(pip_path), "install"
             ] + common_packages, check=True, capture_output=True, text=True)
-            
+
             logger.info(f"Successfully installed packages in {target_venv}")
-            
+
         except subprocess.CalledProcessError as e:
             logger.warning(f"Failed to install packages from base venv: {e}")
             # Continue without packages - the fresh venv will still work
