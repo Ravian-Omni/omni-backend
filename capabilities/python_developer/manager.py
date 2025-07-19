@@ -76,8 +76,7 @@ class PythonDeveloper:
         return autogen.AssistantAgent(
             name="code_writer_agent",
             llm_config=self.llm_config,
-            system_message=prompts.code_writer.format(
-                file_location=self.file_location, coding_language=self.coding_language)
+            system_message=prompts.code_writer.format(file_location=self.file_location)
         )
 
     def get_code_executor(self):

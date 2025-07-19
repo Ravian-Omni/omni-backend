@@ -234,6 +234,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "name": sender.name,
             "content": content,
             "raw_message": message,
+            "call_id": self.context.call_id,
         }
         # Store in memory (synchronous)
         memory_data = {k: message_data[k] for k in ['role', 'name', 'content']}
