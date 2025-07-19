@@ -94,7 +94,11 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
-    exhaustive_report: str
+    complete_response: str = Field(
+        ...,
+        description="The **full, exact** response returned by the agent that executed this task."
+        "Do NOT summarize, truncate, or paraphrase any part of the response.",
+    )   
     details_of_generated_files: Optional[str] = None
     complete_location_generated_files: Optional[str] = None
 
@@ -250,6 +254,7 @@ class Capability(str, Enum):
 
 class TaskCapabilityMapping(BaseModel):
     task: str = Field(..., title="Task", description="The complete details of the task needs to be executed")
+    context: str = Field(..., title="Context", description="The complete context of teh conversation")
     capability: Capability = Field(..., title="Capability", description="The capability to handle this task")
     task_id: Optional[int] = Field(None, title="Task ID", description="Optional task identifier")
     priority: Optional[int] = Field(None, title="Priority", description="Task priority for execution order")
@@ -363,6 +368,13 @@ class CapabilityRoutingResponse(BaseModel):
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
+from datetime import datetime  , timezone
+
+
+def get_current_timestamp() -> datetime:
+    """Get current UTC datetime with timezone."""
+    return datetime.now(timezone.utc)
+
 
 
 class QuestionType(str, Enum):
@@ -444,7 +456,13 @@ class QuestionClassification(BaseModel):
         example="How are you doing today?"
     )
 
-    
+    # timestamp: datetime = Field(
+    #     default_factory=get_current_timestamp,
+    #     description="Creation date/time",
+    #     example="2025-07-15T10:30:45.123456"
+    # )
+
+
     complexity_score: Optional[int] = Field(
         None,
         ge=1,

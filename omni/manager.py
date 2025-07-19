@@ -583,7 +583,7 @@ class Omni:
         self.agent_executor = self.get_agent_executor()
         self.problem_status_checker = self.get_problem_status_checker()
         self.manual_verification = self.get_manual_verification()
-        self.get_user_acceptance = self.get_user_acceptance()
+        self.user_acceptance = self.get_user_acceptance()
         self.user_input = self.get_user_input()
         self.process_completion = self.get_process_completion()
         self.questions_generator = self.get_questions_generator()
@@ -597,7 +597,7 @@ class Omni:
             self.agent_caller,
             self.agent_executor,
             self.problem_status_checker,
-            self.get_user_acceptance,
+            self.user_acceptance,
             self.manual_verification,
             self.user_input,
             self.process_completion,

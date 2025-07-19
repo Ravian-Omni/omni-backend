@@ -68,13 +68,23 @@ password = settings.USER_EMAIL_PASSWORD
 # print(f"username is {username} and password is {password}")
 
 
+# llm = AzureChatOpenAI(
+#     azure_deployment="gpt-4o-mini",
+#     api_version="2023-06-01-preview",
+#     temperature=0,
+#     azure_endpoint="https://newton-aoi.openai.azure.com/",
+#     api_key="Cq3mVjQS5sBySSyMhRTGkoI8okh0HbOjB4UxuV4txdBkB4ANUCflJQQJ99BCACYeBjFXJ3w3AAABACOG2GEt",
+# )
+
+
 llm = AzureChatOpenAI(
-    azure_deployment="gpt-4o-mini",
-    api_version="2023-06-01-preview",
-    temperature=0,
+    azure_deployment="gpt-4.1-mini",
+    api_version="2025-01-01-preview",
+    temperature=0.1,
     azure_endpoint="https://newton-aoi.openai.azure.com/",
     api_key="Cq3mVjQS5sBySSyMhRTGkoI8okh0HbOjB4UxuV4txdBkB4ANUCflJQQJ99BCACYeBjFXJ3w3AAABACOG2GEt",
 )
+
 
 
 def validate_attachments(file_paths):
@@ -363,8 +373,9 @@ class EmailManager:
                 msg.set_content(reply_content)
             else:
                 # Use LLM to generate reply
-                response = llm.invoke(f"reply to the email with a short message to the user,--> {body}")
-                msg.set_content(response.content)
+                msg.set_content(reply_content)
+                # response = llm.invoke(f"reply to the email with a short message to the user,--> {body}")
+                # msg.set_content(response.content)
 
             # Send via Gmail SMTP
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:

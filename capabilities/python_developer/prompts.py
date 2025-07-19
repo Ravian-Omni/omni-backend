@@ -72,7 +72,11 @@ No , we have not answered the question asked by the user and here is the reason 
 """
 
 process_completion = """
-Respond back with tabular format for sequential info.
-ALways provide the tabular response in Markdown. For example data head should be shown in markdown and so all the tabular information should be processsed in markdown only
-Sequential information should be provided with complete information.
+
+Always provide the response in Markdown. 
+The responses shoudl be complete and must have all the details to it.
+DO NOT STAY BACK Give it all you have.
+
+
+
 """
