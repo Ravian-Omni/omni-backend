@@ -172,7 +172,7 @@ class BrowserManager:
                 browser_session=browser_session,
                 max_failures=3,  # Reduced from 5
                 retry_delay=2,   # Reduced from 3
-                use_vision=False,
+                use_vision=True,
                 generate_gif=False if not self.save_results else self.browser_gif,  # Disabled to reduce file generation
                 max_input_tokens=180000,  # Reduced from 180000
                 validate_output=True,
