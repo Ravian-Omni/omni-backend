@@ -6,6 +6,7 @@ import time
 import json
 from datetime import datetime
 import base64
+import re 
 
 router = APIRouter()
 
@@ -143,3 +144,102 @@ async def clear_user_token():
         }
     else:
         raise HTTPException(status_code=404, detail="USER_TOKEN not found")
+    
+#Email and Password Settings
+def validate_email(email: str) -> bool:
+    """Validate email format"""
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(email_pattern, email) is not None
+
+def validate_app_password(app_password: str) -> bool:
+    """Validate Google App Password format"""
+    # Should match pattern: "xxxx xxxx xxxx xxxx" (16 chars + 3 spaces)
+    if len(app_password) != 19:
+        return False
+    
+    # Check format with spaces
+    if not re.match(r'^[a-zA-Z0-9]{4}\s[a-zA-Z0-9]{4}\s[a-zA-Z0-9]{4}\s[a-zA-Z0-9]{4}$', app_password):
+        return False
+    
+    return True
+
+@router.put("/api/settings/user-email")
+async def update_user_email(email: str, email_password: str):
+    """Update USER_EMAIL and USER_EMAIL_PASSWORD settings with validation"""
+    
+    # Validate email format
+    if not validate_email(email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    
+    # Validate app password format
+    if not validate_app_password(email_password):
+        raise HTTPException(status_code=400, detail="Invalid app password format - must be 'xxxx xxxx xxxx xxxx' (16 alphanumeric characters with spaces)")
+    
+    # Update the settings (keep original format with spaces)
+    email_success = settings.update_setting("USER_EMAIL", email)
+    password_success = settings.update_setting("USER_EMAIL_PASSWORD", email_password)
+    
+    if not email_success:
+        # If USER_EMAIL doesn't exist, add it dynamically
+        settings.USER_EMAIL = email
+        email_success = True
+    
+    if not password_success:
+        # If USER_EMAIL_PASSWORD doesn't exist, add it dynamically
+        settings.USER_EMAIL_PASSWORD = email_password
+        password_success = True
+    
+    return {
+        "message": "Email credentials updated successfully",
+        "email": email,
+        "password_length": len(email_password),
+        "timestamp": time.time()
+    }
+
+@router.get("/api/settings/user-email")
+async def get_user_email():
+    """Get current USER_EMAIL and USER_EMAIL_PASSWORD status"""
+    email = getattr(settings, 'USER_EMAIL', None)
+    password = getattr(settings, 'USER_EMAIL_PASSWORD', None)
+    
+    if not email and not password:
+        raise HTTPException(status_code=404, detail="Email credentials not set")
+    
+    if not email:
+        raise HTTPException(status_code=404, detail="USER_EMAIL not set")
+    
+    if not password:
+        raise HTTPException(status_code=404, detail="USER_EMAIL_PASSWORD not set")
+    
+    return {
+        "email": email,
+        "email_password_set": True,
+        "password_length": len(password),
+        "is_set": True,
+        "timestamp": time.time()
+    }
+
+@router.delete("/api/settings/user-email")
+async def clear_user_email():
+    """Clear/remove USER_EMAIL and USER_EMAIL_PASSWORD"""
+    email_exists = hasattr(settings, 'USER_EMAIL') and getattr(settings, 'USER_EMAIL', None)
+    password_exists = hasattr(settings, 'USER_EMAIL_PASSWORD') and getattr(settings, 'USER_EMAIL_PASSWORD', None)
+    
+    if not email_exists and not password_exists:
+        raise HTTPException(status_code=404, detail="Email credentials not found")
+    
+    cleared_items = []
+    
+    if email_exists:
+        settings.USER_EMAIL = None
+        cleared_items.append("USER_EMAIL")
+    
+    if password_exists:
+        settings.USER_EMAIL_PASSWORD = None
+        cleared_items.append("USER_EMAIL_PASSWORD")
+    
+    return {
+        "message": "Email credentials cleared successfully",
+        "cleared_items": cleared_items,
+        "timestamp": time.time()
+    }
