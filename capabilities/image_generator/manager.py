@@ -77,6 +77,12 @@ class ImageGenerator:
             name="flux_image_generator",
             description="This tool will be used to generate images based on the information.",
         )
+    
+    def get_context_keeper(self):
+        return autogen.AssistantAgent(
+            name="context_keeper",
+            llm_config=self.llm_config
+        )
 
     def get_user_intent_agent(self):
         return AssistantAgent(
@@ -138,12 +144,14 @@ class ImageGenerator:
 
     def get_agents(self) -> List[Agent]:
         self.user_intent = self.get_user_intent_agent()
+        self.context_keeper = self.get_context_keeper()
         self.image_prompt_generator = self.get_image_prompt_generator_agent()
         self.image_generator_caller = self.get_image_generator_caller_agent()
         self.image_generator = self.get_image_generator_agent()
         self.process_completion = self.get_process_completion_agent()
         return [
             self.user_intent,
+            self.context_keeper,
             self.image_prompt_generator,
             self.image_generator_caller,
             self.image_generator,
