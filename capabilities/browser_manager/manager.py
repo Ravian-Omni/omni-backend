@@ -29,6 +29,11 @@ from capabilities.browser_manager.response_format import webprocess_completion
 from tavily import AsyncTavilyClient
 from .country_data import country_codes
 from utilities.storage import ensure_path
+from capabilities.browser_manager.function_description import (
+    web_browser_automation,
+    web_api_search
+)
+
 
 
 class BrowserManager:
@@ -244,7 +249,7 @@ class BrowserManager:
                     browser_session=browser_session,
                     max_failures=3,
                     retry_delay=2,
-                    use_vision=False,
+                    use_vision=True,
                     validate_output=True,
                     llm=self.vision_llm,
                     controller=self.controller,
@@ -344,12 +349,8 @@ class BrowserManager:
             browser_search_function_wrapper,
             caller=self.browser_reader,
             executor=self.browser_searcher,
-            name="web_search_tool_chrome",
-            description="""
-            Interactive web automation tool for complex browser tasks requiring visual parsing and multi-step interactions.
-            Use for: login-required content, form submissions, e-commerce, social media automation, visual content analysis.
-            Avoid for: simple factual queries or static content.
-            """
+            name="web_browser_automation",
+            description=web_browser_automation
         )
 
         # Register API search function as backup
@@ -357,12 +358,8 @@ class BrowserManager:
             search_tool_wrapper,
             caller=self.browser_reader,
             executor=self.browser_searcher,
-            name="web_search_tool_api",
-            description="""
-            High-speed API-based search for rapid information retrieval.
-            Use for: factual research, current events, market data, academic lookup.
-            Avoid for: tasks requiring user accounts or interactive elements.
-            """
+            name="web_api_search",
+            description=web_api_search
         )
 
     def _initialize_agents(self) -> List:

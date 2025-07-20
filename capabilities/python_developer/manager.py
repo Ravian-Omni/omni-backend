@@ -72,6 +72,12 @@ class PythonDeveloper:
                 file_location=self.file_location, coding_language=self.coding_language)
         )
 
+    def get_context_keeper(self):
+        return autogen.AssistantAgent(
+            name="context_keeper",
+            llm_config=self.llm_config
+        )
+    
     def get_code_writer(self):
         return autogen.AssistantAgent(
             name="code_writer_agent",
@@ -155,6 +161,7 @@ class PythonDeveloper:
 
     def get_agents(self) -> List[Agent]:
         self.planner = self.get_planner()
+        self.context_keeper = self.get_context_keeper()
         self.code_writer = self.get_code_writer()
         self.code_executor_agent = self.get_code_executor()
         self.code_debugger = self.get_code_debugger()
@@ -164,6 +171,7 @@ class PythonDeveloper:
 
         return [
             self.planner,
+            self.context_keeper,
             self.code_writer,
             self.code_executor_agent,
             self.code_debugger,

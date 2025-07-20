@@ -22,7 +22,7 @@ from configs.llm_configs_manager import LLMConfigManager
 llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
-from capabilities.file_finder.response_format import ProblemStatusResponse
+from capabilities.file_finder.response_format import ProblemStatusResponse, FileFinderResponse
 
 
 llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -188,6 +188,8 @@ class FileFinder:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
+        self.llm_config_process_comp = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_process_comp["response_format"] = FileFinderResponse
         self.agents = self.get_agents()
         autogen.register_function(search_files_with_agent,
                                   caller=self.file_finder,
@@ -232,7 +234,7 @@ class FileFinder:
     def process_completion(self):
         return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_process_comp,
             description="Let group manager know that the process is completed. ",
             system_message=prompts.process_completion)
     

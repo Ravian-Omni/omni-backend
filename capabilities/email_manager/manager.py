@@ -393,7 +393,12 @@ class EmailManager:
             description="Search emails by criteria"
         )
 
-
+    def get_context_keeper(self):
+        return autogen.AssistantAgent(
+            name="context_keeper",
+            llm_config=self.llm_config
+        )
+        
     def get_intent_classifier(self):
         return autogen.AssistantAgent(
             name="intent_classifier_agent",
@@ -476,7 +481,7 @@ class EmailManager:
             if "INTENT: SEND_EMAIL" in last_message:
                 return groupchat.agent_by_name("planner_agent")
             elif "INTENT: READ_EMAIL" in last_message:
-                return groupchat.agent_by_name("email_reader_agent")
+                return groupchat.agent_by_name("email_search_agent")
             elif "INTENT: SEARCH_EMAIL" in last_message:
                 return groupchat.agent_by_name("email_search_agent")
             elif "INTENT: REPLY_EMAIL" in last_message:
@@ -513,6 +518,7 @@ class EmailManager:
 
     def get_agents(self):
         self.intent_classifier = self.get_intent_classifier()
+        self.context_keeper = self.get_context_keeper()
         self.email_reader_agent = self.get_email_reader()
         self.email_search_agent = self.get_email_search()
         self.email_reply_agent = self.get_email_reply()
@@ -524,6 +530,7 @@ class EmailManager:
         self.process_completion = self.get_process_completion()
         return [
             self.intent_classifier,
+            self.context_keeper,
             self.email_reader_agent,
             self.email_search_agent,
             self.email_reply_agent,

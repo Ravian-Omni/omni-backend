@@ -396,11 +396,12 @@ agent_aligner = """
 
 
 agent_router = """
-We have the below mentioned capabilities- Based on the plan made by planner call one capability at a time that is necessary as per the priority of the task.
+We have the below mentioned capabilities. Based on the plan made by planner, analyze task dependencies and execute capabilities accordingly - selecting ALL independent tasks for parallel execution or ONE dependent task for sequential execution.
+
 <python_coder> 
-- always require a structured data file file like csv, tsv, json, parquet to work on.
+- always require a structured data file like csv, tsv, json, parquet to work on.
 - can perform any task like statistical analysis, data analysis, fraud detection, machine learning and deep learning on the data provided. 
-- It work like a virtual  data scientist or machine learning engineer
+- It works like a virtual data scientist or machine learning engineer
 - can create plots and charts.
 - can create ML model for further prediction
 </python_coder>
@@ -415,11 +416,10 @@ We have the below mentioned capabilities- Based on the plan made by planner call
 
 <dashboard_server>
 - Can spin up and stop a dashboarding server.
-- It cannot code to build  server in the runtime.
+- It cannot code to build server in the runtime.
 - can only analyze file like csv, tsv, json, parquet to work on.
 - IT CANNOT CREATE DASHBOARD FROM A GIVEN INFO IN THE RUNTIME
 </dashboard_server>
-
 
 <web_browser>
 - capability to surf the internet, websites,
@@ -428,18 +428,86 @@ We have the below mentioned capabilities- Based on the plan made by planner call
 - It can be any question or topic that needs a web searching capability
 </web_browser>
 
-
 <image_generator>
 - to generate any image from text as suggested by user
 </image_generator>
 
+{
+  "task_execution_system": {
+    "instruction": {
+      "primary_directive": "ANALYZE DEPENDENCIES and EXECUTE INTELLIGENTLY",
+      "execution_logic": {
+        "dependency_detection": {
+          "sequential_tasks": "tasks where one depends on output/result of another",
+          "parallel_tasks": "tasks that can run independently without waiting for others"
+        },
+        "execution_modes": {
+          "sequential_mode": {
+            "trigger": "when tasks have dependencies",
+            "action": "select ONLY the next task in dependency chain",
+            "rule": "one_task_at_a_time"
+          },
+          "parallel_mode": {
+            "trigger": "when tasks are independent",
+            "action": "select ALL independent tasks together",
+            "rule": "all_tasks_simultaneously"
+          }
+        }
+      }
+    },
+    "execution_strategy": {
+      "dependency_analysis": {
+        "check_prerequisites": "does task A need results from task B?",
+        "check_data_flow": "does task require output files/data from previous task?",
+        "check_logical_sequence": "must tasks happen in specific order?"
+      },
+      "selection_criteria": {
+        "if_dependencies_exist": {
+          "condition": "any task depends on another task's completion",
+          "action": "select_single_next_task_only",
+          "execution_order": "sequential_one_by_one",
+          "has_dependencies": true
+        },
+        "if_no_dependencies": {
+          "condition": "all remaining tasks are independent",
+          "action": "select_all_independent_tasks",
+          "execution_order": "parallel_simultaneous",
+          "has_dependencies": false
+        }
+      }
+    },
+    "decision_workflow": {
+      "step_1": "analyze_all_planned_tasks",
+      "step_2": "identify_task_dependencies_and_prerequisites",
+      "step_3": "determine_if_dependencies_exist",
+      "step_4": {
+        "if_dependencies": "select_only_next_sequential_task",
+        "if_no_dependencies": "select_all_remaining_parallel_tasks"
+      },
+      "step_5": "map_selected_tasks_to_appropriate_capabilities",
+      "step_6": "set_execution_mode_and_dependency_flag"
+    },
+    "execution_rules": {
+      "sequential_execution": {
+        "when": "dependencies detected",
+        "select": "single task only",
+        "rationale": "prevent blocking and ensure proper data flow"
+      },
+      "parallel_execution": {
+        "when": "no dependencies detected", 
+        "select": "all independent tasks",
+        "rationale": "maximize efficiency through simultaneous execution"
+      }
+    }
+  }
+}
 
-Based on the plan made by planner DECIDE WISELY 
-If one task has dependency on another task then call the capability one by one or 
-if there are no dependency of capabilities then call multiple at a time.
+CRITICAL EXECUTION LOGIC:
+- IF any task depends on another → SELECT ONLY ONE TASK (the next in sequence) + set has_dependencies=true
+- IF all tasks are independent → SELECT ALL TASKS TOGETHER + set has_dependencies=false
+- NEVER mix dependent and independent tasks in same selection
+- ALWAYS prioritize completing dependency chains before parallel execution
 
-###RESPONSE TEMPLATE
-Task <task1> --> Capability <Capability1>
 """
 
 # agent_caller = """

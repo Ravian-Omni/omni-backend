@@ -138,7 +138,7 @@ async def run_websocket(
     websocket: WebSocket,
     chat_id: str,
     user_id: str = "default_user",
-    capability_name: str = "python_coder",
+    capability_name: str = "email_sender",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
     db=Depends(get_mongodb_service),
 ):
