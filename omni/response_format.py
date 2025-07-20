@@ -1,4 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
+from omni.country_data import country_codes
+from omni.omni_handlers import _get_user_country
+country = _get_user_country(country_codes)
 
 
 # omni_planner_response_format = {
@@ -91,15 +94,19 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
-    detailed_result: str
+    complete_response: str = Field(
+        ...,
+        description="The **full, exact** response returned by the agent that executed this task."
+        "Do NOT summarize, truncate, or paraphrase any part of the response.",
+    )   
+    details_of_generated_files: Optional[str] = None
+    complete_location_generated_files: Optional[str] = None
 
 
 class PlannerResponse(BaseModel):
     user_request: str
     breakdown: List[Task]
     overall_strategy: str
-
-
 
 
 
@@ -372,6 +379,32 @@ class ConfidenceLevel(str, Enum):
     MEDIUM = "Medium"
     LOW = "Low"
 
+class UserCountry(BaseModel):
+    """
+    Pydantic model for user country information.
+    """
+    country_code: Optional[str] = Field(
+        None,
+        description="ISO country code (e.g., 'US', 'GB', 'IN')",
+        example="US"
+    )
+    country_name: Optional[str] = Field(
+        None,
+        description="Full country name",
+        example="Great Britain"
+    )
+    
+    @classmethod
+    def detect_country(cls) -> 'UserCountry':
+        """Detect user's country using the imported function."""
+        try:
+            country = _get_user_country(country_codes)
+            return cls(
+                country_code=country.get('code') if isinstance(country, dict) else None,
+                country_name=country.get('name') if isinstance(country, dict) else str(country) if country else None
+            )
+        except Exception:
+            return cls(country_code=None, country_name=None)
 
 class QuestionClassification(BaseModel):
     """
@@ -409,9 +442,11 @@ class QuestionClassification(BaseModel):
     original_question: str = Field(
         ...,
         min_length=1,
-        description="The original user question being classified",
+        description="The complete original user question ",
         example="How are you doing today?"
     )
+
+    
     complexity_score: Optional[int] = Field(
         None,
         ge=1,
@@ -432,6 +467,17 @@ class QuestionClassification(BaseModel):
         ),
         example="15-20 minutes"
     )
+
+
+    user_country_code: str = Field(
+        ...,
+        description=country["code"]
+    )
+    user_country_name: str = Field(
+        ...,
+        description=country["name"]
+    )
+
 
 
 # Alternative: Create a mapping that you can reference in your LLM prompt
@@ -463,3 +509,141 @@ class AgentCallerResponse(BaseModel):
     
     class Config:
         extra = "forbid"
+
+
+
+
+
+
+
+
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional, Dict, Any
+from enum import Enum
+
+class Status(str, Enum):
+    COMPLETED = "COMPLETED"
+    IN_PROGRESS = "IN_PROGRESS"
+    FAILED = "FAILED"
+    PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
+
+
+class SolutionStep(BaseModel):
+    """Individual step in the problem-solving process."""
+    step_number: int = Field(..., description="Sequential number of the step")
+    step_title: str = Field(..., description="Title/name of the step")
+    description: str = Field(..., description="Detailed description of what happens in this step")
+    solution_details: Optional[str] = Field(None, description="Detailed solution and process")
+    result: Optional[str] = Field(None, description="Result of this step")
+
+
+class FileOutput(BaseModel):
+    """Information about generated files."""
+    file_name: str = Field(..., description="Name of the generated file")
+    file_type: str = Field(..., description="Type of file (txt, json, pdf, etc.)")
+    file_path: str = Field(..., description="Complete path to the file")
+    description: Optional[str] = Field(None, description="Description of file contents")
+
+
+class process_completion_response(BaseModel):
+    """
+    Pydantic model for process_completion agent responses.
+    """
+    
+    # Core task information
+    task_id: int = Field(..., description="Unique identifier for the task")
+    task: str = Field(..., description="Description of the mathematical problem/task")
+    status: Status = Field(..., description="Current status of the task")
+    
+    # Solution process
+    solution_steps: List[SolutionStep] = Field(default_factory=list, description="All steps taken to solve the problem")
+    
+    # Results and details
+    details: str = Field(..., description="General details about the solution process")
+    detailed_result: str = Field(..., description="Comprehensive result with all calculations")
+    
+    # Final answers
+    final_answers: List[str] = Field(default_factory=list, description="Final numerical or symbolic answers")
+    
+    # File outputs
+    details_of_generated_files: Optional[str] = Field(None, description="Description of files that were generated")
+    complete_location_generated_files: Optional[str] = Field(None, description="Complete path to directory containing generated files")
+    generated_files: List[FileOutput] = Field(default_factory=list, description="List of generated files with details")
+    
+    # Summary and insights
+    summary: str = Field(..., description="Summary of the problem-solving process")
+    insights: List[str] = Field(default_factory=list, description="Key insights from the solution process")
+    learnings: List[str] = Field(default_factory=list, description="Learnings and observations")
+    
+    # Additional metadata
+    accuracy_notes: Optional[str] = Field(None, description="Notes about solution accuracy and precision")
+    validation_performed: bool = Field(False, description="Whether the solution was validated")
+    
+    @field_validator('solution_steps')
+    @classmethod
+    def validate_solution_steps(cls, v: List[SolutionStep]) -> List[SolutionStep]:
+        """Validate that step numbers are sequential."""
+        if v:
+            step_numbers = [step.step_number for step in v]
+            if step_numbers != list(range(1, len(step_numbers) + 1)):
+                raise ValueError("Step numbers must be sequential starting from 1")
+        return v
+    
+    @field_validator('final_answers')
+    @classmethod
+    def validate_final_answers(cls, v: List[str]) -> List[str]:
+        """Validate that final answers are non-empty strings."""
+        if v:
+            for answer in v:
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("All final answers must be non-empty strings")
+        return v
+    
+    @property
+    def step_count(self) -> int:
+        """Returns the total number of solution steps."""
+        return len(self.solution_steps)
+    
+    @property
+    def file_count(self) -> int:
+        """Returns the total number of generated files."""
+        return len(self.generated_files)
+    
+    def add_solution_step(self, step_title: str, description: str, 
+                         equation_before: Optional[str] = None,
+                         equation_after: Optional[str] = None,
+                         calculation_details: Optional[str] = None,
+                         result: Optional[str] = None) -> None:
+        """Helper method to add a solution step."""
+        step_number = len(self.solution_steps) + 1
+        step = SolutionStep(
+            step_number=step_number,
+            step_title=step_title,
+            description=description,
+            equation_before=equation_before,
+            equation_after=equation_after,
+            calculation_details=calculation_details,
+            result=result
+        )
+        self.solution_steps.append(step)
+    
+    def add_file_output(self, file_name: str, file_type: str, file_path: str, 
+                       description: Optional[str] = None) -> None:
+        """Helper method to add a generated file."""
+        file_output = FileOutput(
+            file_name=file_name,
+            file_type=file_type,
+            file_path=file_path,
+            description=description
+        )
+        self.generated_files.append(file_output)
+    
+    def add_insight(self, insight: str) -> None:
+        """Helper method to add an insight."""
+        if insight and insight.strip():
+            self.insights.append(insight.strip())
+    
+    def add_learning(self, learning: str) -> None:
+        """Helper method to add a learning."""
+        if learning and learning.strip():
+            self.learnings.append(learning.strip())

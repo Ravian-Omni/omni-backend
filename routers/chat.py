@@ -78,6 +78,56 @@ async def create_new_chat(request:Request, user_id:str = "default_user", chat_di
             detail=f"Chat creation failed due to server error: {e}"
         )
 
+@router.post("capability/new-chat")
+async def create_new_chat(request:Request, capability_name: str = Query(..., description="Capability name"), user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian"), mongodb: MongoDBService = Depends(get_mongodb_service)):
+    try:
+        chat_dir = ensure_path(chat_dir)
+        # Generate unique chat identifier
+        chat_id = str(uuid.uuid4())
+        
+        capability = CapabilityType.from_string(capability_name)
+        collection_name = capability.collection
+        # Check if the chat_id already exists for this user
+        existing_chat = await mongodb.find_one(
+            collection_name,
+            {"user_id": user_id, "chat_id": chat_id}
+        )
+        
+        if existing_chat:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, 
+                detail="Chat already exists for this user with the generated ID"
+            )
+        
+        # Prepare chat document
+        chat_document = {
+            "user_id": user_id,  # Placeholder for user_id, can be replaced with actual user ID logic
+            "chat_id": chat_id,
+            "chat_dir": chat_dir,
+            "call_id": "Individual",
+            "capability_id": chat_id,
+            "messages": [],
+            "raw_messages": [],
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        # Create database record
+        await mongodb.insert_one(collection_name, chat_document)
+        
+        
+        # Return standardized response using Pydantic model
+        return {"capability_name": capability_name,"chat_id":chat_id}
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Chat creation failed due to server error: {e}"
+        )
 
 # FastAPI endpoint
 @router.post("/chat")

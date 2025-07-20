@@ -75,8 +75,9 @@ class CapabilityManager:
             
             # Prepare and execute chat
             if config.use_chat_messages:
-                messages = self._prepare_chat_messages()
-                last_agent, last_message = capability_instance.manager.resume(messages=messages)
+                messages = self._prepare_chat_messages() or []
+                if messages:
+                    last_agent, last_message = capability_instance.manager.resume(messages=messages)
             
             response = capability_instance.manager.initiate_chat(
                 capability_instance.manager, 
@@ -103,29 +104,37 @@ class CapabilityManager:
     
     def _prepare_chat_messages(self) -> List[Dict[str, Any]]:
         """Prepare messages for capability manager chat"""
-        messages = self.memory.pull_recent_from_chat_manager()
+        # messages = self.memory.pull_recent_from_chat_manager()
+        messages = []
         
-        # Add last capability message if available
+        # Add last capability messages if available
         if self.memory.get_last_capability():
-            last_content = self._get_last_completion_content()
-            if last_content:
-                messages.append({
-                    "role": "user",
-                    "name": "chat_manager",
-                    "content": last_content
-                })
+            last_content_list = self._get_last_completion_content()
+            if last_content_list:
+                for agent_message in last_content_list:
+                    messages.append({
+                        "role": "user",
+                        "name": f"context_keeper",
+                        "content": agent_message['content']
+                    })
         
         return messages
     
-    def _get_last_completion_content(self) -> Optional[str]:
-        """Get last completion content from capability messages"""
+    def _get_last_completion_content(self) -> Optional[list]:
+        """Get last completion content from capability messages for all specified agents"""
         try:
             capability_messages = self.memory.pull_last_capability_messages()
-            return next(
-                (msg['content'] for msg in capability_messages 
-                 if msg.get('name') == 'process_completion'), 
-                None
-            )
+            agent_messages = []
+            
+            for msg in capability_messages:
+                if msg.get('name') in ('process_completion', 'code_executor_agent', 'process_completion_agent'):
+                    agent_messages.append({
+                        'name': msg.get('name'),
+                        'content': msg.get('content')
+                    })
+            
+            return agent_messages if agent_messages else None
+            
         except Exception as e:
             logger.error(f"Error getting last completion content: {e}")
             return None
