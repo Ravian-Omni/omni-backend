@@ -30,7 +30,7 @@ def run_command(command, capture_output=True, shell=True):
         return None
 
 
-def kill_processes_by_port_range(start_port=8001, end_port=8020):
+def kill_processes_by_port_range(start_port=58392, end_port=58395):
     """Kill processes using ports in the specified range"""
     print(f"🔍 Checking ports {start_port}-{end_port}...")
 
@@ -138,7 +138,7 @@ def kill_python_uvicorn_processes():
                     run_command(f"sudo kill -9 {pid}")
 
 
-def check_port_status(start_port=8000, end_port=8020):
+def check_port_status(start_port=58392, end_port=58395):
     """Check which ports are still in use"""
     print(f"\n📊 Port status check ({start_port}-{end_port}):")
 

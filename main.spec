@@ -18,6 +18,8 @@ datas += copy_metadata('botocore')
 datas += copy_metadata('browser-use')
 # Add browser-use data files including templates
 datas += collect_data_files('browser_use')
+# Add certifi SSL certificates for proper SSL handling in executables
+datas += collect_data_files('certifi')
 datas += copy_metadata('cachetools')
 datas += copy_metadata('certifi')
 datas += copy_metadata('charset-normalizer')
@@ -218,6 +220,11 @@ a = Analysis(
         'motor.motor_asyncio',
         'pymongo',
         'asyncio',
+        # SSL and certificate related imports for MongoDB Atlas
+        'ssl',
+        'certifi',
+        'certifi.core',
+        '_ssl',
         # Mem0 specific imports
         'mem0.configs.vector_stores',
         'mem0.configs.vector_stores.qdrant',

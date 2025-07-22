@@ -53,11 +53,69 @@ class MongoDBService:
     async def connect(self):
         """Connect to MongoDB database"""
         try:
-            self.client = AsyncIOMotorClient(self.connection_string)
-            self.db = self.client[self.database_name]
-            # Ping the database to verify connection
-            await self.client.admin.command('ping')
-            self.logger.info("Connected to MongoDB")
+            # Enhanced SSL configuration for PyInstaller executables
+            import sys
+            import ssl
+            import certifi
+            
+            # Check if running as PyInstaller executable
+            is_executable = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+            
+            if is_executable:
+                # For executables, try multiple connection approaches
+                connection_approaches = [
+                    # Approach 1: Use connection string as-is (safest for Atlas URIs)
+                    {
+                        'description': 'URI as-is',
+                        'client_params': {}
+                    },
+                    # Approach 2: Use TLS CA file with bundled certificates
+                    {
+                        'description': 'with bundled TLS certificates',
+                        'client_params': {
+                            'tls': True,
+                            'tlsCAFile': certifi.where()
+                        }
+                    },
+                    # Approach 3: Disable TLS certificate verification
+                    {
+                        'description': 'with disabled TLS verification',
+                        'client_params': {
+                            'tls': True,
+                            'tlsAllowInvalidCertificates': True
+                        }
+                    }
+                ]
+                
+                connection_error = None
+                for i, approach in enumerate(connection_approaches):
+                    try:
+                        self.logger.info(f"Attempting MongoDB connection {approach['description']} (attempt {i+1})")
+                        self.client = AsyncIOMotorClient(self.connection_string, **approach['client_params'])
+                        self.db = self.client[self.database_name]
+                        # Ping the database to verify connection
+                        await self.client.admin.command('ping')
+                        self.logger.info(f"Connected to MongoDB using approach {i+1}: {approach['description']}")
+                        return  # Success, exit the function
+                    except Exception as e:
+                        connection_error = e
+                        self.logger.warning(f"Approach {i+1} failed: {e}")
+                        if self.client:
+                            self.client.close()
+                            self.client = None
+                        continue
+                
+                # If all approaches failed, raise the last error
+                if connection_error:
+                    raise connection_error
+            else:
+                # For development, use standard connection
+                self.client = AsyncIOMotorClient(self.connection_string)
+                self.db = self.client[self.database_name]
+                # Ping the database to verify connection
+                await self.client.admin.command('ping')
+                self.logger.info("Connected to MongoDB")
+                
         except Exception as e:
             self.logger.error(f"Error connecting to MongoDB: {e}")
             raise
