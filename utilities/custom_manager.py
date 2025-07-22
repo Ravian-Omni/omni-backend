@@ -4,12 +4,11 @@ import asyncio
 from typing import List, Optional,Dict,Any
 from loguru import logger
 from datetime import datetime,timezone
-from dependencies import get_mongodb_service
 from dependencies import get_websocket_manager
 from dataclasses import dataclass
 from omni.memory import OmniMemory
 from collections import defaultdict
-
+from utilities.api_client import api_client
 
 @dataclass
 class ChatContext:
@@ -29,7 +28,6 @@ class ChatContext:
             self.manager_kwargs = {}
 
 async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
-    mongodb = await get_mongodb_service()
     chat_document = {
         "user_id": context.user_id,
         "chat_id": context.chat_id,
@@ -42,7 +40,13 @@ async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
     }
     
     # Create database record
-    await mongodb.insert_one(context.collection_name, chat_document)
+    create_chat = await api_client.post("/chats/new", params={"capability": context.collection_name}, data=chat_document)
+    create_chat = create_chat.standard_response()
+    if not create_chat.get("success"):
+        raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
+    
+    result = create_chat.get("data")
+    # await mongodb.insert_one(context.collection_name, chat_document)
     
     # Return standardized response using Pydantic model
     return {"chat_id":context.chat_id}
@@ -59,9 +63,7 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
     Returns:
         bool: True if update was successful
     """
-    try:
-        mongodb_service = await get_mongodb_service()
-        
+    try:        
         # Extract message fields safely
         raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message', 'usage'] if k in message}
         content_message = {k: message.get(k) for k in ['role', 'name', 'content'] if k in message}
@@ -86,12 +88,18 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
             "call_id": context.call_id,
             "capability_id": context.capability_id
         }
+
+        update_result = await api_client.post("/chats/chat_update", params={"capability": context.collection_name}, data={"filter_criteria":filter_criteria,"document":update_document})
+        update_result = update_result.standard_response()
+        if not update_result.get("success"):
+            raise Exception(f"Failed to update chat history: {update_result.get('message', 'Unknown error')}")
         
-        result = await mongodb_service.update_one(
-            context.collection_name, 
-            filter_criteria, 
-            update_document
-        )
+        result = update_result.get("data")
+        # result = await mongodb_service.update_one(
+        #     context.collection_name, 
+        #     filter_criteria, 
+        #     update_document
+        # )
         
         logger.info(
             f"Chat history updated - chat_id: {context.chat_id}, "

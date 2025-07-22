@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from loguru import logger
-from dependencies import get_websocket_manager, get_mongodb_service
+from dependencies import get_websocket_manager
 from managers.connection import WebSocketManager
 from configs.settings import settings, CapabilityType
 from omni.manager import Omni
@@ -17,23 +17,31 @@ from omni.memory import OmniMemory
 import os
 from fastapi import HTTPException, Depends, status
 from utilities.custom_manager import ChatContext
-
+from utilities.api_client import api_client
+from configs.llm_configs_manager import LLMConfigManager
 router = APIRouter()
 
 @router.websocket("/omni/{chat_id}")
 async def run_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "default_user",
+    user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
-    db=Depends(get_mongodb_service),
 ):
     """WebSocket endpoint for run communication"""
     # Verify run exists and is in valid state
-    history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
+    chat_history = await api_client.post("/chats/history", params={"capability":"omni"}, data={"chat_id":chat_id, "user_id":user_id})
+    chat_history = chat_history.standard_response()
+    if not chat_history.get("success"):
+        logger.error(chat_history)
+        await websocket.close(code=3001, reason=chat_history.get("message", "Run not found"))
+        return
+    
+    history = chat_history.get("data")
+    # history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
     if not history:
         logger.warning(f"Run not found: {user_id} & {chat_id}")
-        await websocket.close(code=4004, reason="Run not found")
+        await websocket.close(code=4003, reason="Run not found")
         return
     
     chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
@@ -43,10 +51,7 @@ async def run_websocket(
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
         omni.memory.load_main_messages(messages)
-    # run = run_response.data[0]
-    # if run.status not in [RunStatus.CREATED, RunStatus.ACTIVE]:
-    #     await websocket.close(code=4003, reason="Run not in valid state")
-    #     return
+
 
     input_func = ws_manager._create_input_func(chat_id)
     omni.user_input.set_input_function(input_func)
@@ -139,8 +144,7 @@ async def run_websocket(
     chat_id: str,
     user_id: str = "default_user",
     capability_name: str = "email_sender",
-    ws_manager: WebSocketManager = Depends(get_websocket_manager),
-    db=Depends(get_mongodb_service),
+    ws_manager: WebSocketManager = Depends(get_websocket_manager)
 ):
     """WebSocket endpoint for run communication"""
     # Verify run exists and is in valid state
@@ -152,11 +156,21 @@ async def run_websocket(
         raise HTTPException(status_code=400, detail=str(e))
     query = {"user_id": user_id, "chat_id": chat_id, "call_id": "Individual", "capability_id": chat_id}
     
-    history = await db.find_one(collection_name, query)
+    # Verify run exists and is in valid state
+    chat_history = await api_client.post("/chats/history", params={"capability":collection_name}, data=query)
+    chat_history = chat_history.standard_response()
+    if not chat_history.get("success"):
+        logger.error(chat_history)
+        await websocket.close(code=3001, reason=chat_history.get("message", "Run not found"))
+        return
+    
+    history = chat_history.get("data")
+    # history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
     if not history:
         logger.warning(f"Run not found: {user_id} & {chat_id}")
-        await websocket.close(code=4004, reason="Run not found")
+        await websocket.close(code=4003, reason="Run not found")
         return
+    
     
     chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
     

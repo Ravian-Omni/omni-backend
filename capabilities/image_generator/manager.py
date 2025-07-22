@@ -31,16 +31,18 @@ class ImageGenerator:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_pc["response_format"] = ProcessCompletionResponse
+        image_llm_config = LLMConfigManager.get_config("image_together_llm")
+        self.image_llm_config = image_llm_config.get("config_list", [])[0]
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
         
     def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"], filename: Annotated[str, "The filename to save the image as"]):
         try:
-            client = Together(api_key=settings.TOGETHER_API_KEY)
+            client = Together(api_key=self.image_llm_config.get("api_key"))
             response = client.images.generate(
                 prompt=prompt,
-                model="black-forest-labs/FLUX.1-dev",
+                model=self.image_llm_config.get("model"),
                 n=1,
                 width=768,
                 height=432,

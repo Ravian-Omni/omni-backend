@@ -1,223 +1,184 @@
 from typing import Dict, Any
-from dataclasses import dataclass
-import os
-from configs.settings import settings
-
-@dataclass
-class LLMConfig:
-    """Simple LLM configuration container"""
-    model: str
-    api_key: str = None
-    api_type: str = None
-    base_url: str = None
-    api_version: str = None
-    temperature: float = None
-    max_tokens: int = None
-    reasoning_effort: str = None
-    # Add any other common parameters here
-    
-    def to_autogen_format(self) -> Dict[str, Any]:
-        """Convert to AutoGen-compatible format"""
-        config = {k: v for k, v in self.__dict__.items() if v is not None}
-        return {"config_list": [config]}
+import asyncio
+import time
+from utilities.api_client import api_client
 
 class LLMConfigManager:
+    """LLM Configuration Manager (Class-based methods)"""
     
-    @classmethod
-    def _get_current_api_keys(cls) -> Dict[str, str]:
-        """Get current API keys from settings (evaluated at runtime)"""
-        return {
-            "azure_api_key": settings.AZURE_OPENAI_API_KEY,
-            "openai_api_key": settings.OPENAI_API_KEY,
-            "together_api_key": settings.TOGETHER_API_KEY,
-            "anthropic_api_key": settings.ANTHROPIC_API_KEY,
-            "azure_o3_api_key": settings.AZURE_OPENAI_API_KEY_O3
-        }
+    _cache: Dict[str, Any] = {}
+    _cache_time: float = 0
     
     @classmethod
     def get_config(cls, config_name: str) -> Dict[str, Any]:
-        """Get predefined configuration by name"""
-        # Get fresh API keys each time
-        api_keys = cls._get_current_api_keys()
-        
-        configs = {
-            # Azure Configurations
-            "gpt4_mini": LLMConfig(
-                model="gpt-4o-mini",
-                api_key=api_keys["azure_api_key"],
-                api_type="azure",
-                base_url="https://newton-aoi.openai.azure.com/",
-                api_version="2024-08-01-preview",
-                temperature=0.15
-            ),
-            
-            "gpt4o": LLMConfig(
-                model="gpt-4o",
-                api_key=api_keys["azure_api_key"],
-                api_type="azure",
-                base_url="https://newton-aoi.openai.azure.com/",
-                api_version="2024-08-01-preview",
-            ),
-            
-            # Anthropic Configurations
-            "claude-3-7-sonnet-20250219": LLMConfig(
-                model="claude-3-7-sonnet-20250219",
-                api_key=api_keys["anthropic_api_key"],
-                api_type="anthropic"
-            ),
-            
-            # Azure O3 Configuration
-            "o3-mini-reason-high": LLMConfig(
-                model="o3-mini",
-                api_key=api_keys["azure_o3_api_key"],
-                api_type="azure",
-                base_url="https://newton-ai-123.cognitiveservices.azure.com/",
-                api_version="2025-01-01-preview",
-                # reasoning_effort="high"
-            ),
-            
-            # Together AI Configurations
-            "deepseek": LLMConfig(
-                model="deepseek-ai/DeepSeek-V3",
-                api_key=api_keys["together_api_key"],
-                api_type="together"
-            ),
-            
-            "image_together": LLMConfig(
-                model="black-forest-labs/FLUX.1-dev",
-                api_key=api_keys["together_api_key"],
-            ),
-            
-            # OpenAI Configurations
-            "gpt_4_1_mini": LLMConfig(
-                model="gpt-4.1-mini-2025-04-14",
-                api_key=api_keys["openai_api_key"],
-            ),
-            
-            # Commented configurations for reference
-            # "gpt_4_1_mini_azure": LLMConfig(
-            #     model="gpt-4.1-mini",
-            #     api_key=api_keys["azure_api_key"],
-            #     api_type="azure",
-            #     base_url="https://newton-aoi.openai.azure.com/",
-            #     api_version="2025-01-01-preview"
-            # ),
-        }
+        """Get LLM configuration by name"""
+        configs = cls._get_all_configs()
         
         if config_name not in configs:
-            available_configs = list(configs.keys())
-            raise ValueError(f"Unknown config: {config_name}. Available configs: {available_configs}")
-            
-        return configs[config_name].to_autogen_format()
-    
-    @classmethod
-    def create_custom_config(cls, **kwargs) -> Dict[str, Any]:
-        """Create one-off configurations"""
-        return LLMConfig(**kwargs).to_autogen_format()
+            available = list(configs.keys())
+            raise ValueError(f"Config '{config_name}' not found. Available: {available}")
+        
+        config_data = configs[config_name]
+        return {"config_list": [config_data]}
     
     @classmethod
     def get_available_configs(cls) -> list:
-        """Get list of all available configuration names"""
-        # Get fresh API keys to build config list
-        api_keys = cls._get_current_api_keys()
-        
-        configs = [
-            "gpt4_mini",
-            "gpt4o", 
-            "claude-3-7-sonnet-20250219",
-            "o3-mini-reason-high",
-            "deepseek",
-            "gpt_4_1_mini",
-            "image_together"
-        ]
-        
-        return configs
+        """Get list of available configuration names"""
+        configs = cls._get_all_configs()
+        return list(configs.keys())
     
     @classmethod
-    def get_config_info(cls, config_name: str) -> Dict[str, Any]:
-        """Get configuration info without API keys for debugging"""
-        api_keys = cls._get_current_api_keys()
+    def _get_all_configs(cls) -> Dict[str, Any]:
+        """Get all configs - use cache first, API only if cache is empty"""
         
-        # Create a safe version that shows if keys are available
-        safe_api_keys = {
-            key: "SET" if value else "NOT_SET" 
-            for key, value in api_keys.items()
-        }
+        # Return cached data if available
+        if cls._cache:
+            return cls._cache
         
+        # Only call API if cache is empty
         try:
-            config = cls.get_config(config_name)
-            model_info = config["config_list"][0]
-            
-            return {
-                "config_name": config_name,
-                "model": model_info.get("model"),
-                "api_type": model_info.get("api_type"),
-                "base_url": model_info.get("base_url"),
-                "api_version": model_info.get("api_version"),
-                "temperature": model_info.get("temperature"),
-                "api_key_status": safe_api_keys,
-                "has_api_key": bool(model_info.get("api_key"))
-            }
-        except ValueError as e:
-            return {"error": str(e)}
+            response = asyncio.run(api_client.get("/chats/api_keys"))
+            response = response.standard_response()
+            if response["success"]:
+                cls._cache = response["data"]
+                cls._cache_time = time.time()
+                return cls._cache
+            else:
+                raise Exception(response.get('message', 'Unknown error'))
+        except Exception as e:
+            # Return empty dict if API call fails
+            raise Exception(f"Error fetching configs: {str(e)}")
     
     @classmethod
-    def test_api_keys(cls) -> Dict[str, str]:
-        """Test which API keys are currently set"""
-        api_keys = cls._get_current_api_keys()
+    def clear_cache(cls):
+        """Clear the configuration cache"""
+        cls._cache = {}
+        cls._cache_time = 0
+    
+    @classmethod
+    def refresh_configs(cls) -> bool:
+        """Force refresh configurations from server (ignores cache)"""
+        try:
+            response = asyncio.run(api_client.get("/chats/api_keys"))
+            response = response.standard_response()
+            
+            if response["success"]:
+                cls._cache = response["data"]
+                cls._cache_time = time.time()
+                return True
+            else:
+                return False
+        except Exception:
+            return False
+    
+    @classmethod
+    def is_server_available(cls) -> bool:
+        """Check if server is available"""
+        try:
+            response = asyncio.run(api_client.get("/"))
+            return response["success"]
+        except Exception:
+            return False
+    
+    @classmethod
+    def get_cache_info(cls) -> Dict[str, Any]:
+        """Get cache information"""
         return {
-            key: "SET" if value else "NOT_SET" 
-            for key, value in api_keys.items()
+            "has_cache": bool(cls._cache),
+            "config_count": len(cls._cache) if cls._cache else 0,
+            "cache_time": cls._cache_time,
+            "cache_age_seconds": time.time() - cls._cache_time if cls._cache_time else 0
         }
 
-# Convenience functions for common operations
+# Remove singleton instance since we're using classmethods
+# llm_config_manager = LLMConfigManager()
+
+# Simple convenience functions (optional - you can use class methods directly)
 def get_llm_config(config_name: str) -> Dict[str, Any]:
-    """Convenience function to get LLM configuration"""
+    """Get LLM config"""
     return LLMConfigManager.get_config(config_name)
 
-def create_custom_llm_config(**kwargs) -> Dict[str, Any]:
-    """Convenience function to create custom LLM configuration"""
-    return LLMConfigManager.create_custom_config(**kwargs)
-
-def list_available_configs() -> list:
-    """Convenience function to list available configurations"""
+def list_configs() -> list:
+    """List available configs"""
     return LLMConfigManager.get_available_configs()
 
-def check_api_keys() -> Dict[str, str]:
-    """Convenience function to check API key status"""
-    return LLMConfigManager.test_api_keys()
+def clear_llm_cache():
+    """Clear LLM config cache"""
+    LLMConfigManager.clear_cache()
 
-# Example usage and testing
-if __name__ == "__main__":
-    # Test API key status
-    print("API Key Status:")
-    print(LLMConfigManager.test_api_keys())
+def refresh_llm_configs() -> bool:
+    """Refresh configs from server"""
+    return LLMConfigManager.refresh_configs()
+
+def get_cache_info() -> Dict[str, Any]:
+    """Get cache information"""
+    return LLMConfigManager.get_cache_info()
+
+def is_server_available() -> bool:
+    """Check if server is available"""
+    return LLMConfigManager.is_server_available()
+
+# Context manager for auto-cleanup
+class LLMConfigContext:
+    """Context manager that auto-clears cache after use"""
     
-    # Test getting a configuration
+    def __init__(self, config_name: str):
+        self.config_name = config_name
+        self.config = None
+    
+    def __enter__(self):
+        self.config = get_llm_config(self.config_name)
+        return self.config
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        clear_llm_cache()
+
+# Easy-to-use function with auto-cleanup
+def get_llm_config_clean(config_name: str) -> Dict[str, Any]:
+    """Get LLM config and automatically clear cache after"""
     try:
-        config = LLMConfigManager.get_config("gpt4_mini")
-        print(f"\nGPT4 Mini Config: {config}")
-    except Exception as e:
-        print(f"Error getting config: {e}")
-    
-    # Test configuration info
-    print(f"\nConfig Info: {LLMConfigManager.get_config_info('gpt4_mini')}")
-    
-    # List available configurations
-    print(f"\nAvailable Configs: {LLMConfigManager.get_available_configs()}")
+        config = get_llm_config(config_name)
+        return config
+    finally:
+        clear_llm_cache()
 
-# Example of how to modify an existing configuration
-def modify_config_example():
-    """Example of how to modify an existing configuration"""
-    # Get base configuration
-    base_config = LLMConfigManager.get_config("gpt4_mini")
+# Usage Examples:
+# if __name__ == "__main__":
+#     # Direct class usage (this is what you wanted!)
+#     config = LLMConfigManager.get_config("gpt_4_1_mini")
+#     print(f"Config: {config}")
     
-    # Modify the configuration
-    modified_config = base_config["config_list"][0].copy()
-    modified_config.update({
-        "temperature": 0.5,
-        "max_tokens": 2000
-    })
+#     # List available configs
+#     available = LLMConfigManager.get_available_configs()
+#     print(f"Available configs: {available}")
     
-    # Return modified configuration in AutoGen format
-    return {"config_list": [modified_config]}
+#     # Check cache info
+#     info = LLMConfigManager.get_cache_info()
+#     print(f"Cache info: {info}")
+    
+#     # Clear cache
+#     LLMConfigManager.clear_cache()
+    
+#     # Check cache info again
+#     info = LLMConfigManager.get_cache_info()
+#     print(f"Cache info after clear: {info}")
+    
+#     # Refresh configs
+#     success = LLMConfigManager.refresh_configs()
+#     print(f"Refresh successful: {success}")
+    
+#     # Check server availability
+#     server_ok = LLMConfigManager.is_server_available()
+#     print(f"Server available: {server_ok}")
+    
+#     # You can still use convenience functions if you prefer
+#     config2 = get_llm_config("claude-3-7-sonnet-20250219")
+#     print(f"Config via function: {config2}")
+    
+#     # Context manager still works
+#     with LLMConfigContext("gpt4_mini") as config:
+#         print(f"Using config in context: {config}")
+    
+#     # Auto-cleanup usage
+#     config3 = get_llm_config_clean("deepseek")
+#     print(f"Config with auto-cleanup: {config3}")

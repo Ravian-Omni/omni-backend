@@ -19,14 +19,9 @@ import time
 from datetime import datetime
 from capabilities.file_finder import prompts
 from configs.llm_configs_manager import LLMConfigManager
-llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.file_finder.response_format import ProblemStatusResponse, FileFinderResponse
-
-
-llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
-llm_config_psc["response_format"] = ProblemStatusResponse
 
 class FileSearchAgent:
     def __init__(self, root_dir: str = str(Path.home())):

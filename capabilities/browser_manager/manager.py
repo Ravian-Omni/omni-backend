@@ -21,7 +21,7 @@ from browser_use.browser.context import BrowserContextConfig
 
 # Your custom imports
 from configs.settings import settings
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from capabilities.browser_manager import prompts
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.llm_configs_manager import LLMConfigManager
@@ -59,9 +59,6 @@ class BrowserManager:
         self.save_results = save_results
         self.context = context
         
-        # Initialize Tavily client
-        self.tavily_client = AsyncTavilyClient(settings.TAVILY_API_KEY)
-        
         # Setup directories
         self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")
         
@@ -72,15 +69,31 @@ class BrowserManager:
         
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        tavily_llm_config = LLMConfigManager.get_config("tavily_llm_config")
+        # Initialize Tavily client
+        tavily_client_key = tavily_llm_config.get("config_list", [])[0].get("api_key")
+        self.tavily_client = AsyncTavilyClient(tavily_client_key)
         self.llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_wc["response_format"] = webprocess_completion
-        
+        self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
         # Initialize vision LLM
-        self.vision_llm = ChatOpenAI(
-            model_name="gpt-4.1-mini-2025-04-14",
-            temperature=0.1,
-            api_key=settings.OPENAI_API_KEY,
-        )
+        browser_llm = self.llm_config.get("config_list", [])[0]
+        if "api_type" in browser_llm.keys() and browser_llm.get("api_type") == "azure":
+            self.vision_llm = AzureChatOpenAI(
+                azure_deployment=browser_llm.get("model"),
+                temperature=browser_llm.get("temperature", 0.1),
+                api_key=browser_llm.get("api_key"),
+                azure_endpoint=browser_llm.get("base_url"),
+                api_version=browser_llm.get("api_version")
+            )
+
+        else:
+            self.vision_llm = ChatOpenAI(
+                model_name=browser_llm.get("model"),
+                temperature=browser_llm.get("temperature", 0.1),
+                api_key=browser_llm.get("api_key"),
+            )
+        
         
         # Browser session management
         self.browser_session = None

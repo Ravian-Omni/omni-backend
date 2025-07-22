@@ -1,8 +1,6 @@
 from fastapi import Depends
 from fastapi import APIRouter
 from fastapi import Request
-from dependencies import get_mongodb_service
-from utilities.mongodb_service import MongoDBService
 from utilities.storage import ensure_path
 import uuid
 import json
@@ -17,6 +15,7 @@ from typing import List, Optional, Dict, Any
 from bson import ObjectId
 import time
 import os
+from utilities.api_client import api_client
 
 
 router = APIRouter()
@@ -31,7 +30,7 @@ class Message(BaseModel):
     content: str
 
 @router.post("/new_chat")
-async def create_new_chat(request:Request, user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian"), mongodb: MongoDBService = Depends(get_mongodb_service)):
+async def create_new_chat(request:Request, user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian")):
     try:
         chat_dir = ensure_path(chat_dir)
         # Generate unique chat identifier
@@ -39,16 +38,16 @@ async def create_new_chat(request:Request, user_id:str = "default_user", chat_di
         
         
         # Check if the chat_id already exists for this user
-        existing_chat = await mongodb.find_one(
-            settings.OMNI_COLLECTION,
-            {"user_id": user_id, "chat_id": chat_id}
-        )
+        # existing_chat = await mongodb.find_one(
+        #     settings.OMNI_COLLECTION,
+        #     {"user_id": user_id, "chat_id": chat_id}
+        # )
         
-        if existing_chat:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, 
-                detail="Chat already exists for this user with the generated ID"
-            )
+        # if existing_chat:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_409_CONFLICT, 
+        #         detail="Chat already exists for this user with the generated ID"
+        #     )
         
         # Prepare chat document
         chat_document = {
@@ -62,11 +61,15 @@ async def create_new_chat(request:Request, user_id:str = "default_user", chat_di
         }
         
         # Create database record
-        await mongodb.insert_one(settings.OMNI_COLLECTION, chat_document)
+        create_chat = await api_client.post("/chats/new", params={"capability": "omni"}, data=chat_document)
+        create_chat = create_chat.standard_response()
+        if not create_chat.get("success"):
+            raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
         
+        result = create_chat.get("data")
         
         # Return standardized response using Pydantic model
-        return {"chat_id":chat_id}
+        return result
     
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -79,7 +82,7 @@ async def create_new_chat(request:Request, user_id:str = "default_user", chat_di
         )
 
 @router.post("capability/new-chat")
-async def create_new_chat(request:Request, capability_name: str = Query(..., description="Capability name"), user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian"), mongodb: MongoDBService = Depends(get_mongodb_service)):
+async def create_new_chat(request:Request, capability_name: str = Query(..., description="Capability name"), user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian")):
     try:
         chat_dir = ensure_path(chat_dir)
         # Generate unique chat identifier
@@ -88,16 +91,16 @@ async def create_new_chat(request:Request, capability_name: str = Query(..., des
         capability = CapabilityType.from_string(capability_name)
         collection_name = capability.collection
         # Check if the chat_id already exists for this user
-        existing_chat = await mongodb.find_one(
-            collection_name,
-            {"user_id": user_id, "chat_id": chat_id}
-        )
+        # existing_chat = await mongodb.find_one(
+        #     collection_name,
+        #     {"user_id": user_id, "chat_id": chat_id}
+        # )
         
-        if existing_chat:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, 
-                detail="Chat already exists for this user with the generated ID"
-            )
+        # if existing_chat:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_409_CONFLICT, 
+        #         detail="Chat already exists for this user with the generated ID"
+        #     )
         
         # Prepare chat document
         chat_document = {
@@ -113,11 +116,17 @@ async def create_new_chat(request:Request, capability_name: str = Query(..., des
         }
         
         # Create database record
-        await mongodb.insert_one(collection_name, chat_document)
+        # await mongodb.insert_one(collection_name, chat_document)
+        create_chat = await api_client.post("/chats/new", params={"capability": collection_name}, data=chat_document)
+        create_chat = create_chat.standard_response()
+        if not create_chat.get("success"):
+            raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
+        
+        result = create_chat.get("data")
         
         
         # Return standardized response using Pydantic model
-        return {"capability_name": capability_name,"chat_id":chat_id}
+        return result
     
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -128,18 +137,6 @@ async def create_new_chat(request:Request, capability_name: str = Query(..., des
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail=f"Chat creation failed due to server error: {e}"
         )
-
-# FastAPI endpoint
-@router.post("/chat")
-async def chat_endpoint(request:Request, chat_request: ChatRequest, mongodb: MongoDBService = Depends(get_mongodb_service)):
-    omni = Omni(chat_request.chat_id)
-    history = await mongodb.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_request.chat_id})
-    # messages = history.get("messages",[])
-    # if messages:
-    #     last_agent, last_message = omni.manager.resume(messages=messages)
-    #     omni.memory.load_main_messages(messages)
-    response = await omni.manager.a_initiate_chat(omni.manager,message=chat_request.message,clear_history=False)
-    return omni.groupchat.messages[-1]
 
 
 def serialize_document(doc: Dict[Any, Any]) -> Dict[str, Any]:
@@ -177,19 +174,21 @@ class SimplifiedChatHistory(BaseModel):
 @router.get("/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory)
 async def get_specific_chat(
     user_id: str = Path(..., description="User ID"),
-    chat_id: str = Path(..., description="Chat ID"),
-    mongodb: MongoDBService = Depends(get_mongodb_service)
+    chat_id: str = Path(..., description="Chat ID")
 ):
     """Get a specific chat by user_id and chat_id - returns only chat_id and raw_messages"""
     try:
         query = {"user_id": user_id, "chat_id": chat_id}
-        document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
-        
-        if not document:
+        # document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
+        chat_history = await api_client.post("/chats/history", params={"capability":"omni"}, data=query)
+        chat_history = chat_history.standard_response()
+        if not chat_history.get("success"):
             raise HTTPException(
                 status_code=404,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
             )
+        
+        document = chat_history.get("data")
         
         # Serialize the full document first
         serialized_doc = serialize_document(document)
@@ -228,8 +227,7 @@ async def get_specific_chat(
     user_id: str = Path(..., description="User ID"),
     chat_id: str = Path(..., description="Chat ID"),
     call_id: str = Query(..., description="Call ID"),
-    capability_name: str = Query(..., description="Capability name"),
-    mongodb: MongoDBService = Depends(get_mongodb_service)
+    capability_name: str = Query(..., description="Capability name")
 ):
     """Get a specific chat by user_id and chat_id - returns call_id, capability_name, chat_id and raw_messages"""
     try:
@@ -241,13 +239,17 @@ async def get_specific_chat(
             )
         capability = CapabilityType._value2member_map_.get(capability_name)
         collection_name = capability.collection 
-        document = await mongodb.find_one(collection_name, query)
-        
-        if not document:
+        # document = await mongodb.find_one(collection_name, query)
+        chat_history = await api_client.post("/chats/history", params={"capability":collection_name}, data=query)
+        chat_history = chat_history.standard_response()
+        if not chat_history.get("success"):
             raise HTTPException(
                 status_code=404,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
             )
+        
+        document = chat_history.get("data")
+        
         
         # Serialize the full document first
         serialized_doc = serialize_document(document)

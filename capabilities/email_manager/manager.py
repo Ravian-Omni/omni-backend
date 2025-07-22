@@ -26,7 +26,6 @@ import imaplib
 import email
 from email.header import decode_header
 from email.message import EmailMessage
-llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from langchain_openai import AzureChatOpenAI
 from capabilities.email_manager.response_format import email_process_completion, intent_class
 

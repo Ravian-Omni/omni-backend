@@ -289,8 +289,6 @@ class Omni:
         self.chat_dir = chat_dir
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.config_list_anth = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
-        self.llm_config_reason = LLMConfigManager.get_config("o3-mini-reason-high")
         # self.llm_config = LLMConfigManager.get_config("deepseek")
         self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_mini_planner["response_format"] = PlannerResponse
