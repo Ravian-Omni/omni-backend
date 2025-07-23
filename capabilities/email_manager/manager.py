@@ -1,6 +1,6 @@
 import os
 import autogen
-import os
+import asyncio
 import datetime
 from typing import List, Dict, Any, Union
 from capabilities.email_manager import prompts
@@ -28,7 +28,7 @@ from email.header import decode_header
 from email.message import EmailMessage
 from langchain_openai import AzureChatOpenAI
 from capabilities.email_manager.response_format import email_process_completion, intent_class
-
+from loguru import logger
 
 
 
@@ -64,7 +64,11 @@ class EmailManager:
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
-        
+    
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
     
     async def send_email_with_attachments(self, to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
                                     attachments: List[str] = None, sender: str = None):
@@ -471,48 +475,56 @@ class EmailManager:
         
 
     def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:
-        messages = groupchat.messages
-        if len(messages) == 1 or last_speaker.name == "chat_manager":
-            print("Initial query received. Starting with intent_classifier.")
-            return groupchat.agent_by_name("intent_classifier_agent")
-        if last_speaker.name == "intent_classifier_agent":
-            last_message = messages[-1]["content"]
-            if "INTENT: SEND_EMAIL" in last_message:
-                return groupchat.agent_by_name("planner_agent")
-            elif "INTENT: READ_EMAIL" in last_message:
-                return groupchat.agent_by_name("email_search_agent")
-            elif "INTENT: SEARCH_EMAIL" in last_message:
-                return groupchat.agent_by_name("email_search_agent")
-            elif "INTENT: REPLY_EMAIL" in last_message:
-                return groupchat.agent_by_name("email_reply_agent")
+        try:
+            self._check_cancellation()
             
-        #the basic flow of the email manager    
-        if last_speaker.name == "planner_agent":
-            return groupchat.agent_by_name("content_writer_agent")
-        if last_speaker.name == "content_writer_agent":
-            return groupchat.agent_by_name("email_caller_agent")
-        if last_speaker.name == "email_caller_agent":
-            return groupchat.agent_by_name("code_executor_agent")
-        if last_speaker.name == "code_executor_agent":
-            if "exitcode: 1" in messages[-1]["content"]:
-                return groupchat.agent_by_name("debugger_agent")
-            elif "exitcode: 0" in messages[-1]["content"]:
-                return groupchat.agent_by_name("process_completion_agent")
-            else:
-                return groupchat.agent_by_name("process_completion_agent")
-        #the additional flow for the email manager
-        if last_speaker.name == "debugger_agent":
-            return groupchat.agent_by_name("code_executor_agent")
-        
-        elif last_speaker.name == "email_reader_agent":
-            return groupchat.agent_by_name("code_executor_agent")
+            messages = groupchat.messages
+            if len(messages) == 1 or last_speaker.name == "chat_manager":
+                print("Initial query received. Starting with intent_classifier.")
+                return groupchat.agent_by_name("intent_classifier_agent")
+            if last_speaker.name == "intent_classifier_agent":
+                last_message = messages[-1]["content"]
+                if "INTENT: SEND_EMAIL" in last_message:
+                    return groupchat.agent_by_name("planner_agent")
+                elif "INTENT: READ_EMAIL" in last_message:
+                    return groupchat.agent_by_name("email_search_agent")
+                elif "INTENT: SEARCH_EMAIL" in last_message:
+                    return groupchat.agent_by_name("email_search_agent")
+                elif "INTENT: REPLY_EMAIL" in last_message:
+                    return groupchat.agent_by_name("email_reply_agent")
+                
+            #the basic flow of the email manager    
+            if last_speaker.name == "planner_agent":
+                return groupchat.agent_by_name("content_writer_agent")
+            if last_speaker.name == "content_writer_agent":
+                return groupchat.agent_by_name("email_caller_agent")
+            if last_speaker.name == "email_caller_agent":
+                return groupchat.agent_by_name("code_executor_agent")
+            if last_speaker.name == "code_executor_agent":
+                if "exitcode: 1" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("debugger_agent")
+                elif "exitcode: 0" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("process_completion_agent")
+                else:
+                    return groupchat.agent_by_name("process_completion_agent")
+            #the additional flow for the email manager
+            if last_speaker.name == "debugger_agent":
+                return groupchat.agent_by_name("code_executor_agent")
+            
+            elif last_speaker.name == "email_reader_agent":
+                return groupchat.agent_by_name("code_executor_agent")
 
-        
-        elif last_speaker.name in ["email_search_agent"]:
-             return groupchat.agent_by_name("code_executor_agent")
-        
-        elif last_speaker.name in ["email_reply_agent"]:
-            return groupchat.agent_by_name("code_executor_agent")
+            
+            elif last_speaker.name in ["email_search_agent"]:
+                return groupchat.agent_by_name("code_executor_agent")
+            
+            elif last_speaker.name in ["email_reply_agent"]:
+                return groupchat.agent_by_name("code_executor_agent")
+            
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
 
 
     def get_agents(self):

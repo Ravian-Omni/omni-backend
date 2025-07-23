@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional, Callable, Awaitable
 import json
 from fastapi import WebSocket, WebSocketDisconnect
 from configs.llm_configs_manager import LLMConfigManager
-
+from managers.cancellation_token import CancellationToken
 logger = logging.getLogger(__name__)
-
+from managers.cancellation_token import CancellationToken
 # Type aliases for input handling
 InputFuncType = Callable[[str, str], Awaitable[str]]
 InputRequestType = str  # "text_input", "file_upload", etc.
@@ -27,6 +27,7 @@ class WebSocketManager:
         self._closed_connections: set[str] = set()
         self._input_responses: Dict[str, asyncio.Queue[str]] = {}
         self._active_tasks: Dict[str, asyncio.Task] = {}
+        self._cancellation_tokens: Dict[int, CancellationToken] = {}
         self._stop_flags: Dict[str, bool] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
@@ -46,6 +47,8 @@ class WebSocketManager:
             self._closed_connections.discard(session_id)
             self._input_responses[session_id] = asyncio.Queue()
             self._stop_flags[session_id] = False
+            cancellation_token = CancellationToken()
+            self._cancellation_tokens[session_id] = cancellation_token
 
             await self._send_message(
                 session_id,
@@ -67,7 +70,7 @@ class WebSocketManager:
         session_id: str,
         # chat_handler: Callable[[str, InputFuncType], Awaitable[Any]],
         initial_message: str = "",
-        omni=None
+        omni = None
     ) -> None:
         """
         Start a chat stream with the provided handler
@@ -97,7 +100,7 @@ class WebSocketManager:
                     },
                 )
 
-
+            omni._set_cancellation_token(self._cancellation_tokens.get(session_id, None))
             task = asyncio.create_task(omni.manager.a_initiate_chat(omni.manager,message=initial_message.get("task"),clear_history=False))
             self._active_tasks[session_id] = task
 
@@ -128,6 +131,7 @@ class WebSocketManager:
             traceback.print_exc()
             await self._handle_stream_error(session_id, e)
         finally:
+            self._cancellation_tokens.pop(session_id, None)
             self._active_tasks.pop(session_id, None)
             self._stop_flags.pop(session_id, None)
 
@@ -263,32 +267,34 @@ class WebSocketManager:
             reason: Reason for stopping
         """
         LLMConfigManager.clear_cache()
-        logger.info(f"Stopping session {session_id}: {reason}")
+        if session_id in self._cancellation_tokens:
+            logger.info(f"Stopping session {session_id}: {reason}")
 
-        try:
-            # Set stop flag
-            self._stop_flags[session_id] = True
-            
-            # Cancel the task if it exists
-            if session_id in self._active_tasks:
-                task = self._active_tasks[session_id]
-                if not task.done():
-                    task.cancel()
+            try:
+                # Set stop flag
+                self._stop_flags[session_id] = True
+                # Cancel the task if it exists
+                if session_id in self._active_tasks:
+                    task = self._active_tasks[session_id]
+                    if not task.done():
+                        task.cancel()
 
-            # Send completion message if connection is active
-            if session_id in self._connections and session_id not in self._closed_connections:
-                await self._send_message(
-                    session_id,
-                    {
-                        "type": "completion",
-                        "status": "stopped",
-                        "reason": reason,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
-                
-        except Exception as e:
-            logger.error(f"Error stopping session {session_id}: {e}")
+                # Finally cancel the token
+                self._cancellation_tokens[session_id].cancel()
+                # Send completion message if connection is active
+                if session_id in self._connections and session_id not in self._closed_connections:
+                    await self._send_message(
+                        session_id,
+                        {
+                            "type": "completion",
+                            "status": "stopped",
+                            "reason": reason,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Error stopping session {session_id}: {e}")
 
     async def disconnect(self, session_id: str) -> None:
         """
@@ -308,6 +314,7 @@ class WebSocketManager:
 
         # Clean up resources
         self._connections.pop(session_id, None)
+        self._cancellation_tokens.pop(session_id, None)
         self._input_responses.pop(session_id, None)
         self._active_tasks.pop(session_id, None)
         self._stop_flags.pop(session_id, None)
@@ -361,6 +368,8 @@ class WebSocketManager:
             # Stop all sessions
             for session_id in list(self._active_tasks.keys()):
                 self._stop_flags[session_id] = True
+                if session_id in self._cancellation_tokens:
+                    self._cancellation_tokens[session_id].cancel()
 
             # Disconnect all websockets with timeout
             async def disconnect_all():
@@ -382,6 +391,7 @@ class WebSocketManager:
             # Clear all internal state
             LLMConfigManager.clear_cache()
             self._connections.clear()
+            self._cancellation_tokens.clear()
             self._closed_connections.clear()
             self._input_responses.clear()
             self._active_tasks.clear()
@@ -404,3 +414,8 @@ class WebSocketManager:
     def is_session_stopped(self, session_id: str) -> bool:
         """Check if a session has been stopped"""
         return self._stop_flags.get(session_id, False)
+    
+    def get_cancellation_token(self, session_id: str) -> Optional[CancellationToken]:
+        """Get the cancellation token for a session"""
+        with self._lock:
+            return self._cancellation_tokens.get(session_id)

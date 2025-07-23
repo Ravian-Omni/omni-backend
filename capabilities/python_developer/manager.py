@@ -38,6 +38,11 @@ class PythonDeveloper:
         self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
         self.agents = self.get_agents()
         self.get_chat_manager()
+    
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
         
     def get_planner(self):
         return autogen.AssistantAgent(
@@ -103,31 +108,39 @@ class PythonDeveloper:
         
     # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
-        messages = groupchat.messages
-        last_msg = messages[-1]["content"] if messages else ""
-        
-        if loop_detector.update(last_msg):
-            return groupchat.agent_by_name("stop_agent")
-        
-        if len(messages) <= 1 or last_speaker.name == "chat_manager":
+        try:
+            self._check_cancellation()
             
-            return groupchat.agent_by_name("planner_agent")
-        if last_speaker.name == "planner_agent":
-            return groupchat.agent_by_name("code_writer_agent")
-        elif last_speaker.name == "code_writer_agent":
-            return groupchat.agent_by_name("code_executor_agent")
-        elif last_speaker.name == "code_executor_agent":
-            if "exitcode: 0" in messages[-1]["content"].lower():
-                return groupchat.agent_by_name("problem_status_checker_agent")
-            else:
-                return groupchat.agent_by_name("code_debugger_agent")
-        elif last_speaker.name == "problem_status_checker_agent":
-            if 'yes' in messages[-1]["content"].lower():
-                return groupchat.agent_by_name("process_completion_agent")
-            else:
+            messages = groupchat.messages
+            last_msg = messages[-1]["content"] if messages else ""
+            
+            if loop_detector.update(last_msg):
+                return groupchat.agent_by_name("stop_agent")
+            
+            if len(messages) <= 1 or last_speaker.name == "chat_manager":
+                
+                return groupchat.agent_by_name("planner_agent")
+            if last_speaker.name == "planner_agent":
                 return groupchat.agent_by_name("code_writer_agent")
-        elif last_speaker.name == "code_debugger_agent":
-            return groupchat.agent_by_name("code_writer_agent")
+            elif last_speaker.name == "code_writer_agent":
+                return groupchat.agent_by_name("code_executor_agent")
+            elif last_speaker.name == "code_executor_agent":
+                if "exitcode: 0" in messages[-1]["content"].lower():
+                    return groupchat.agent_by_name("problem_status_checker_agent")
+                else:
+                    return groupchat.agent_by_name("code_debugger_agent")
+            elif last_speaker.name == "problem_status_checker_agent":
+                if 'yes' in messages[-1]["content"].lower():
+                    return groupchat.agent_by_name("process_completion_agent")
+                else:
+                    return groupchat.agent_by_name("code_writer_agent")
+            elif last_speaker.name == "code_debugger_agent":
+                return groupchat.agent_by_name("code_writer_agent")
+            
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
         
         # return groupchat.agent_by_name("stop_agent")
 

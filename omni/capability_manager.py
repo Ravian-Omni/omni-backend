@@ -3,7 +3,7 @@ from loguru import logger
 from typing import Annotated, Dict, Any, Optional, List, Type, Union
 from dataclasses import dataclass
 from utilities.custom_manager import create_capability_chat, ChatContext
-
+from managers.cancellation_token import CancellationToken
 
 @dataclass
 class CapabilityConfig:
@@ -13,6 +13,7 @@ class CapabilityConfig:
     manager_class: Type
     completion_agent_name: str = "process_completion"
     use_chat_messages: bool = True
+    cancellation_token: CancellationToken = None
     manager_kwargs: Optional[Dict[str, Any]] = None  # Additional arguments for manager class
     
     def __post_init__(self):
@@ -64,6 +65,7 @@ class CapabilityManager:
                 capability_name=config.name,
                 collection_name=config.collection,
                 omni_memory=self.memory,
+                cancellation_token=config.cancellation_token,
                 manager_kwargs=config.manager_kwargs
             )
             

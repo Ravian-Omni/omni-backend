@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Annotated, List, Dict, Any, Optional
-
+from loguru import logger
 import requests
 import nest_asyncio
 from pydantic import BaseModel
@@ -107,6 +107,11 @@ class BrowserManager:
         self._register_functions()
         self.groupchat, self.manager = self._initialize_chat_manager()
 
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
+        
     def _get_user_country(self) -> str:
         """Get user's country from IP address."""
         try:
@@ -307,16 +312,23 @@ class BrowserManager:
 
     def _speaker_selection(self, last_speaker, groupchat):
         """Simplified speaker selection logic."""
-        messages = groupchat.messages
-        if len(messages) == 1 or last_speaker.name == "chat_manager":
-            return groupchat.agent_by_name("browser_planner")
-        elif last_speaker.name == "browser_planner":
-            return groupchat.agent_by_name("browser_reader")
-        elif last_speaker.name == "browser_reader":
-            return groupchat.agent_by_name("browser_searcher")
-        elif last_speaker.name == "browser_searcher":
-            return groupchat.agent_by_name("process_completion")
-        return None
+        try:
+            self._check_cancellation()
+            messages = groupchat.messages
+            if len(messages) == 1 or last_speaker.name == "chat_manager":
+                return groupchat.agent_by_name("browser_planner")
+            elif last_speaker.name == "browser_planner":
+                return groupchat.agent_by_name("browser_reader")
+            elif last_speaker.name == "browser_reader":
+                return groupchat.agent_by_name("browser_searcher")
+            elif last_speaker.name == "browser_searcher":
+                return groupchat.agent_by_name("process_completion")
+            return None
+        
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
 
     def _initialize_chat_manager(self):
         """Initialize group chat and manager."""

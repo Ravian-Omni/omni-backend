@@ -287,7 +287,10 @@ class Omni:
         self.user_id=user_id
         self.chat_id=chat_id
         self.chat_dir = chat_dir
+        self.cancellation_token = None
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config_caller = LLMConfigManager.get_config("gpt_4_1_mini")
+        # self.llm_config_caller["tool_choice"]="required"
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         # self.llm_config = LLMConfigManager.get_config("deepseek")
         self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -313,6 +316,13 @@ class Omni:
         self._register_functions()
         self.get_chat_manager()
         
+    def _set_cancellation_token(self, cancellation_token):
+        self.cancellation_token = cancellation_token
+    
+    def _check_cancellation(self):
+        """Check if operations should be cancelled"""
+        if self.cancellation_token and self.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"FileFinder operation cancelled for session {self.chat_id}")
     
     def get_last_call_id(self):
         last_speaker = self.groupchat.messages[-1]
@@ -382,7 +392,8 @@ class Omni:
             name=CapabilityType.IMAGE_GENERATOR.value,
             collection=settings.IMAGE_GENERATOR_COLLECTION,
             manager_class=ImageGenerator,
-            completion_agent_name="process_completion"
+            completion_agent_name="process_completion",
+            cancellation_token=self.cancellation_token
         )
         return await self.capability_manager.execute_capability(query, self.image_gen_config, call_id)
 
@@ -393,6 +404,7 @@ class Omni:
             collection=settings.BROWSER_COLLECTION,
             manager_class=BrowserManager,
             completion_agent_name="process_completion",
+            cancellation_token=self.cancellation_token,
             use_chat_messages=False 
         )
         return await self.capability_manager.execute_capability(query, self.web_browser_config, call_id)
@@ -406,7 +418,7 @@ class Omni:
             collection=settings.PYTHON_DEV_COLLECTION,
             manager_class=PythonDeveloper,
             completion_agent_name="process_completion_agent",
-            use_chat_messages=True 
+            cancellation_token=self.cancellation_token
         )
         return await self.capability_manager.execute_capability(query, self.python_coder_config, call_id)
        
@@ -418,7 +430,7 @@ class Omni:
             collection=settings.EMAIL_COLLECTION,
             manager_class=EmailManager,
             completion_agent_name="process_completion_agent",
-            use_chat_messages=True 
+            cancellation_token=self.cancellation_token
         )
         return await self.capability_manager.execute_capability(query, self.email_sender_config, call_id)
 
@@ -431,6 +443,7 @@ class Omni:
             collection=settings.FILE_FINDER_COLLECTION,
             manager_class=FileFinder,
             completion_agent_name="process_completion",
+            cancellation_token=self.cancellation_token,
             use_chat_messages=False
         )
         return await self.capability_manager.execute_capability(query, self.file_finder_config, call_id)
@@ -558,7 +571,7 @@ class Omni:
     def get_agent_caller(self):
         return autogen.AssistantAgent(
             name="agent_caller",
-            llm_config=self.llm_config_mini,
+            llm_config=self.llm_config_caller,
             #system_message=prompts.agent_caller,
         )
 
@@ -613,59 +626,69 @@ class Omni:
         )
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
-        messages = groupchat.messages
-        if len(messages) == 1:
-        #judge a question and understand if the question is a task or  general conversation
-                return groupchat.agent_by_name("judge_question")
-        if last_speaker.name in ["judge_question"]:
-            if "task_oriented" in messages[-1]["content"]:
-        #if it is a task oriented question then route to planner agent
-                return groupchat.agent_by_name("planner_agent")
-        #if it is a general conversation then route to conversation agent
-            if "conversation" in messages[-1]["content"]:
-                return groupchat.agent_by_name("conversation_agent")
-
-        #Agent Aligner will align the process and will route to the next agent    
-        if last_speaker.name == "agent_aligner":
-            if "agent_router" in messages[-1]["content"]:
-                return groupchat.agent_by_name("agent_router")
-            elif "manual_verification" in messages[-1]["content"]:
-                return groupchat.agent_by_name("manual_verification")
-            elif "process_completion" in messages[-1]["content"]:
-                return groupchat.agent_by_name("process_completion_agent")
+        try:
+            self._check_cancellation()
             
+            messages = groupchat.messages
+            if len(messages) == 1:
+            #judge a question and understand if the question is a task or  general conversation
+                    return groupchat.agent_by_name("judge_question")
+            if last_speaker.name in ["judge_question"]:
+                if "task_oriented" in messages[-1]["content"]:
+            #if it is a task oriented question then route to planner agent
+                    return groupchat.agent_by_name("planner_agent")
+            #if it is a general conversation then route to conversation agent
+                if "conversation" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("conversation_agent")
 
-        # inner loop planner agent will report back to aligner agent
-        if last_speaker.name in ["planner_agent"]:
-            # if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
-            #     return groupchat.agent_by_name("get_user_acceptance")
-            # else:
+            #Agent Aligner will align the process and will route to the next agent    
+            if last_speaker.name == "agent_aligner":
+                if "agent_router" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("agent_router")
+                elif "manual_verification" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("manual_verification")
+                elif "process_completion" in messages[-1]["content"]:
+                    return groupchat.agent_by_name("process_completion_agent")
+                
+
+            # inner loop planner agent will report back to aligner agent
+            if last_speaker.name in ["planner_agent"]:
+                # if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
+                #     return groupchat.agent_by_name("get_user_acceptance")
+                # else:
+                    return groupchat.agent_by_name("agent_aligner")
+
+            # inner loop planner agent will report back to aligner agent
+            if last_speaker.name in ["get_user_acceptance"]:
+                return groupchat.agent_by_name("user_input")
+            # if last_speaker.name in ["user_input"]:
+            #     return groupchat.agent_by_name("agent_aligner")
+
+            
+            # inner loop manual verification agent will report back to aligner agent
+            if last_speaker.name in ["manual_verification"]:
+                return groupchat.agent_by_name("user_input")
+            if last_speaker.name in ["user_input"]:
                 return groupchat.agent_by_name("agent_aligner")
+            
+            # how the sequential processess will get called
+            if last_speaker.name == "agent_router":
+                return groupchat.agent_by_name("agent_caller")
+            # if last_speaker.name == "agent_caller" and 'tool_call' not in messages[-1]:
+            #     return groupchat.agent_by_name("agent_router")
+            if last_speaker.name == "agent_caller":
+                return groupchat.agent_by_name("agent_executor")
+            if last_speaker.name == "agent_executor":
+                return groupchat.agent_by_name("planner_agent")
+            if last_speaker.name == "chat_manager":
+                return groupchat.agent_by_name("judge_question")
 
-        # inner loop planner agent will report back to aligner agent
-        if last_speaker.name in ["get_user_acceptance"]:
-            return groupchat.agent_by_name("user_input")
-        # if last_speaker.name in ["user_input"]:
-        #     return groupchat.agent_by_name("agent_aligner")
-
-        
-        # inner loop manual verification agent will report back to aligner agent
-        if last_speaker.name in ["manual_verification"]:
-            return groupchat.agent_by_name("user_input")
-        if last_speaker.name in ["user_input"]:
-            return groupchat.agent_by_name("agent_aligner")
-        
-        # how the sequential processess will get called
-        if last_speaker.name == "agent_router":
-            return groupchat.agent_by_name("agent_caller")
-        if last_speaker.name == "agent_caller":
-            return groupchat.agent_by_name("agent_executor")
-        if last_speaker.name == "agent_executor":
-            return groupchat.agent_by_name("planner_agent")
-        if last_speaker.name == "chat_manager":
-            return groupchat.agent_by_name("judge_question")
-
-        return None
+            return None
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.chat_id}")
+            # Return process_completion to gracefully end the chat
+            # return groupchat.agent_by_name("process_completion_agent")
+            raise 
 
     def get_agents(self):
         self.judge_question = self.get_judge_question()

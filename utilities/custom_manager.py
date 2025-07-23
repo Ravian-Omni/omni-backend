@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from omni.memory import OmniMemory
 from collections import defaultdict
 from utilities.api_client import api_client
-
+from managers.cancellation_token import CancellationToken
 @dataclass
 class ChatContext:
     """Chat context containing all necessary identifiers"""
@@ -21,6 +21,7 @@ class ChatContext:
     capability_name: str
     collection_name: str
     omni_memory: OmniMemory
+    cancellation_token: CancellationToken = None
     manager_kwargs: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
