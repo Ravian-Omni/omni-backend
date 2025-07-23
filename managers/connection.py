@@ -4,8 +4,8 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Callable, Awaitable
 import json
-
 from fastapi import WebSocket, WebSocketDisconnect
+from configs.llm_configs_manager import LLMConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +262,7 @@ class WebSocketManager:
             session_id: Session identifier
             reason: Reason for stopping
         """
+        LLMConfigManager.clear_cache()
         logger.info(f"Stopping session {session_id}: {reason}")
 
         try:
@@ -296,6 +297,7 @@ class WebSocketManager:
         Args:
             session_id: Session identifier
         """
+        LLMConfigManager.clear_cache()
         logger.info(f"Disconnecting session {session_id}")
 
         # Mark as closed before cleanup
@@ -378,6 +380,7 @@ class WebSocketManager:
             logger.error(f"Error during WebSocketManager cleanup: {e}")
         finally:
             # Clear all internal state
+            LLMConfigManager.clear_cache()
             self._connections.clear()
             self._closed_connections.clear()
             self._input_responses.clear()

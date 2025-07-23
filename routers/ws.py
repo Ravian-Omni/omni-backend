@@ -86,6 +86,7 @@ async def run_websocket(
 
                 elif message.get("type") == "stop":
                     logger.info(f"Received stop request for run {chat_id}")
+                    LLMConfigManager.clear_cache()
                     reason = message.get("reason") or "User requested stop/cancellation"
                     await ws_manager.stop_run(chat_id, reason=reason)
                     break
@@ -123,9 +124,12 @@ async def run_websocket(
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for run {chat_id}")
+        LLMConfigManager.clear_cache()
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
+        LLMConfigManager.clear_cache()
     finally:
+        LLMConfigManager.clear_cache()
         await ws_manager.disconnect(chat_id)
 
 CAPABILITY_CLASS_MAP = {

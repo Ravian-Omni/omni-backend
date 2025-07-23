@@ -185,7 +185,7 @@ class ServerAPIClient:
     def __init__(self):
         if not self._initialized:
             self.base_url = getattr(settings, 'BACKEND_URL', 'http://localhost:8000')
-            self.timeout = 30.0
+            self.timeout = 300.0
             self.default_headers = {"Content-Type": "application/json"}
             self._initialized = True
     
