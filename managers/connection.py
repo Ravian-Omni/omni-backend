@@ -27,6 +27,7 @@ class WebSocketManager:
         self._closed_connections: set[str] = set()
         self._input_responses: Dict[str, asyncio.Queue[str]] = {}
         self._active_tasks: Dict[str, asyncio.Task] = {}
+        self.active_browser: Dict[str, asyncio.Task] = {}
         self._cancellation_tokens: Dict[int, CancellationToken] = {}
         self._stop_flags: Dict[str, bool] = {}
 
@@ -47,8 +48,6 @@ class WebSocketManager:
             self._closed_connections.discard(session_id)
             self._input_responses[session_id] = asyncio.Queue()
             self._stop_flags[session_id] = False
-            cancellation_token = CancellationToken()
-            self._cancellation_tokens[session_id] = cancellation_token
 
             await self._send_message(
                 session_id,
@@ -84,6 +83,8 @@ class WebSocketManager:
             raise ValueError(f"No active connection for session {session_id}")
 
         self._stop_flags[session_id] = False
+        cancellation_token = CancellationToken()
+        self._cancellation_tokens[session_id] = cancellation_token
 
         try:
             # Send initial message if provided
@@ -278,6 +279,26 @@ class WebSocketManager:
                     task = self._active_tasks[session_id]
                     if not task.done():
                         task.cancel()
+                
+                if session_id in self.active_browser:
+                    agent, browser = self.active_browser[session_id]
+                    
+                    if not agent.done():
+                        agent.cancel()
+                        try:
+                            await browser.kill()
+                            await agent
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            self.logger.error(f"Error cancelling task for {session_id}: {e}")
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    self.logger.error(f"Error cancelling task for {session_id}: {e}")
+                    
 
                 # Finally cancel the token
                 self._cancellation_tokens[session_id].cancel()
@@ -419,3 +440,8 @@ class WebSocketManager:
         """Get the cancellation token for a session"""
         with self._lock:
             return self._cancellation_tokens.get(session_id)
+    
+    def get_active_browser(self, session_id: str) -> Optional[CancellationToken]:
+        """Get the cancellation token for a session"""
+        with self._lock:
+            return self.active_browser.get(session_id)

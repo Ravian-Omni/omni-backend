@@ -289,8 +289,8 @@ class Omni:
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_caller = LLMConfigManager.get_config("gpt_4_1_mini")
-        # self.llm_config_caller["tool_choice"]="required"
+        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         # self.llm_config = LLMConfigManager.get_config("deepseek")
         self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -315,7 +315,11 @@ class Omni:
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
-        
+    
+    def set_input_function(self, input_function):
+        self.input_function = input_function
+        return self.input_function
+    
     def _set_cancellation_token(self, cancellation_token):
         self.cancellation_token = cancellation_token
     
@@ -405,7 +409,8 @@ class Omni:
             manager_class=BrowserManager,
             completion_agent_name="process_completion",
             cancellation_token=self.cancellation_token,
-            use_chat_messages=False 
+            use_chat_messages=False,
+            manager_kwargs= {"input_function": self.input_function}
         )
         return await self.capability_manager.execute_capability(query, self.web_browser_config, call_id)
         
@@ -674,8 +679,8 @@ class Omni:
             # how the sequential processess will get called
             if last_speaker.name == "agent_router":
                 return groupchat.agent_by_name("agent_caller")
-            # if last_speaker.name == "agent_caller" and 'tool_call' not in messages[-1]:
-            #     return groupchat.agent_by_name("agent_router")
+            if last_speaker.name == "agent_caller" and messages[-1].get('content', None):
+                return groupchat.agent_by_name("conversation_agent")
             if last_speaker.name == "agent_caller":
                 return groupchat.agent_by_name("agent_executor")
             if last_speaker.name == "agent_executor":

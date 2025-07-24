@@ -31,6 +31,7 @@ class PythonDeveloper:
     def __init__(self, context: ChatContext):
         self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_code_writer = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
         self.coding_language = "python"
@@ -60,7 +61,7 @@ class PythonDeveloper:
     def get_code_writer(self):
         return autogen.AssistantAgent(
             name="code_writer_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_code_writer,
             system_message=prompts.code_writer.format(file_location=self.file_location)
         )
     def get_code_executor(self):

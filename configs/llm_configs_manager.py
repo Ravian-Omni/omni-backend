@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 from utilities.api_client import api_client
-
+import copy
 class PureDateEncryption:
     """Pure date-based AES-256-GCM encryption - no global settings"""
     
@@ -113,7 +113,8 @@ class LLMConfigManager:
             available = list(configs.keys())
             raise ValueError(f"Config '{config_name}' not found. Available: {available}")
         
-        config_data = configs[config_name]
+        # config_data = configs[config_name]
+        config_data = copy.deepcopy(configs[config_name])
         return {"config_list": [config_data]}
     
     @classmethod

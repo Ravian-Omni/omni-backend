@@ -47,6 +47,9 @@ class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_content_writer = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_pc["response_format"] = email_process_completion
         self.llm_config_ic = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -439,14 +442,14 @@ class EmailManager:
     def get_content_writer(self):
         return autogen.AssistantAgent(
             name="content_writer_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_content_writer,
             system_message=prompts.content_writer,
         )
 
     def get_email_caller(self):
         return autogen.AssistantAgent(
             name="email_caller_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_caller,
             # system_message=prompts.email_caller,
         )
 

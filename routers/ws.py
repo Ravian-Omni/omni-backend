@@ -55,6 +55,7 @@ async def run_websocket(
 
     input_func = ws_manager._create_input_func(chat_id)
     omni.user_input.set_input_function(input_func)
+    omni.set_input_function(input_func)
     # Connect websocket
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
@@ -88,7 +89,7 @@ async def run_websocket(
                     logger.info(f"Received stop request for run {chat_id}")
                     LLMConfigManager.clear_cache()
                     reason = message.get("reason") or "User requested stop/cancellation"
-                    await ws_manager.stop_run(chat_id, reason=reason)
+                    await ws_manager.stop_session(chat_id, reason=reason)
                     break
 
                 elif message.get("type") == "ping":
@@ -233,7 +234,7 @@ async def run_websocket(
                 elif message.get("type") == "stop":
                     logger.info(f"Received stop request for run {chat_id}")
                     reason = message.get("reason") or "User requested stop/cancellation"
-                    await ws_manager.stop_run(chat_id, reason=reason)
+                    await ws_manager.stop_session(chat_id, reason=reason)
                     break
 
                 elif message.get("type") == "ping":

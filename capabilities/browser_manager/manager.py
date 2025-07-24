@@ -33,7 +33,8 @@ from capabilities.browser_manager.function_description import (
     web_browser_automation,
     web_api_search
 )
-
+from dependencies import get_websocket_manager
+from capabilities.browser_manager.streaming_browser import StreamingAgent
 
 
 class BrowserManager:
@@ -58,7 +59,6 @@ class BrowserManager:
         self.window_size = window_size or {'width': 1280, 'height': 720}
         self.save_results = save_results
         self.context = context
-        
         # Setup directories
         self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")
         
@@ -75,6 +75,8 @@ class BrowserManager:
         self.tavily_client = AsyncTavilyClient(tavily_client_key)
         self.llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_wc["response_format"] = webprocess_completion
+        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
         # Initialize vision LLM
         browser_llm = self.llm_config.get("config_list", [])[0]
@@ -178,17 +180,19 @@ class BrowserManager:
     async def get_browser_search_function(self, task_goal: str, starting_url: str = None) -> str:
         """Browser automation function with optional result saving."""
         try:
+            ws_manager = await get_websocket_manager()
             # Initialize browser session
             browser_session = await self._initialize_browser_session()
             
             # Setup controller with credentials handler
             @self.controller.action("Ask user for credentials")
-            def ask_human_local(question: str) -> ActionResult:
-                answer = input(f'\n{question}\nInput: ')
+            async def ask_human_local(question: str) -> ActionResult:
+                # answer = input(f'\n{question}\nInput: ')
+                answer = await self.context.manager_kwargs["input_function"](question)
                 return ActionResult(extracted_content=answer, include_in_memory=True)
             
             # Create agent with minimal configuration
-            agent = Agent(
+            agent = StreamingAgent(
                 task=task_goal,
                 browser=self._create_browser(),
                 browser_session=browser_session,
@@ -199,12 +203,17 @@ class BrowserManager:
                 max_input_tokens=180000,  # Reduced from 180000
                 validate_output=True,
                 llm=self.vision_llm,
+                controller=self.controller,
+                session_id = self.context.chat_id,
+                ws_manager = ws_manager
                 # save_conversation_path=None if not self.save_results else self.results_dir,
-                controller=self.controller
             )
 
             # Run the agent
-            result = await agent.run()
+            # result = await agent.run()
+            task = asyncio.create_task(agent.run())
+            ws_manager.active_browser[self.context.chat_id] = (task,browser_session)
+            result = await task
             final_result = (
                 result.final_result()
                 if callable(result.final_result)
@@ -260,6 +269,7 @@ class BrowserManager:
         async def search_tool_wrapper(query: str):
             """API-based search tool using Tavily."""
             return await self.get_search_tool(query)
+        
         # Register browser search function
         autogen.register_function(
             browser_search_function_wrapper,
@@ -291,7 +301,7 @@ class BrowserManager:
 
         self.browser_reader = AssistantAgent(
             name="browser_reader",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_caller,
         )
 
         self.browser_searcher = autogen.UserProxyAgent(
