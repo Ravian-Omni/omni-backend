@@ -68,7 +68,7 @@ EMAIL PLAN:
    - Supporting Elements: [How to present background information]
    - Call to Action: [Clear next steps for recipient]
    - Closing: [Appropriate conclusion style]
-   - Signature: "OMNI AI by RAVIAN AI"
+   - Signature: "RAVIAN AI"
 
 6. TONE & STYLE:
    [Guidance on formality, directness, and emotional tone]
@@ -95,7 +95,7 @@ EMAIL PLAN:
 • Provide direction and framework only, not actual email content
 • Use ALL information explicitly found in the task description
 • Always include EVERY specific detail mentioned in the task
-• Always include "OMNI AI by RAVIAN AI" as the signature
+• Always include "RAVIAN AI" as the signature
 • Select only attachments directly relevant to the email purpose
 • Provide practical HTML styling guidance compatible with email clients
 • Always recommend converting plain text elements (tables, lists, etc.) to proper HTML formatting
@@ -220,13 +220,13 @@ content_writer = """
 
 <signature_requirement>
 • Include this standardized signature in all emails:
-  - "OMNI AI by RAVIAN AI"
+  - "RAVIAN AI"
 • Style the signature professionally with:
   - Visual separation from the main content (styled horizontal rule or spacing)
   - Slightly smaller font than body text but still readable
   - Subtle styling to distinguish it from the main content
   - Consistent positioning at the bottom of all emails
-• Maintain the exact wording "OMNI AI by RAVIAN AI" without modification
+• Maintain the exact wording "RAVIAN AI" without modification
 • Apply appropriate theme-matching styling to signature elements
 </signature_requirement>
 

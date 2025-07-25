@@ -8,7 +8,12 @@ from browser_use.agent.views import ActionModel, ActionResult, AgentOutput, Agen
 from browser_use.browser import BrowserSession
 from browser_use.controller.service import Controller
 from dependencies import get_websocket_manager
-
+from browser_use.agent.views import AgentOutput
+from browser_use.utils import time_execution_async
+from browser_use.exceptions import LLMException
+from browser_use.agent.message_manager.utils import extract_json_from_model_output
+from pydantic import ValidationError
+from langchain_core.messages import BaseMessage
 class StreamingAgent(Agent):
     """Agent subclass that streams actions and state changes to WebSocket clients"""
     
@@ -27,9 +32,165 @@ class StreamingAgent(Agent):
                          *args, **kwargs)
         self.session_id = session_id
         self.websocket_manager = ws_manager
+        self.llm_calls_metadata = []  # Store all LLM call metadata
+
+    def _extract_llm_metadata(self, response) -> Dict[str, Any]:
+        """Extract metadata from LLM response with proper token extraction"""
+        if not response:
+            return {}
+        
+        metadata = {
+            'model': self.model_name,
+            'provider': self.chat_model_library,
+            'timestamp': time.time(),
+            'input_tokens': 0,
+            'output_tokens': 0,
+            'total_tokens': 0
+        }
+        
+        try:
+            # OpenAI format (most common)
+            if hasattr(response, 'usage'):
+                usage = response.usage
+                metadata.update({
+                    'input_tokens': getattr(usage, 'prompt_tokens', 0),
+                    'output_tokens': getattr(usage, 'completion_tokens', 0),
+                    'total_tokens': getattr(usage, 'total_tokens', 0),
+                    'usage_raw': {
+                        'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
+                        'completion_tokens': getattr(usage, 'completion_tokens', 0),
+                        'total_tokens': getattr(usage, 'total_tokens', 0)
+                    }
+                })
+                
+            # Check response_metadata for token usage (LangChain wrapped responses)
+            elif hasattr(response, 'response_metadata'):
+                resp_metadata = response.response_metadata
+                
+                if 'token_usage' in resp_metadata:
+                    usage = resp_metadata['token_usage']
+                    metadata.update({
+                        'model': resp_metadata.get('model_name', "unknown"),
+                        'input_tokens': usage.get('prompt_tokens', 0),
+                        'output_tokens': usage.get('completion_tokens', 0),
+                        'total_tokens': usage.get('total_tokens', 0),
+                        'usage_raw': usage
+                    })
+                elif 'usage' in resp_metadata:
+                    usage = resp_metadata['usage']
+                    metadata.update({
+                        'model': resp_metadata.get('model_name', "unknown"),
+                        'input_tokens': usage.get('input_tokens', usage.get('prompt_tokens', 0)),
+                        'output_tokens': usage.get('output_tokens', usage.get('completion_tokens', 0)),
+                        'total_tokens': usage.get('total_tokens', 0),
+                        'usage_raw': usage
+                    })
+                
+                # Include all response metadata
+                metadata['response_metadata'] = resp_metadata
+            
+            # Anthropic format
+            elif hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                input_tokens = getattr(usage, 'input_tokens', 0)
+                output_tokens = getattr(usage, 'output_tokens', 0)
+                metadata.update({
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'total_tokens': input_tokens + output_tokens,
+                    'usage_raw': usage
+                })
+            
+            
+            # Google format
+            elif hasattr(response, 'candidates') and response.candidates:
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    metadata.update({
+                        'input_tokens': getattr(usage, 'prompt_token_count', 0),
+                        'output_tokens': getattr(usage, 'candidates_token_count', 0),
+                        'total_tokens': getattr(usage, 'total_token_count', 0),
+                        'usage_raw': usage
+                    })
+            
+            # Fallback: try to extract from any nested usage attribute
+            else:
+                # Look for usage in any attribute
+                for attr_name in dir(response):
+                    if 'usage' in attr_name.lower():
+                        try:
+                            usage_attr = getattr(response, attr_name)
+                            if hasattr(usage_attr, 'prompt_tokens'):
+                                metadata.update({
+                                    'input_tokens': getattr(usage_attr, 'prompt_tokens', 0),
+                                    'output_tokens': getattr(usage_attr, 'completion_tokens', 0),
+                                    'total_tokens': getattr(usage_attr, 'total_tokens', 0),
+                                    'usage_raw': usage_attr,
+                                    'usage_source': attr_name
+                                })
+                                break
+                        except:
+                            continue
+            
+            # Debug info
+            metadata['response_type'] = type(response).__name__
+            metadata['response_attributes'] = [attr for attr in dir(response) if not attr.startswith('_')]
+            
+        except Exception as e:
+            metadata['extraction_error'] = str(e)
+            self.logger.debug(f"Error extracting LLM metadata: {e}")
+        
+        return metadata
+    
+    def get_token_summary(self) -> Dict[str, Any]:
+        """Get summary of token usage across all LLM calls"""
+        total_input_tokens = 0
+        total_output_tokens = 0
+        
+        for metadata in self.llm_calls_metadata:
+            total_input_tokens += metadata.get('input_tokens', 0)
+            total_output_tokens += metadata.get('output_tokens', 0)
+        
+        return {
+            'total_input_tokens': total_input_tokens,
+            'total_output_tokens': total_output_tokens,
+            'total_tokens': total_input_tokens + total_output_tokens,
+            'total_calls': len(self.llm_calls_metadata),
+            'model_name': self.model_name,
+            'provider': self.chat_model_library,
+            'calls_metadata': self.llm_calls_metadata,
+            'latest_call': self.llm_calls_metadata[-1] if self.llm_calls_metadata else {}
+        }
+    
+    def get_latest_llm_metadata(self) -> Dict[str, Any]:
+        """Get metadata from the most recent LLM call"""
+        return self.llm_calls_metadata[-1] if self.llm_calls_metadata else {}
+    
+    async def get_token_details(self) -> Dict[str, Any]:
+        """Get current token consumption details"""
+        try:
+            current_tokens = getattr(self._message_manager.state.history, 'current_tokens', 0)
+            total_tokens = self.state.history.total_input_tokens() if self.state.history else 0
+            
+            return {
+                'current_tokens': current_tokens,
+                'total_input_tokens': total_tokens,
+                'step_number': self.state.n_steps,
+                'message_count': len(self._message_manager.state.history.messages) if hasattr(self._message_manager.state.history, 'messages') else 0,
+                'model_name': self.model_name
+            }
+        except Exception as e:
+            return {'error': f'Could not get token details: {str(e)}'}
 
     async def stream_action(self, action_data: Dict[str, Any]):
         """Stream action to all connected clients"""
+        # Add token information to every streamed action
+        # token_details = await self.get_token_details()
+        token_details = self.get_latest_llm_metadata()
+        action_data.update({
+            'token_details': {k: token_details.get(k, None) for k in ('model', 'provider', 'input_tokens', 'output_tokens', 'total_tokens')}
+        })
+        
         await self.websocket_manager.send_chat_message(
                 session_id=self.session_id, 
                 content=action_data, 
@@ -75,52 +236,110 @@ class StreamingAgent(Agent):
             })
             raise
     
-    async def get_next_action(self, input_messages) -> AgentOutput:
-        """Override get_next_action to stream LLM calls and responses"""
+    @time_execution_async('--get_next_action')
+    async def get_next_action(self, input_messages: list[BaseMessage]) -> AgentOutput:
+        """Override get_next_action to capture LLM metadata"""
         
-        # Stream LLM call start
-        await self.stream_action({
-            'type': 'llm_call_start',
-            'step_number': self.state.n_steps,
-            'message_count': len(input_messages),
-            'model_name': self.model_name,
-            'tool_calling_method': self.tool_calling_method,
-            'agent_id': self.task_id,
-            'current_tokens': getattr(self._message_manager.state.history, 'current_tokens', 0)
-        })
+        start_time = time.time()
         
-        try:
-            start_time = time.time()
-            result = await super().get_next_action(input_messages)
-            execution_time = time.time() - start_time
+        # Convert input messages
+        input_messages = self._convert_input_messages(input_messages)
+        
+        # Variables to track metadata
+        llm_metadata = {}
+        raw_response = None
+
+        if self.tool_calling_method == 'raw':
+            self._log_llm_call_info(input_messages, self.tool_calling_method)
+            try:
+                output = await self.llm.ainvoke(input_messages)
+                raw_response = output
+                response = {'raw': output, 'parsed': None}
+            except Exception as e:
+                self.logger.error(f'Failed to invoke model: {str(e)}')
+                status_code = getattr(e, 'status_code', None) or getattr(e, 'code', None) or 500
+                error_msg = f'LLM API call failed: {type(e).__name__}: {str(e)}'
+                raise LLMException(status_code, error_msg) from e
             
-            # Stream LLM response
-            await self.stream_action({
-                'type': 'llm_response',
-                'step_number': self.state.n_steps,
-                'success': True,
-                'execution_time_ms': round(execution_time * 1000, 2),
-                'agent_id': self.task_id,
-                'action_count': len(result.action) if result.action else 0,
-                'evaluation': result.current_state.evaluation_previous_goal if hasattr(result, 'current_state') else None,
-                'next_goal': result.current_state.next_goal if hasattr(result, 'current_state') else None,
-                'memory': result.current_state.memory if hasattr(result, 'current_state') else None
-            })
+            output.content = self._remove_think_tags(str(output.content))
+            try:
+                parsed_json = extract_json_from_model_output(output.content)
+                parsed = self.AgentOutput(**parsed_json)
+                response['parsed'] = parsed
+            except (ValueError, ValidationError) as e:
+                self.logger.warning(f'Failed to parse model output: {output} {str(e)}')
+                raise ValueError('Could not parse response.')
+
+        elif self.tool_calling_method is None:
+            structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True)
+            try:
+                response: dict[str, Any] = await structured_llm.ainvoke(input_messages)
+                raw_response = response.get('raw')
+                parsed: AgentOutput | None = response['parsed']
+            except Exception as e:
+                self.logger.error(f'Failed to invoke model: {str(e)}')
+                raise LLMException(401, 'LLM API call failed') from e
+
+        else:
+            self._log_llm_call_info(input_messages, self.tool_calling_method)
+            structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True, method=self.tool_calling_method)
+            response: dict[str, Any] = await structured_llm.ainvoke(input_messages)
+            raw_response = response.get('raw')
+
+        # Extract metadata from the raw response
+        if raw_response:
+            llm_metadata = self._extract_llm_metadata(raw_response)
+            llm_metadata['step_number'] = self.state.n_steps
+            llm_metadata['execution_time_ms'] = round((time.time() - start_time) * 1000, 2)
             
-            return result
+            # Store metadata for later access
+            self.llm_calls_metadata.append(llm_metadata)
             
-        except Exception as e:
-            execution_time = time.time() - start_time
-            
-            # Stream LLM error
-            await self.stream_action({
-                'type': 'llm_error',
-                'step_number': self.state.n_steps,
-                'error': str(e),
-                'execution_time_ms': round(execution_time * 1000, 2),
-                'agent_id': self.task_id
-            })
-            raise
+            # Log current call tokens
+            self.logger.info(f"🔢 LLM Call Tokens - Input: {llm_metadata['input_tokens']}, Output: {llm_metadata['output_tokens']}, Total: {llm_metadata['total_tokens']}")
+
+        # Handle tool call responses
+        if response.get('parsing_error') and 'raw' in response:
+            raw_msg = response['raw']
+            if hasattr(raw_msg, 'tool_calls') and raw_msg.tool_calls:
+                tool_call = raw_msg.tool_calls[0]
+                tool_call_name = tool_call['name']
+                tool_call_args = tool_call['args']
+
+                current_state = {
+                    'page_summary': 'Processing tool call',
+                    'evaluation_previous_goal': 'Executing action',
+                    'memory': 'Using tool call',
+                    'next_goal': f'Execute {tool_call_name}',
+                }
+
+                action = {tool_call_name: tool_call_args}
+                from browser_use.agent.views import AgentBrain
+                parsed = self.AgentOutput(current_state=AgentBrain(**current_state), action=[self.ActionModel(**action)])
+            else:
+                parsed = None
+        else:
+            parsed = response['parsed']
+
+        if not parsed:
+            try:
+                parsed_json = extract_json_from_model_output(response['raw'].content)
+                parsed = self.AgentOutput(**parsed_json)
+            except Exception as e:
+                self.logger.warning(f'Failed to parse model output: {response["raw"].content} {str(e)}')
+                raise ValueError('Could not parse response.')
+
+        # Cut the number of actions to max_actions_per_step if needed
+        if len(parsed.action) > self.settings.max_actions_per_step:
+            parsed.action = parsed.action[: self.settings.max_actions_per_step]
+
+        # Original logging
+        if not (hasattr(self.state, 'paused') and (self.state.paused or self.state.stopped)):
+            from browser_use.agent.service import log_response
+            log_response(parsed, self.controller.registry.registry, self.logger)
+
+        self._log_next_action_summary(parsed)
+        return parsed
     
     async def multi_act(self, actions: list[ActionModel], check_for_new_elements: bool = True) -> list[ActionResult]:
         """Override multi_act to stream individual action execution"""

@@ -25,7 +25,7 @@ from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from capabilities.browser_manager import prompts
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.llm_configs_manager import LLMConfigManager
-from capabilities.browser_manager.response_format import webprocess_completion
+from capabilities.browser_manager.response_format import WebProcessCompletion
 from tavily import AsyncTavilyClient
 from .country_data import country_codes
 from utilities.storage import ensure_path
@@ -74,7 +74,8 @@ class BrowserManager:
         tavily_client_key = tavily_llm_config.get("config_list", [])[0].get("api_key")
         self.tavily_client = AsyncTavilyClient(tavily_client_key)
         self.llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_wc["response_format"] = webprocess_completion
+        self.llm_config_wc["response_format"] = WebProcessCompletion
+        self.llm_planner = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
         self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
@@ -158,17 +159,36 @@ class BrowserManager:
         """API-based search tool using Tavily."""
         try:
             response = await self.tavily_client.search(query, search_depth="advanced")
-            
             if response and 'results' in response:
-                result_text = f"Query: {response.get('query', query)}\n"
-                result_text += f"Found {len(response['results'])} results:\n\n"
+                result = {
+                    "status": "success" if response else "failed",
+                    "query": query,
+                    "results_count": len(response.get('results', [])),
+                    "answer": response.get('answer', ''),
+                    "urls": [result['url'] for result in response.get('results', [])],
+                    "sources": [
+                        {
+                            "title": result.get('title', ''),
+                            "url": result.get('url', ''),
+                            "content": result.get('content', ''),
+                            "score": result.get('score', 0)
+                        } 
+                        for result in response.get('results', [])
+                    ],
+                    "images": response.get('images', []),
+                    "search_depth": response.get('search_depth', 'basic'),
+                    "follow_up_questions": response.get('follow_up_questions', [])
+                }
+                # result_text = f"Query: {response.get('query', query)}\n"
+                # result_text += f"Found {len(response['results'])} results:\n\n"
                 
-                for i, result in enumerate(response['results'][:5], 1):
-                    result_text += f"{i}. {result.get('title', 'No title')}\n"
-                    result_text += f"   URL: {result.get('url', 'No URL')}\n"
-                    result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
+                # for i, result in enumerate(response['results'][:5], 1):
+                #     result_text += f"{i}. {result.get('title', 'No title')}\n"
+                #     result_text += f"   URL: {result.get('url', 'No URL')}\n"
+                #     result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
+                # return result_text
+                return result
                 
-                return result_text
             else:
                 return "No results found"
                 
@@ -223,8 +243,16 @@ class BrowserManager:
             # Optionally save results
             if self.save_results:
                 await self._save_result(task_goal, final_result, "success")
-
-            return f"Task completed successfully: {final_result}"
+            response = {
+                    "status": "success" if result.is_successful() else "failed",
+                    "result": final_result,
+                    "execution_time": result.total_duration_seconds(),
+                    "urls_visited": result.urls(),
+                    "errors": result.errors(),
+                    "steps": len(result.extracted_content()),
+                    "gif_path": self.browser_gif
+                }
+            return response
 
         except Exception as e:
             error_msg = f"Browser automation failed: {str(e)}"
@@ -292,7 +320,7 @@ class BrowserManager:
         """Initialize all agents with simplified configuration."""
         self.planner = AssistantAgent(
             name="browser_planner",
-            llm_config=self.llm_config,
+            llm_config=self.llm_planner,
             system_message=prompts.planner.format(
                 today_date=datetime.now(),
                 usercountry=self.user_country
