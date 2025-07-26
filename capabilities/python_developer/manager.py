@@ -78,6 +78,7 @@ class PythonDeveloper:
         return autogen.AssistantAgent(
             name="code_debugger_agent",
             llm_config=self.llm_config,
+            max_consecutive_auto_reply=5,
             system_message=prompts.debugger.format(file_location=self.file_location,coding_language=self.coding_language)
         )
     def problem_status_checker(self):

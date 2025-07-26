@@ -6,7 +6,7 @@ import json
 import base64
 import os
 import hashlib
-from datetime import date
+from datetime import date, datetime, timezone
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -25,7 +25,8 @@ class PureDateEncryption:
     def _get_date_based_key() -> bytes:
         """Get encryption key based purely on current date"""
         # Use current date as primary key (YYYY-MM-DD format)
-        current_date = date.today().isoformat()
+        # current_date = date.today().isoformat()
+        current_date = datetime.now(timezone.utc).date().isoformat()
         
         # Create deterministic key from date only
         # Using same fixed salt as server ensures compatibility

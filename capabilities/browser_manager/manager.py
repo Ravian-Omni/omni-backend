@@ -8,7 +8,8 @@ from loguru import logger
 import requests
 import nest_asyncio
 from pydantic import BaseModel
-
+import gc
+import sys
 # AutoGen imports
 import autogen
 from autogen import AssistantAgent, UserProxyAgent
@@ -196,10 +197,44 @@ class BrowserManager:
             error_msg = f"Search failed: {str(e)}"
             print(error_msg)
             return error_msg
+    
+    def _clear_module_registries(self):
+        """Clear any global registries in browser automation modules."""
+        try:
+            # Force garbage collection first
+            gc.collect()
+            
+            # Look for browser automation modules and clear their state
+            modules_to_check = []
+            for module_name in sys.modules.keys():
+                if any(keyword in module_name.lower() for keyword in [
+                    'browser_use', 'browser', 'agent', 'event'
+                ]):
+                    modules_to_check.append(module_name)
+            
+            for module_name in modules_to_check:
+                try:
+                    module = sys.modules[module_name]
+                    # Look for attributes that might be registries
+                    for attr_name in dir(module):
+                        if any(keyword in attr_name.lower() for keyword in [
+                            'registry', 'instances', '_agents', '_eventbus', 'cache'
+                        ]):
+                            attr = getattr(module, attr_name, None)
+                            if isinstance(attr, dict):
+                                attr.clear()
+                            elif hasattr(attr, 'clear') and callable(attr.clear):
+                                attr.clear()
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            print(f"Warning: Could not clear module registries: {e}")
 
     async def get_browser_search_function(self, task_goal: str, starting_url: str = None) -> str:
         """Browser automation function with optional result saving."""
         try:
+            self._clear_module_registries()
             ws_manager = await get_websocket_manager()
             # Initialize browser session
             browser_session = await self._initialize_browser_session()
@@ -385,16 +420,55 @@ class BrowserManager:
         )
 
         return groupchat, manager
-
-    async def close_browser_session(self):
-        """Clean up browser session."""
-        if self.browser_session:
-            try:
+    
+    async def _cleanup_event_bus(self):
+        """Clean up EventBus instances to prevent conflicts."""
+        try:
+            # Check if the browser session has an event bus or agent
+            if hasattr(self.browser_session, 'agent'):
+                agent = self.browser_session.agent
+                if hasattr(agent, 'event_bus'):
+                    # Try to stop or clean up the event bus
+                    if hasattr(agent.event_bus, 'stop'):
+                        await agent.event_bus.stop()
+                    elif hasattr(agent.event_bus, 'close'):
+                        await agent.event_bus.close()
+                    elif hasattr(agent.event_bus, 'cleanup'):
+                        await agent.event_bus.cleanup()
+            
+            # Also check for global EventBus registry cleanup
+            if hasattr(self.browser_session, '_cleanup_event_system'):
+                await self.browser_session._cleanup_event_system()
+                
+        except Exception as e:
+            print(f"Warning: Could not clean up EventBus: {e}")
+            
+    async def close_browser_session(self) -> bool:
+        """Attempt to close browser gracefully using the session's built-in methods."""
+        if self.browser_session is None:
+            return True
+            
+        try:
+            await self._cleanup_event_bus()
+            # Try the standard close method first
+            if hasattr(self.browser_session, 'close'):
+                await self.browser_session.close()
+            
+            # Then try kill method
+            if hasattr(self.browser_session, 'kill'):
                 await self.browser_session.kill()
-            except Exception as e:
-                print(f"Error closing browser session: {e}")
-            finally:
-                self.browser_session = None
+            
+            # Try to close the browser if it has a browser attribute
+            if hasattr(self.browser_session, 'browser') and self.browser_session.browser:
+                await self.browser_session.browser.close()
+            
+            self.browser_session = None
+            return True
+            
+        except Exception as e:
+            print(f"Error during graceful browser closure: {e}")
+            return False
+
 
     async def __aenter__(self):
         """Async context manager entry."""

@@ -286,7 +286,7 @@ class WebSocketManager:
                     if not agent.done():
                         agent.cancel()
                         try:
-                            await browser.kill()
+                            await self.close_browser_session(browser)
                             await agent
                         except asyncio.CancelledError:
                             pass
@@ -317,6 +317,47 @@ class WebSocketManager:
             except Exception as e:
                 logger.error(f"Error stopping session {session_id}: {e}")
 
+
+    async def close_browser_session(self, browser_session) -> bool:
+        """Attempt to close browser gracefully using the session's built-in methods."""
+        if browser_session is None:
+            return True
+            
+        try:
+            if hasattr(browser_session, 'agent'):
+                agent = browser_session.agent
+                if hasattr(agent, 'event_bus'):
+                    # Try to stop or clean up the event bus
+                    if hasattr(agent.event_bus, 'stop'):
+                        await agent.event_bus.stop()
+                    elif hasattr(agent.event_bus, 'close'):
+                        await agent.event_bus.close()
+                    elif hasattr(agent.event_bus, 'cleanup'):
+                        await agent.event_bus.cleanup()
+            
+            # Also check for global EventBus registry cleanup
+            if hasattr(browser_session, '_cleanup_event_system'):
+                await browser_session._cleanup_event_system()
+                
+            # Try the standard close method first
+            if hasattr(browser_session, 'close'):
+                await browser_session.close()
+            
+            # Then try kill method
+            if hasattr(browser_session, 'kill'):
+                await browser_session.kill()
+            
+            # Try to close the browser if it has a browser attribute
+            if hasattr(browser_session, 'browser') and browser_session.browser:
+                await browser_session.browser.close()
+            browser_session = None
+            return True
+            
+        except Exception as e:
+            print(f"Error during graceful browser closure: {e}")
+            return False
+
+    
     async def disconnect(self, session_id: str) -> None:
         """
         Clean up connection and associated resources
@@ -336,6 +377,7 @@ class WebSocketManager:
         # Clean up resources
         self._connections.pop(session_id, None)
         self._cancellation_tokens.pop(session_id, None)
+        self.active_browser.pop(session_id, None)
         self._input_responses.pop(session_id, None)
         self._active_tasks.pop(session_id, None)
         self._stop_flags.pop(session_id, None)
@@ -438,10 +480,8 @@ class WebSocketManager:
     
     def get_cancellation_token(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
-        with self._lock:
-            return self._cancellation_tokens.get(session_id)
+        return self._cancellation_tokens.get(session_id)
     
     def get_active_browser(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
-        with self._lock:
-            return self.active_browser.get(session_id)
+        return self.active_browser.get(session_id)

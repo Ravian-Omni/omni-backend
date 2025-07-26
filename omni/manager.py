@@ -326,7 +326,7 @@ class Omni:
     def _check_cancellation(self):
         """Check if operations should be cancelled"""
         if self.cancellation_token and self.cancellation_token.is_cancelled():
-            raise asyncio.CancelledError(f"FileFinder operation cancelled for session {self.chat_id}")
+            raise asyncio.CancelledError(f"OMNI operation cancelled for session {self.chat_id}")
     
     def get_last_call_id(self):
         last_speaker = self.groupchat.messages[-1]
@@ -550,11 +550,13 @@ class Omni:
         )
     
     def get_user_acceptance(self):
-        return autogen.AssistantAgent(
+        return CustomUserProxyAgent(
             name="get_user_acceptance",
-            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
             llm_config=self.llm_config,
-            system_message="Please ask user if they accept the plan or not.",
+            # default_auto_reply="Awaiting for manual verification",
+            human_input_mode="ALWAYS",
+            code_execution_config=False,
+            # system_message=prompts.manual_verification,
         )
 
     def get_agent_aligner(self):
@@ -658,14 +660,14 @@ class Omni:
 
             # inner loop planner agent will report back to aligner agent
             if last_speaker.name in ["planner_agent"]:
-                # if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
-                #     return groupchat.agent_by_name("get_user_acceptance")
-                # else:
+                if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
+                    return groupchat.agent_by_name("get_user_acceptance")
+                else:
                     return groupchat.agent_by_name("agent_aligner")
 
             # inner loop planner agent will report back to aligner agent
             if last_speaker.name in ["get_user_acceptance"]:
-                return groupchat.agent_by_name("user_input")
+                return groupchat.agent_by_name("agent_aligner")
             # if last_speaker.name in ["user_input"]:
             #     return groupchat.agent_by_name("agent_aligner")
 
@@ -732,7 +734,7 @@ class Omni:
             agents=self.agents,
             messages=[],
             speaker_selection_method=self.custom_speaker_selection_func,
-            max_round=500,
+            max_round=50,
         )
         self.manager = OmniGroupChatManager(
             groupchat=self.groupchat,
