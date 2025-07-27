@@ -234,7 +234,7 @@ class BrowserManager:
     async def get_browser_search_function(self, task_goal: str, starting_url: str = None) -> str:
         """Browser automation function with optional result saving."""
         try:
-            self._clear_module_registries()
+            # self._clear_module_registries()
             ws_manager = await get_websocket_manager()
             # Initialize browser session
             browser_session = await self._initialize_browser_session()

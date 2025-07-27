@@ -31,13 +31,20 @@ class QuestionClassification(BaseModel):
         None,
         description="Optional brief explanation for the classification"
     )
-
-    class Config:
-        """Pydantic configuration"""
-        use_enum_values = True
-        json_encoders = {
+    
+    model_config = {
+        "use_enum_values": True,
+        "json_encoders": {
             QuestionCategory: lambda v: v.value
         }
+    }
+
+    # class Config:
+    #     """Pydantic configuration"""
+    #     use_enum_values = True
+    #     json_encoders = {
+    #         QuestionCategory: lambda v: v.value
+    #     }
 
     def __str__(self) -> str:
         """String representation matching the required template"""

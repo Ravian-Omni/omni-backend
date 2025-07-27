@@ -17,7 +17,7 @@ class Settings:
     def _load_settings(self):
         """Load settings from environment"""
         self.PROJECT_NAME = "OMNI"
-        self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+        self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
         self.USER_TOKEN = None
         self.ROOT_DIR = os.path.join(Path.home(),".ravian")
         self.USER_EMAIL = os.getenv("email_username")

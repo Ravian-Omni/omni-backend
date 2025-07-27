@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 from utilities.api_client import api_client
+from utilities.async_helpers import async_to_sync
 import copy
 class PureDateEncryption:
     """Pure date-based AES-256-GCM encryption - no global settings"""
@@ -138,7 +139,7 @@ class LLMConfigManager:
         try:
             print(f"🔄 Fetching fresh configs for date: {current_date}")
             
-            response = asyncio.run(api_client.get("/chats/api_keys"))
+            response = async_to_sync(api_client.get("/chats/api_keys"))
             response = response.standard_response()
             
             if response["success"]:
@@ -189,7 +190,7 @@ class LLMConfigManager:
             
             cls.clear_cache()
             
-            response = asyncio.run(api_client.get("/chats/api_keys"))
+            response = async_to_sync(api_client.get("/chats/api_keys"))
             response = response.standard_response()
             
             if response["success"]:
@@ -215,7 +216,7 @@ class LLMConfigManager:
     def is_server_available(cls) -> bool:
         """Check if server is available"""
         try:
-            response = asyncio.run(api_client.get("/"))
+            response = async_to_sync(api_client.get("/"))
             return response["success"]
         except Exception:
             return False

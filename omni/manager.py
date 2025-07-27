@@ -35,6 +35,7 @@ from omni.memory import OmniMemory
 from dependencies import get_websocket_manager
 from omni.capability_manager import CapabilityManager, CapabilityConfig
 from omni.capabilities_descriptions import capability_descriptions
+from utilities.async_helpers import async_to_sync
 
 
 all_capabilities = capability_descriptions()
@@ -207,8 +208,8 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         
         # Process async operations
         # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
-        asyncio.run(self._send_websocket_message(websocket_message))
-        asyncio.run(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
+        async_to_sync(self._send_websocket_message(websocket_message))
+        async_to_sync(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
         
     # Additional utility methods for comprehensive usage tracking
     

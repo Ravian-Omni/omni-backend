@@ -291,13 +291,14 @@ class WebSocketManager:
                         except asyncio.CancelledError:
                             pass
                         except Exception as e:
-                            self.logger.error(f"Error cancelling task for {session_id}: {e}")
+                            logger.error(f"Error cancelling task for {session_id}: {e}")
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    raise
                 except Exception as e:
-                    self.logger.error(f"Error cancelling task for {session_id}: {e}")
+                    logger.error(f"Error cancelling task for {session_id}: {e}")
+                    raise e
                     
 
                 # Finally cancel the token
@@ -377,7 +378,6 @@ class WebSocketManager:
         # Clean up resources
         self._connections.pop(session_id, None)
         self._cancellation_tokens.pop(session_id, None)
-        self.active_browser.pop(session_id, None)
         self._input_responses.pop(session_id, None)
         self._active_tasks.pop(session_id, None)
         self._stop_flags.pop(session_id, None)
@@ -392,7 +392,7 @@ class WebSocketManager:
         """
         if session_id in self._closed_connections:
             logger.warning(f"Attempted to send message to closed session {session_id}")
-            return
+            raise Exception(f"Session closed for {session_id}")
 
         try:
             if session_id in self._connections:

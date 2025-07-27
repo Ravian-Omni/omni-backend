@@ -84,8 +84,8 @@ class Capability(str, Enum):
 
 class Status(str, Enum):
     PENDING = "pending"
-    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Task(BaseModel):
@@ -501,14 +501,20 @@ class FunctionCall(BaseModel):
     name: str
     arguments: str
     
-    class Config:
-        extra = "forbid"
+    model_config = {
+        "extra": "forbid"
+    }
+    # class Config:
+    #     extra = "forbid"
 
 class AgentCallerResponse(BaseModel):
     function_calls: List[FunctionCall]
     
-    class Config:
-        extra = "forbid"
+    # class Config:
+    #     extra = "forbid"
+    model_config = {
+        "extra": "forbid"
+    }
 
 
 

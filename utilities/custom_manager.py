@@ -10,6 +10,8 @@ from omni.memory import OmniMemory
 from collections import defaultdict
 from utilities.api_client import api_client
 from managers.cancellation_token import CancellationToken
+from utilities.async_helpers import async_to_sync
+
 @dataclass
 class ChatContext:
     """Chat context containing all necessary identifiers"""
@@ -112,7 +114,8 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
         
     except Exception as e:
         logger.error(f"Failed to update chat history: {e}")
-        return False
+        # return False
+        raise e
 
 class CustomGroupChatManager(autogen.GroupChatManager):
     """Enhanced GroupChatManager with chat context and background processing"""
@@ -212,6 +215,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             )
         except Exception as e:
             logger.error(f"WebSocket send failed: {e}")
+            raise e
     
     async def _process_message_background(self, message_data: Dict[str, Any]) -> None:
         """Process message in background (WebSocket + Database)"""
@@ -254,8 +258,8 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         )
         
         # Process background tasks (async)
-        asyncio.run(self._send_websocket_message(websocket_message))
-        asyncio.run(update_chat_history(self.context,message_data))
+        async_to_sync(update_chat_history(self.context,message_data))
+        async_to_sync(self._send_websocket_message(websocket_message))
         
     # Additional utility methods for comprehensive usage tracking
     
@@ -340,5 +344,5 @@ class CustomGroupChatManager(autogen.GroupChatManager):
 #         db_content = {"role":"user","name":sender.name,"content":content}
 #         self.omni_memory.push_capability_message(db_content,self.capability,self.capability_id)
 #         db_content["raw_message"] = message
-#         asyncio.run(self.send_websocket(db_content))
+#         async_to_sync(self.send_websocket(db_content))
 #         asyncio.create_task(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability, capability_id=self.capability_id))

@@ -21,13 +21,23 @@ class GeneratedImage(BaseModel):
     filename: str = Field(..., description="Name of the generated image file with extension")
     file_path: str = Field(..., description="Full path or URL to the generated image")
     
-    class Config:
-        schema_extra = {
-            "example": {
-                "filename": "german_shepherd_portrait.jpg",
-                "file_path": "/images/gen_001.jpg"
-            }
+    # class Config:
+    #     schema_extra = {
+    #         "example": {
+    #             "filename": "german_shepherd_portrait.jpg",
+    #             "file_path": "/images/gen_001.jpg"
+    #         }
+    #     }
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "filename": "german_shepherd_portrait.jpg",
+                    "file_path": "/images/gen_001.jpg"
+                }
+            ]
         }
+    }
 
 class ProcessCompletionResponse(BaseModel):
     status: CompletionStatus = Field(..., description="Overall completion status of image generation")
@@ -37,22 +47,41 @@ class ProcessCompletionResponse(BaseModel):
     issues: Optional[str] = Field(default="NONE", description="Critical issues encountered during generation, or 'NONE' if no issues")
     next_action: NextAction = Field(..., description="Recommended next step for the user")
     
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "COMPLETED",
-                "outcome": "ACHIEVED",
-                "generated_images": [
-                    {
-                        "filename": "german_shepherd_portrait.jpg",
-                        "file_path": "/images/gen_001.jpg"
-                    }
-                ],
-                "summary": "Generated photorealistic German Shepherd portrait with accurate breed characteristics and professional lighting.",
-                "issues": "NONE",
-                "next_action": "Ready for new requests"
-            }
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "COMPLETED",
+                    "outcome": "ACHIEVED",
+                    "generated_images": [
+                        {
+                            "filename": "german_shepherd_portrait.jpg",
+                            "file_path": "/images/gen_001.jpg"
+                        }
+                    ],
+                    "summary": "Generated photorealistic German Shepherd portrait with accurate breed characteristics and professional lighting.",
+                    "issues": "NONE",
+                    "next_action": "Ready for new requests"
+                }
+            ]
         }
+    }
+    # class Config:
+    #     schema_extra = {
+    #         "example": {
+    #             "status": "COMPLETED",
+    #             "outcome": "ACHIEVED",
+    #             "generated_images": [
+    #                 {
+    #                     "filename": "german_shepherd_portrait.jpg",
+    #                     "file_path": "/images/gen_001.jpg"
+    #                 }
+    #             ],
+    #             "summary": "Generated photorealistic German Shepherd portrait with accurate breed characteristics and professional lighting.",
+    #             "issues": "NONE",
+    #             "next_action": "Ready for new requests"
+    #         }
+    #     }
 
 # Additional response examples for different scenarios
 class CompletionResponseExamples:
