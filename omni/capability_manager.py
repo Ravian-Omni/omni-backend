@@ -79,6 +79,8 @@ class CapabilityManager:
                 if messages:
                     last_agent, last_message = capability_instance.manager.resume(messages=messages)
             
+            capability_instance.groupchat.max_round=15
+
             response = capability_instance.manager.initiate_chat(
                 capability_instance.manager, 
                 message=query, 

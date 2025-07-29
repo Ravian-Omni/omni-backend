@@ -8,19 +8,27 @@ from typing import Annotated, List, Dict, Any, Optional
 import requests
 import nest_asyncio
 from pydantic import BaseModel
-
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
 # AutoGen imports
 import autogen
 from autogen import AssistantAgent, UserProxyAgent
 
-# Browser-use imports
+# Your custom imports - import settings first to set up environment
+from configs.settings import settings
+
+# Force Playwright to use bundled Chromium when running as executable
+if settings.IS_EXECUTABLE:
+    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '0'  # Disable auto-download
+    os.environ['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] = settings.CHROME_EXECUTABLE_PATH
+    # Also try the generic executable path variable
+    os.environ['PLAYWRIGHT_EXECUTABLE_PATH'] = settings.CHROME_EXECUTABLE_PATH
+
+# Browser-use imports (after setting environment variables)
 from browser_use import Agent, Browser, BrowserConfig, Controller, ActionResult
 from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 from browser_use.browser.context import BrowserContextConfig
 
-# Your custom imports
-from configs.settings import settings
 from langchain_openai import ChatOpenAI
 from capabilities.browser_manager import prompts
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
@@ -33,7 +41,6 @@ from capabilities.browser_manager.function_description import (
     web_browser_automation,
     web_api_search
 )
-
 
 
 class BrowserManager:
@@ -72,17 +79,17 @@ class BrowserManager:
             try:
                 self.results_dir = ensure_path(
                     os.path.join(self.context.chat_dir, "browser"))
-                
+
                 # Create GIF subdirectory if needed
                 gif_dir = ensure_path(os.path.join(self.results_dir, "gif"))
-                
+
                 # Set the full path for the GIF file
                 self.browser_gif = os.path.join(
                     gif_dir, f"{self.context.capability_id}.gif")
-                
+
                 # Ensure the parent directory exists and is writable
                 os.makedirs(os.path.dirname(self.browser_gif), exist_ok=True)
-                
+
                 # Test write permissions
                 test_file = os.path.join(gif_dir, ".write_test")
                 try:
@@ -91,14 +98,36 @@ class BrowserManager:
                     os.remove(test_file)
                     print(f"GIF will be saved to: {self.browser_gif}")
                 except PermissionError:
-                    print(f"Warning: No write permission for GIF directory: {gif_dir}")
-                    self.browser_gif = None
-                
+                    print(
+                        f"Warning: No write permission for GIF directory: {gif_dir}")
+                    # Try to create a fallback directory in temp instead of disabling completely
+                    import tempfile
+                    fallback_dir = os.path.join(
+                        tempfile.gettempdir(), "browser_gifs")
+                    os.makedirs(fallback_dir, exist_ok=True)
+                    self.browser_gif = os.path.join(
+                        fallback_dir, f"{self.context.capability_id}.gif")
+                    print(f"Using fallback GIF location: {self.browser_gif}")
+
             except Exception as e:
                 print(f"Warning: Failed to setup GIF directory: {e}")
-                # Fallback: disable GIF generation if path setup fails
-                self.browser_gif = None
-                print("GIF generation disabled due to path setup failure")
+                # Create a fallback GIF path in temp directory
+                try:
+                    import tempfile
+                    fallback_dir = os.path.join(
+                        tempfile.gettempdir(), "browser_gifs")
+                    os.makedirs(fallback_dir, exist_ok=True)
+                    self.browser_gif = os.path.join(
+                        fallback_dir, f"{self.context.capability_id}.gif")
+                    print(f"Using fallback GIF location: {self.browser_gif}")
+                except Exception as fallback_error:
+                    print(
+                        f"Failed to create fallback GIF directory: {fallback_error}")
+                    self.browser_gif = None
+                    print("GIF generation disabled due to path setup failure")
+        else:
+            # Even if save_results is False, we might still want GIF generation
+            self.browser_gif = None
 
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -144,6 +173,13 @@ class BrowserManager:
     async def _initialize_browser_session(self) -> BrowserSession:
         """Initialize browser session with optimized configuration."""
         if self.browser_session is None:
+            # Force Playwright to use our bundled Chromium by setting environment variables
+            if settings.IS_EXECUTABLE:
+                # Set environment variables to force Playwright to use bundled Chromium
+                # Disable auto-download
+                os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '0'
+                os.environ['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] = settings.CHROME_EXECUTABLE_PATH
+
             # Create browser profile with executable-aware settings
             browser_profile_kwargs = {
                 "window_size": self.window_size,
@@ -155,8 +191,15 @@ class BrowserManager:
 
             # Add executable-specific arguments if needed
             if settings.IS_EXECUTABLE:
-                # Note: browser_args might not be supported, so we'll handle this through environment
-                pass
+                # Add args to ensure stable execution in bundled environment
+                browser_profile_kwargs["browser_args"] = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-gpu",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor"
+                ]
 
             browser_profile = BrowserProfile(**browser_profile_kwargs)
 
@@ -220,29 +263,34 @@ class BrowserManager:
                 answer = input(f'\n{question}\nInput: ')
                 return ActionResult(extracted_content=answer, include_in_memory=True)
 
-            # Create agent with minimal configuration for executable environment
+            # Determine GIF path for all environments
+            gif_path = None
+            if self.save_results and self.browser_gif:
+                gif_path = self.browser_gif
+                print(f"DEBUG: GIF will be generated at: {gif_path}")
+            else:
+                print(
+                    f"DEBUG: GIF generation skipped. save_results={self.save_results}, browser_gif={self.browser_gif}")
+
+            # Create agent with GIF support for all environments
             if settings.IS_EXECUTABLE:
-                # Use a very minimal configuration to avoid template issues
+                # Executable configuration with GIF support
                 agent = Agent(
                     task=task_goal,
                     browser=self._create_browser(),
                     browser_session=browser_session,
                     llm=self.vision_llm,
                     controller=self.controller,
-                    # Minimal settings to avoid issues
+                    # Settings optimized for executable but with GIF support
                     max_failures=2,
                     retry_delay=1,
                     use_vision=False,
-                    generate_gif=False,
+                    generate_gif=gif_path,  # Enable GIF generation
                     validate_output=False,
                     max_input_tokens=100000,
                 )
             else:
                 # Full configuration for normal environment
-                gif_path = None
-                if self.save_results and self.browser_gif:
-                    gif_path = self.browser_gif
-                
                 agent = Agent(
                     task=task_goal,
                     browser=self._create_browser(),
@@ -300,15 +348,15 @@ class BrowserManager:
 
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
+
             # Ensure results directory exists
             if not hasattr(self, 'results_dir') or not self.results_dir:
                 print("Warning: Results directory not properly initialized")
                 return
-                
+
             # Create the results directory if it doesn't exist
             os.makedirs(self.results_dir, exist_ok=True)
-            
+
             filename = os.path.join(
                 self.results_dir, f"search_result_{self.context.chat_id}_{timestamp}.json")
 
@@ -327,9 +375,9 @@ class BrowserManager:
 
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(result_data, f, indent=2, ensure_ascii=False)
-                
+
             print(f"Results saved to: {filename}")
-            
+
         except Exception as e:
             print(f"Failed to save results: {e}")
             # Don't raise the exception, just log it

@@ -352,6 +352,8 @@ class EmailManager:
         
         async def send_email_with_attachments_wrapper(to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
                                     attachments: List[str] = None, sender: str = None):
+            msg_plain = self._ensure_utf8_encoding(msg_plain)
+            msg_html = self._ensure_utf8_encoding(msg_html)
             return await self.send_email_with_attachments(to, subject, msg_html, msg_plain, attachments, sender)
         
         async def read_latest_email_with_attachments_wrapper(sender_details:str = None, attachment_dir:str = None):
@@ -515,6 +517,118 @@ class EmailManager:
         elif last_speaker.name in ["email_reply_agent"]:
             return groupchat.agent_by_name("code_executor_agent")
 
+    def _ensure_utf8_encoding(self, text: str) -> str:
+        """Ensure text is properly UTF-8 encoded with comprehensive character replacements"""
+        try:
+            if isinstance(text, bytes):
+                return text.decode('utf-8', errors='replace')
+            elif isinstance(text, str):
+                # Handle problematic Unicode characters with comprehensive replacements
+                replacements = {
+                    # Spaces and breaks
+                    '\xa0': ' ',        # Non-breaking space
+                    '\u00a0': ' ',      # Non-breaking space (alternative)
+                    '\u200b': '',       # Zero-width space
+                    '\u200c': '',       # Zero-width non-joiner
+                    '\u200d': '',       # Zero-width joiner
+                    '\u2060': '',       # Word joiner
+                    '\ufeff': '',       # Zero-width no-break space (BOM)
+                    
+                    # Quotation marks
+                    '\u2018': "'",      # Left single quotation mark
+                    '\u2019': "'",      # Right single quotation mark
+                    '\u201a': "'",      # Single low-9 quotation mark
+                    '\u201b': "'",      # Single high-reversed-9 quotation mark
+                    '\u201c': '"',      # Left double quotation mark
+                    '\u201d': '"',      # Right double quotation mark
+                    '\u201e': '"',      # Double low-9 quotation mark
+                    '\u201f': '"',      # Double high-reversed-9 quotation mark
+                    '\u2039': "'",      # Single left-pointing angle quotation mark
+                    '\u203a': "'",      # Single right-pointing angle quotation mark
+                    '\u00ab': '"',      # Left-pointing double angle quotation mark
+                    '\u00bb': '"',      # Right-pointing double angle quotation mark
+                    
+                    # Dashes and hyphens
+                    '\u2010': '-',      # Hyphen
+                    '\u2011': '-',      # Non-breaking hyphen
+                    '\u2012': '-',      # Figure dash
+                    '\u2013': '-',      # En dash
+                    '\u2014': '--',     # Em dash
+                    '\u2015': '--',     # Horizontal bar
+                    '\u2212': '-',      # Minus sign
+                    
+                    # Ellipsis and dots
+                    '\u2026': '...',    # Horizontal ellipsis
+                    '\u00b7': '.',      # Middle dot
+                    '\u2022': '*',      # Bullet
+                    '\u2024': '.',      # One dot leader
+                    '\u2025': '..',     # Two dot leader
+                    
+                    # Currency and symbols
+                    '\u00a9': '(c)',    # Copyright sign
+                    '\u00ae': '(r)',    # Registered sign
+                    '\u2122': 'TM',     # Trade mark sign
+                    '\u00b0': 'deg',    # Degree sign
+                    '\u00b1': '+/-',    # Plus-minus sign
+                    '\u00d7': 'x',      # Multiplication sign
+                    '\u00f7': '/',      # Division sign
+                    '\u2190': '<-',     # Leftwards arrow
+                    '\u2192': '->',     # Rightwards arrow
+                    '\u2194': '<->',    # Left right arrow
+                    
+                    # Mathematical symbols
+                    '\u2264': '<=',     # Less-than or equal to
+                    '\u2265': '>=',     # Greater-than or equal to
+                    '\u2260': '!=',     # Not equal to
+                    '\u221e': 'inf',    # Infinity
+                    '\u00b2': '^2',     # Superscript two
+                    '\u00b3': '^3',     # Superscript three
+                    '\u00bc': '1/4',    # Vulgar fraction one quarter
+                    '\u00bd': '1/2',    # Vulgar fraction one half
+                    '\u00be': '3/4',    # Vulgar fraction three quarters
+                    
+                    # Accented characters (common ones)
+                    '\u00c0': 'A', '\u00c1': 'A', '\u00c2': 'A', '\u00c3': 'A',
+                    '\u00c4': 'A', '\u00c5': 'A', '\u00c6': 'AE', '\u00c7': 'C',
+                    '\u00c8': 'E', '\u00c9': 'E', '\u00ca': 'E', '\u00cb': 'E',
+                    '\u00cc': 'I', '\u00cd': 'I', '\u00ce': 'I', '\u00cf': 'I',
+                    '\u00d0': 'D', '\u00d1': 'N', '\u00d2': 'O', '\u00d3': 'O',
+                    '\u00d4': 'O', '\u00d5': 'O', '\u00d6': 'O', '\u00d8': 'O',
+                    '\u00d9': 'U', '\u00da': 'U', '\u00db': 'U', '\u00dc': 'U',
+                    '\u00dd': 'Y', '\u00de': 'TH', '\u00df': 'ss',
+                    '\u00e0': 'a', '\u00e1': 'a', '\u00e2': 'a', '\u00e3': 'a',
+                    '\u00e4': 'a', '\u00e5': 'a', '\u00e6': 'ae', '\u00e7': 'c',
+                    '\u00e8': 'e', '\u00e9': 'e', '\u00ea': 'e', '\u00eb': 'e',
+                    '\u00ec': 'i', '\u00ed': 'i', '\u00ee': 'i', '\u00ef': 'i',
+                    '\u00f0': 'd', '\u00f1': 'n', '\u00f2': 'o', '\u00f3': 'o',
+                    '\u00f4': 'o', '\u00f5': 'o', '\u00f6': 'o', '\u00f8': 'o',
+                    '\u00f9': 'u', '\u00fa': 'u', '\u00fb': 'u', '\u00fc': 'u',
+                    '\u00fd': 'y', '\u00fe': 'th', '\u00ff': 'y',
+                    
+                    # Other common problematic characters
+                    '\u2003': ' ',      # Em space
+                    '\u2002': ' ',      # En space
+                    '\u2009': ' ',      # Thin space
+                    '\u200a': ' ',      # Hair space
+                    '\u2028': '\n',     # Line separator
+                    '\u2029': '\n\n',   # Paragraph separator
+                    '\u00a6': '|',      # Broken bar
+                    '\u00a7': 'S',      # Section sign
+                    '\u00b6': 'P',      # Pilcrow sign
+                }
+                
+                # Apply all replacements
+                for old_char, new_char in replacements.items():
+                    text = text.replace(old_char, new_char)
+                
+                # Ensure it can be encoded/decoded properly
+                return text.encode('utf-8', errors='replace').decode('utf-8')
+            
+            return text
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            # Fallback: remove problematic characters
+            return text.encode('ascii', errors='ignore').decode('ascii')
+
 
     def get_agents(self):
         self.intent_classifier = self.get_intent_classifier()
@@ -556,4 +670,5 @@ class EmailManager:
             human_input_mode="ALWAYS"
         )
         return
+    
 

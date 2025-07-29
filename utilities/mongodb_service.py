@@ -36,10 +36,11 @@ class MongoDBService:
     MongoDB database handler for FastAPI applications.
     Provides methods for all database operations.
     """
+
     def __init__(self, connection_string: str = settings.MONGODB_URI, database_name: str = "OMNI-DB"):
         """
         Initialize MongoDB connection
-        
+
         Args:
             connection_string: MongoDB connection URI
             database_name: Name of the database to use
@@ -57,10 +58,11 @@ class MongoDBService:
             import sys
             import ssl
             import certifi
-            
+
             # Check if running as PyInstaller executable
-            is_executable = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
-            
+            is_executable = getattr(
+                sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
             if is_executable:
                 # For executables, try multiple connection approaches
                 connection_approaches = [
@@ -86,16 +88,19 @@ class MongoDBService:
                         }
                     }
                 ]
-                
+
                 connection_error = None
                 for i, approach in enumerate(connection_approaches):
                     try:
-                        self.logger.info(f"Attempting MongoDB connection {approach['description']} (attempt {i+1})")
-                        self.client = AsyncIOMotorClient(self.connection_string, **approach['client_params'])
+                        self.logger.info(
+                            f"Attempting MongoDB connection {approach['description']} (attempt {i+1})")
+                        self.client = AsyncIOMotorClient(
+                            self.connection_string, **approach['client_params'])
                         self.db = self.client[self.database_name]
                         # Ping the database to verify connection
                         await self.client.admin.command('ping')
-                        self.logger.info(f"Connected to MongoDB using approach {i+1}: {approach['description']}")
+                        self.logger.info(
+                            f"Connected to MongoDB using approach {i+1}: {approach['description']}")
                         return  # Success, exit the function
                     except Exception as e:
                         connection_error = e
@@ -104,7 +109,7 @@ class MongoDBService:
                             self.client.close()
                             self.client = None
                         continue
-                
+
                 # If all approaches failed, raise the last error
                 if connection_error:
                     raise connection_error
@@ -115,7 +120,7 @@ class MongoDBService:
                 # Ping the database to verify connection
                 await self.client.admin.command('ping')
                 self.logger.info("Connected to MongoDB")
-                
+
         except Exception as e:
             self.logger.error(f"Error connecting to MongoDB: {e}")
             raise
@@ -134,11 +139,11 @@ class MongoDBService:
     async def insert_one(self, collection_name: str, document: Dict) -> str:
         """
         Insert a single document into a collection
-        
+
         Args:
             collection_name: Name of the collection
             document: Document to insert
-            
+
         Returns:
             Inserted document's ID as string
         """
@@ -153,11 +158,11 @@ class MongoDBService:
     async def insert_many(self, collection_name: str, documents: List[Dict]) -> List[str]:
         """
         Insert multiple documents into a collection
-        
+
         Args:
             collection_name: Name of the collection
             documents: List of documents to insert
-            
+
         Returns:
             List of inserted document IDs as strings
         """
@@ -173,11 +178,11 @@ class MongoDBService:
     async def find_one(self, collection_name: str, query: Dict) -> Optional[Dict]:
         """
         Find a single document in a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
-            
+
         Returns:
             Document if found, None otherwise
         """
@@ -192,11 +197,11 @@ class MongoDBService:
     async def find_by_id(self, collection_name: str, id: Union[str, ObjectId]) -> Optional[Dict]:
         """
         Find a document by its ID
-        
+
         Args:
             collection_name: Name of the collection
             id: Document ID as string or ObjectId
-            
+
         Returns:
             Document if found, None otherwise
         """
@@ -204,38 +209,38 @@ class MongoDBService:
             id = ObjectId(id)
         return await self.find_one(collection_name, {"_id": id})
 
-    async def find_many(self, 
-                        collection_name: str, 
-                        query: Dict = None, 
-                        sort: List = None, 
-                        limit: int = 0, 
+    async def find_many(self,
+                        collection_name: str,
+                        query: Dict = None,
+                        sort: List = None,
+                        limit: int = 0,
                         skip: int = 0) -> List[Dict]:
         """
         Find multiple documents in a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
             sort: Sort specifications [(field, direction)]
             limit: Maximum number of documents to return (0 for all)
             skip: Number of documents to skip
-            
+
         Returns:
             List of documents
         """
         try:
             collection = self.db[collection_name]
             cursor = collection.find(query or {})
-            
+
             if sort:
                 cursor = cursor.sort(sort)
-            
+
             if skip:
                 cursor = cursor.skip(skip)
-                
+
             if limit:
                 cursor = cursor.limit(limit)
-                
+
             return await cursor.to_list(length=limit if limit else None)
         except Exception as e:
             self.logger.error(f"Error finding documents: {e}")
@@ -244,11 +249,11 @@ class MongoDBService:
     async def count_documents(self, collection_name: str, query: Dict = None) -> int:
         """
         Count documents in a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
-            
+
         Returns:
             Document count
         """
@@ -260,20 +265,20 @@ class MongoDBService:
             raise
 
     # UPDATE operations
-    async def update_one(self, 
-                          collection_name: str, 
-                          query: Dict, 
-                          update: Dict,
-                          upsert: bool = False) -> bool:
+    async def update_one(self,
+                         collection_name: str,
+                         query: Dict,
+                         update: Dict,
+                         upsert: bool = False) -> bool:
         """
         Update a single document in a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
             update: Update operations
             upsert: Insert if document doesn't exist
-            
+
         Returns:
             True if a document was updated, False otherwise
         """
@@ -285,20 +290,20 @@ class MongoDBService:
             self.logger.error(f"Error updating document: {e}")
             raise
 
-    async def update_by_id(self, 
-                           collection_name: str, 
-                           id: Union[str, ObjectId], 
+    async def update_by_id(self,
+                           collection_name: str,
+                           id: Union[str, ObjectId],
                            update: Dict,
                            upsert: bool = False) -> bool:
         """
         Update a document by its ID
-        
+
         Args:
             collection_name: Name of the collection
             id: Document ID as string or ObjectId
             update: Update operations
             upsert: Insert if document doesn't exist
-            
+
         Returns:
             True if the document was updated, False otherwise
         """
@@ -306,20 +311,20 @@ class MongoDBService:
             id = ObjectId(id)
         return await self.update_one(collection_name, {"_id": id}, update, upsert)
 
-    async def update_many(self, 
-                          collection_name: str, 
-                          query: Dict, 
+    async def update_many(self,
+                          collection_name: str,
+                          query: Dict,
                           update: Dict,
                           upsert: bool = False) -> int:
         """
         Update multiple documents in a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
             update: Update operations
             upsert: Insert if documents don't exist
-            
+
         Returns:
             Number of documents updated
         """
@@ -335,11 +340,11 @@ class MongoDBService:
     async def delete_one(self, collection_name: str, query: Dict) -> bool:
         """
         Delete a single document from a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
-            
+
         Returns:
             True if a document was deleted, False otherwise
         """
@@ -354,11 +359,11 @@ class MongoDBService:
     async def delete_by_id(self, collection_name: str, id: Union[str, ObjectId]) -> bool:
         """
         Delete a document by its ID
-        
+
         Args:
             collection_name: Name of the collection
             id: Document ID as string or ObjectId
-            
+
         Returns:
             True if the document was deleted, False otherwise
         """
@@ -369,11 +374,11 @@ class MongoDBService:
     async def delete_many(self, collection_name: str, query: Dict) -> int:
         """
         Delete multiple documents from a collection
-        
+
         Args:
             collection_name: Name of the collection
             query: Query filter
-            
+
         Returns:
             Number of documents deleted
         """
@@ -386,16 +391,16 @@ class MongoDBService:
             raise
 
     # AGGREGATION operations
-    async def aggregate(self, 
-                        collection_name: str, 
+    async def aggregate(self,
+                        collection_name: str,
                         pipeline: List[Dict]) -> List[Dict]:
         """
         Perform an aggregation pipeline on a collection
-        
+
         Args:
             collection_name: Name of the collection
             pipeline: Aggregation pipeline stages
-            
+
         Returns:
             Aggregation results
         """
@@ -408,18 +413,18 @@ class MongoDBService:
             raise
 
     # UTILITY operations
-    async def create_index(self, 
-                          collection_name: str, 
-                          keys: Union[str, List, Dict],
-                          unique: bool = False) -> str:
+    async def create_index(self,
+                           collection_name: str,
+                           keys: Union[str, List, Dict],
+                           unique: bool = False) -> str:
         """
         Create an index on a collection
-        
+
         Args:
             collection_name: Name of the collection
             keys: Index specification
             unique: Whether the index should enforce uniqueness
-            
+
         Returns:
             Index name
         """
@@ -433,7 +438,7 @@ class MongoDBService:
     async def drop_index(self, collection_name: str, index_name: str) -> None:
         """
         Drop an index from a collection
-        
+
         Args:
             collection_name: Name of the collection
             index_name: Name of the index to drop
@@ -448,7 +453,7 @@ class MongoDBService:
     async def drop_collection(self, collection_name: str) -> None:
         """
         Drop a collection
-        
+
         Args:
             collection_name: Name of the collection to drop
         """

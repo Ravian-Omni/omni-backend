@@ -203,3 +203,5 @@ omniEnv
 ravian/
 base_venv/
 bundled_python/
+
+resources/

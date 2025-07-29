@@ -170,6 +170,7 @@ planner = """
         "abilities": [
           "Only invoke this when user ask this explicitly",
           "can reply to emails",
+          "system has proper permissions and capability to access, search, and retrieve emails from user's inbox",
           "can send out emails with attachments",
           "can read emails from the inbox and also save the attachments", 
           "can search emails based on subject, sender, date, etc."

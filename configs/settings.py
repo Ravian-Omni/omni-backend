@@ -8,6 +8,7 @@ import threading
 from enum import Enum
 import sys
 
+os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Smart environment loading for executable and development modes
 
@@ -67,7 +68,7 @@ class Settings:
         self.PROJECT_NAME = "OMNI"
         self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
         self.USER_TOKEN = None
-        self.ROOT_DIR = os.path.join(Path.home(),".ravian")
+        self.ROOT_DIR = os.path.join(Path.home(), ".ravian")
         self.USER_EMAIL = os.getenv("email_username")
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
@@ -94,13 +95,22 @@ class Settings:
         self.IMAGE_GENERATOR_COLLECTION = os.getenv(
             "IMAGE_GENERATOR_COLLECTION", "image_generator")
 
-        # browser settings
-        self.CHROME_EXECUTABLE_PATH = os.getenv("CHROME_EXECUTABLE_PATH",
-                                                "/Users/voidfinder/Library/Caches/ms-playwright/chromium-1169/chrome-mac/Chromium.app/Contents/MacOS/Chromium")
-
         # Detect if running from executable
         self.IS_EXECUTABLE = getattr(
             sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+        # browser settings
+        # Use bundled Chromium when running as executable, fallback to system Chromium
+        if self.IS_EXECUTABLE:
+            # When running as executable, use bundled Chromium in dist folder
+            executable_dir = Path(sys.executable).parent
+            bundled_chromium_path = executable_dir / \
+                "Chromium.app" / "Contents" / "MacOS" / "Chromium"
+            self.CHROME_EXECUTABLE_PATH = str(bundled_chromium_path)
+        else:
+            # Development mode - use environment variable or default Playwright Chromium
+            self.CHROME_EXECUTABLE_PATH = os.getenv("CHROME_EXECUTABLE_PATH",
+                                                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
         # Browser-specific settings for executable environment
         if self.IS_EXECUTABLE:
@@ -148,8 +158,6 @@ class Settings:
 settings = Settings()
 
 
-
-
 class CapabilityType(Enum):
     """Enumeration of all available capabilities"""
     OMNI = "omni"
@@ -166,8 +174,9 @@ class CapabilityType(Enum):
             return cls(capability_name)
         except ValueError:
             valid_names = [cap.value for cap in cls]
-            raise ValueError(f"Invalid capability name: {capability_name}. Valid names: {valid_names}")
-    
+            raise ValueError(
+                f"Invalid capability name: {capability_name}. Valid names: {valid_names}")
+
     @property
     def collection(self):
         """Return the collection associated with each capability."""
@@ -179,12 +188,12 @@ class CapabilityType(Enum):
             CapabilityType.FILE_FINDER: settings.FILE_FINDER_COLLECTION,
             CapabilityType.IMAGE_GENERATOR: settings.IMAGE_GENERATOR_COLLECTION,
         }[self]
-    
+
     @classmethod
     def from_collection(cls, collection_name: str):
         """Get CapabilityType instance from collection name."""
         for capability in cls:
             if capability.collection == collection_name:
                 return capability
-        raise ValueError(f"No capability found for collection: {collection_name}")
-
+        raise ValueError(
+            f"No capability found for collection: {collection_name}")

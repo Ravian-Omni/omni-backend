@@ -706,7 +706,7 @@ class Omni:
             agents=self.agents,
             messages=[],
             speaker_selection_method=self.custom_speaker_selection_func,
-            max_round=500,
+            max_round=25,
         )
         self.manager = OmniGroupChatManager(
             groupchat=self.groupchat,
