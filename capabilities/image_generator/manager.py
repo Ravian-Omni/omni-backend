@@ -1,7 +1,7 @@
 import autogen
 from pathlib import Path
 import os
-import json
+import asyncio
 from datetime import datetime
 from autogen import register_function
 from autogen.agentchat.agent import Agent
@@ -22,7 +22,7 @@ from utilities.storage import ensure_path
 import requests
 from together import Together
 from capabilities.image_generator.response_format import ProcessCompletionResponse
-
+from loguru import logger
 
 class ImageGenerator:
     def __init__(self, context: ChatContext):
@@ -31,16 +31,23 @@ class ImageGenerator:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_pc["response_format"] = ProcessCompletionResponse
+        image_llm_config = LLMConfigManager.get_config("image_together_llm")
+        self.image_llm_config = image_llm_config.get("config_list", [])[0]
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
+    
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
         
     def flux_image_generator(self, prompt: Annotated[str, "The image generation prompt"], filename: Annotated[str, "The filename to save the image as"]):
         try:
-            client = Together(api_key=settings.TOGETHER_API_KEY)
+            client = Together(api_key=self.image_llm_config.get("api_key"))
             response = client.images.generate(
                 prompt=prompt,
-                model="black-forest-labs/FLUX.1-dev",
+                model=self.image_llm_config.get("model"),
                 n=1,
                 width=768,
                 height=432,
@@ -122,23 +129,31 @@ class ImageGenerator:
 
 
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
-        messages = groupchat.messages
-        #file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
+        try:
+            self._check_cancellation()
+            
+            messages = groupchat.messages
+            #file_path_provided = any("file path" in msg["content"].lower() for msg in messages)
 
-        if len(messages) == 1 or last_speaker.name == "chat_manager":
-            return groupchat.agent_by_name("user_intent")
-        if last_speaker.name == "user_intent":
-            return groupchat.agent_by_name("image_prompt_generator")
-        if last_speaker.name == "image_prompt_generator":
-            return groupchat.agent_by_name("image_generator_caller")
-        if last_speaker.name == "image_generator_caller":
-            return groupchat.agent_by_name("image_generator")
-        if last_speaker.name == "image_generator":
-            if "error".lower() in messages[-1]["content"]:
+            if len(messages) == 1 or last_speaker.name == "chat_manager":
+                return groupchat.agent_by_name("user_intent")
+            if last_speaker.name == "user_intent":
                 return groupchat.agent_by_name("image_prompt_generator")
-            else:
-                return groupchat.agent_by_name("process_completion")
-        return None
+            if last_speaker.name == "image_prompt_generator":
+                return groupchat.agent_by_name("image_generator_caller")
+            if last_speaker.name == "image_generator_caller":
+                return groupchat.agent_by_name("image_generator")
+            if last_speaker.name == "image_generator":
+                if "error".lower() in messages[-1]["content"]:
+                    return groupchat.agent_by_name("image_prompt_generator")
+                else:
+                    return groupchat.agent_by_name("process_completion")
+            return None
+        
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
 
 
 

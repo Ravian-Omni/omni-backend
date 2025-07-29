@@ -9,7 +9,7 @@ from autogen.agentchat.agent import Agent
 from typing import List, Dict, Any
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from typing import List, Dict, Optional, Union
-import os
+import asyncio
 from pathlib import Path
 from typing import List, Dict, Set, Optional
 import re
@@ -19,15 +19,10 @@ import time
 from datetime import datetime
 from capabilities.file_finder import prompts
 from configs.llm_configs_manager import LLMConfigManager
-llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.file_finder.response_format import ProblemStatusResponse, FileFinderResponse
-
-
-llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
-llm_config_psc["response_format"] = ProblemStatusResponse
-
+from loguru import logger
 class FileSearchAgent:
     def __init__(self, root_dir: str = str(Path.home())):
         """
@@ -198,6 +193,12 @@ class FileFinder:
                                   description="This tool will be used to search for any files in the system",
                                   )
         self.get_chat_manager()
+        
+        
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
 
 
 
@@ -242,22 +243,30 @@ class FileFinder:
     
     # static custom speaker selection, no dynamic agent selection or condition chat routing
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
-        messages = groupchat.messages
-        if len(messages) == 1 or last_speaker.name == "chat_manager":
-            print("Initial query received ")
-            return groupchat.agent_by_name("file_finder_planner")
-        elif last_speaker.name == "file_finder_planner":
-            return groupchat.agent_by_name("file_finder")
-        elif last_speaker.name == "file_finder":
-            return groupchat.agent_by_name("user_proxy")
-        elif last_speaker.name == "user_proxy":
-            return groupchat.agent_by_name("prob_status_checker")
-        elif last_speaker.name == "prob_status_checker":
-            if 'yes' in messages[-1]["content"].lower():
-                return groupchat.agent_by_name("process_completion")
-            else:
+        try:
+            self._check_cancellation()
+            
+            messages = groupchat.messages
+            if len(messages) == 1 or last_speaker.name == "chat_manager":
+                print("Initial query received ")
                 return groupchat.agent_by_name("file_finder_planner")
-        return None
+            elif last_speaker.name == "file_finder_planner":
+                return groupchat.agent_by_name("file_finder")
+            elif last_speaker.name == "file_finder":
+                return groupchat.agent_by_name("user_proxy")
+            elif last_speaker.name == "user_proxy":
+                return groupchat.agent_by_name("prob_status_checker")
+            elif last_speaker.name == "prob_status_checker":
+                if 'yes' in messages[-1]["content"].lower():
+                    return groupchat.agent_by_name("process_completion")
+                else:
+                    return groupchat.agent_by_name("file_finder_planner")
+            return None
+        
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
 
 
 

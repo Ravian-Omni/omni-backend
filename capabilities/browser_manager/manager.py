@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Annotated, List, Dict, Any, Optional
-
+from loguru import logger
 import requests
 import nest_asyncio
 from pydantic import BaseModel
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
+import gc
+import sys
 # AutoGen imports
 import autogen
 from autogen import AssistantAgent, UserProxyAgent
@@ -29,11 +31,13 @@ from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 from browser_use.browser.context import BrowserContextConfig
 
-from langchain_openai import ChatOpenAI
+# Your custom imports
+from configs.settings import settings
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from capabilities.browser_manager import prompts
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.llm_configs_manager import LLMConfigManager
-from capabilities.browser_manager.response_format import webprocess_completion
+from capabilities.browser_manager.response_format import WebProcessCompletion
 from tavily import AsyncTavilyClient
 from .country_data import country_codes
 from utilities.storage import ensure_path
@@ -41,6 +45,8 @@ from capabilities.browser_manager.function_description import (
     web_browser_automation,
     web_api_search
 )
+from dependencies import get_websocket_manager
+from capabilities.browser_manager.streaming_browser import StreamingAgent
 
 
 class BrowserManager:
@@ -131,16 +137,35 @@ class BrowserManager:
 
         # Initialize LLM configurations
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        tavily_llm_config = LLMConfigManager.get_config("tavily_llm_config")
+        # Initialize Tavily client
+        tavily_client_key = tavily_llm_config.get("config_list", [])[0].get("api_key")
+        self.tavily_client = AsyncTavilyClient(tavily_client_key)
         self.llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_wc["response_format"] = webprocess_completion
-
+        self.llm_config_wc["response_format"] = WebProcessCompletion
+        self.llm_planner = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
+        self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
         # Initialize vision LLM
-        self.vision_llm = ChatOpenAI(
-            model_name="gpt-4.1-mini-2025-04-14",
-            temperature=0.1,
-            api_key=settings.OPENAI_API_KEY,
-        )
+        browser_llm = self.llm_config.get("config_list", [])[0]
+        if "api_type" in browser_llm.keys() and browser_llm.get("api_type") == "azure":
+            self.vision_llm = AzureChatOpenAI(
+                azure_deployment=browser_llm.get("model"),
+                temperature=browser_llm.get("temperature", 0.1),
+                api_key=browser_llm.get("api_key"),
+                azure_endpoint=browser_llm.get("base_url"),
+                api_version=browser_llm.get("api_version")
+            )
 
+        else:
+            self.vision_llm = ChatOpenAI(
+                model_name=browser_llm.get("model"),
+                temperature=browser_llm.get("temperature", 0.1),
+                api_key=browser_llm.get("api_key"),
+            )
+        
+        
         # Browser session management
         self.browser_session = None
         self.controller = Controller()
@@ -153,6 +178,11 @@ class BrowserManager:
         self._register_functions()
         self.groupchat, self.manager = self._initialize_chat_manager()
 
+    def _check_cancellation(self):
+        """Check if the chat should be cancelled"""
+        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
+            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
+        
     def _get_user_country(self) -> str:
         """Get user's country from IP address."""
         try:
@@ -223,17 +253,36 @@ class BrowserManager:
         """API-based search tool using Tavily."""
         try:
             response = await self.tavily_client.search(query, search_depth="advanced")
-
             if response and 'results' in response:
-                result_text = f"Query: {response.get('query', query)}\n"
-                result_text += f"Found {len(response['results'])} results:\n\n"
-
-                for i, result in enumerate(response['results'][:5], 1):
-                    result_text += f"{i}. {result.get('title', 'No title')}\n"
-                    result_text += f"   URL: {result.get('url', 'No URL')}\n"
-                    result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
-
-                return result_text
+                result = {
+                    "status": "success" if response else "failed",
+                    "query": query,
+                    "results_count": len(response.get('results', [])),
+                    "answer": response.get('answer', ''),
+                    "urls": [result['url'] for result in response.get('results', [])],
+                    "sources": [
+                        {
+                            "title": result.get('title', ''),
+                            "url": result.get('url', ''),
+                            "content": result.get('content', ''),
+                            "score": result.get('score', 0)
+                        } 
+                        for result in response.get('results', [])
+                    ],
+                    "images": response.get('images', []),
+                    "search_depth": response.get('search_depth', 'basic'),
+                    "follow_up_questions": response.get('follow_up_questions', [])
+                }
+                # result_text = f"Query: {response.get('query', query)}\n"
+                # result_text += f"Found {len(response['results'])} results:\n\n"
+                
+                # for i, result in enumerate(response['results'][:5], 1):
+                #     result_text += f"{i}. {result.get('title', 'No title')}\n"
+                #     result_text += f"   URL: {result.get('url', 'No URL')}\n"
+                #     result_text += f"   Content: {result.get('content', 'No content')[:200]}...\n\n"
+                # return result_text
+                return result
+                
             else:
                 return "No results found"
 
@@ -241,6 +290,39 @@ class BrowserManager:
             error_msg = f"Search failed: {str(e)}"
             print(error_msg)
             return error_msg
+    
+    def _clear_module_registries(self):
+        """Clear any global registries in browser automation modules."""
+        try:
+            # Force garbage collection first
+            gc.collect()
+            
+            # Look for browser automation modules and clear their state
+            modules_to_check = []
+            for module_name in sys.modules.keys():
+                if any(keyword in module_name.lower() for keyword in [
+                    'browser_use', 'browser', 'agent', 'event'
+                ]):
+                    modules_to_check.append(module_name)
+            
+            for module_name in modules_to_check:
+                try:
+                    module = sys.modules[module_name]
+                    # Look for attributes that might be registries
+                    for attr_name in dir(module):
+                        if any(keyword in attr_name.lower() for keyword in [
+                            'registry', 'instances', '_agents', '_eventbus', 'cache'
+                        ]):
+                            attr = getattr(module, attr_name, None)
+                            if isinstance(attr, dict):
+                                attr.clear()
+                            elif hasattr(attr, 'clear') and callable(attr.clear):
+                                attr.clear()
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            print(f"Warning: Could not clear module registries: {e}")
 
     async def get_browser_search_function(self, task_goal: str, starting_url: str = None) -> str:
         """Browser automation function with optional result saving."""
@@ -254,59 +336,41 @@ class BrowserManager:
                 # Try to prevent template loading issues
                 os.environ.setdefault('BROWSER_USE_DISABLE_TEMPLATES', 'true')
 
+            # self._clear_module_registries()
+            ws_manager = await get_websocket_manager()
             # Initialize browser session
             browser_session = await self._initialize_browser_session()
 
             # Setup controller with credentials handler
             @self.controller.action("Ask user for credentials")
-            def ask_human_local(question: str) -> ActionResult:
-                answer = input(f'\n{question}\nInput: ')
+            async def ask_human_local(question: str) -> ActionResult:
+                # answer = input(f'\n{question}\nInput: ')
+                answer = await self.context.manager_kwargs["input_function"](question)
                 return ActionResult(extracted_content=answer, include_in_memory=True)
-
-            # Determine GIF path for all environments
-            gif_path = None
-            if self.save_results and self.browser_gif:
-                gif_path = self.browser_gif
-                print(f"DEBUG: GIF will be generated at: {gif_path}")
-            else:
-                print(
-                    f"DEBUG: GIF generation skipped. save_results={self.save_results}, browser_gif={self.browser_gif}")
-
-            # Create agent with GIF support for all environments
-            if settings.IS_EXECUTABLE:
-                # Executable configuration with GIF support
-                agent = Agent(
-                    task=task_goal,
-                    browser=self._create_browser(),
-                    browser_session=browser_session,
-                    llm=self.vision_llm,
-                    controller=self.controller,
-                    # Settings optimized for executable but with GIF support
-                    max_failures=2,
-                    retry_delay=1,
-                    use_vision=False,
-                    generate_gif=gif_path,  # Enable GIF generation
-                    validate_output=False,
-                    max_input_tokens=100000,
-                )
-            else:
-                # Full configuration for normal environment
-                agent = Agent(
-                    task=task_goal,
-                    browser=self._create_browser(),
-                    browser_session=browser_session,
-                    max_failures=3,
-                    retry_delay=2,
-                    use_vision=True,
-                    validate_output=True,
-                    llm=self.vision_llm,
-                    controller=self.controller,
-                    max_input_tokens=180000,
-                    generate_gif=gif_path,
-                )
+            
+            # Create agent with minimal configuration
+            agent = StreamingAgent(
+                task=task_goal,
+                browser=self._create_browser(),
+                browser_session=browser_session,
+                max_failures=3,  # Reduced from 5
+                retry_delay=2,   # Reduced from 3
+                use_vision=True,
+                generate_gif=False if not self.save_results else self.browser_gif,  # Disabled to reduce file generation
+                max_input_tokens=180000,  # Reduced from 180000
+                validate_output=True,
+                llm=self.vision_llm,
+                controller=self.controller,
+                session_id = self.context.chat_id,
+                ws_manager = ws_manager
+                # save_conversation_path=None if not self.save_results else self.results_dir,
+            )
 
             # Run the agent
-            result = await agent.run()
+            # result = await agent.run()
+            task = asyncio.create_task(agent.run())
+            ws_manager.active_browser[self.context.chat_id] = (task,browser_session)
+            result = await task
             final_result = (
                 result.final_result()
                 if callable(result.final_result)
@@ -316,8 +380,16 @@ class BrowserManager:
             # Optionally save results
             if self.save_results:
                 await self._save_result(task_goal, final_result, "success")
-
-            return f"Task completed successfully: {final_result}"
+            response = {
+                    "status": "success" if result.is_successful() else "failed",
+                    "result": final_result,
+                    "execution_time": result.total_duration_seconds(),
+                    "urls_visited": result.urls(),
+                    "errors": result.errors(),
+                    "steps": len(result.extracted_content()),
+                    "gif_path": self.browser_gif
+                }
+            return response
 
         except Exception as e:
             error_msg = f"Browser automation failed: {str(e)}"
@@ -391,7 +463,7 @@ class BrowserManager:
         async def search_tool_wrapper(query: str):
             """API-based search tool using Tavily."""
             return await self.get_search_tool(query)
-
+        
         # Register browser search function
         autogen.register_function(
             browser_search_function_wrapper,
@@ -414,7 +486,7 @@ class BrowserManager:
         """Initialize all agents with simplified configuration."""
         self.planner = AssistantAgent(
             name="browser_planner",
-            llm_config=self.llm_config,
+            llm_config=self.llm_planner,
             system_message=prompts.planner.format(
                 today_date=datetime.now(),
                 usercountry=self.user_country
@@ -423,7 +495,7 @@ class BrowserManager:
 
         self.browser_reader = AssistantAgent(
             name="browser_reader",
-            llm_config=self.llm_config,
+            llm_config=self.llm_config_caller,
         )
 
         self.browser_searcher = autogen.UserProxyAgent(
@@ -444,16 +516,23 @@ class BrowserManager:
 
     def _speaker_selection(self, last_speaker, groupchat):
         """Simplified speaker selection logic."""
-        messages = groupchat.messages
-        if len(messages) == 1 or last_speaker.name == "chat_manager":
-            return groupchat.agent_by_name("browser_planner")
-        elif last_speaker.name == "browser_planner":
-            return groupchat.agent_by_name("browser_reader")
-        elif last_speaker.name == "browser_reader":
-            return groupchat.agent_by_name("browser_searcher")
-        elif last_speaker.name == "browser_searcher":
-            return groupchat.agent_by_name("process_completion")
-        return None
+        try:
+            self._check_cancellation()
+            messages = groupchat.messages
+            if len(messages) == 1 or last_speaker.name == "chat_manager":
+                return groupchat.agent_by_name("browser_planner")
+            elif last_speaker.name == "browser_planner":
+                return groupchat.agent_by_name("browser_reader")
+            elif last_speaker.name == "browser_reader":
+                return groupchat.agent_by_name("browser_searcher")
+            elif last_speaker.name == "browser_searcher":
+                return groupchat.agent_by_name("process_completion")
+            return None
+        
+        except asyncio.CancelledError:
+            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            # Return process_completion to gracefully end the chat
+            raise
 
     def _initialize_chat_manager(self):
         """Initialize group chat and manager."""
@@ -472,16 +551,55 @@ class BrowserManager:
         )
 
         return groupchat, manager
-
-    async def close_browser_session(self):
-        """Clean up browser session."""
-        if self.browser_session:
-            try:
+    
+    async def _cleanup_event_bus(self):
+        """Clean up EventBus instances to prevent conflicts."""
+        try:
+            # Check if the browser session has an event bus or agent
+            if hasattr(self.browser_session, 'agent'):
+                agent = self.browser_session.agent
+                if hasattr(agent, 'event_bus'):
+                    # Try to stop or clean up the event bus
+                    if hasattr(agent.event_bus, 'stop'):
+                        await agent.event_bus.stop()
+                    elif hasattr(agent.event_bus, 'close'):
+                        await agent.event_bus.close()
+                    elif hasattr(agent.event_bus, 'cleanup'):
+                        await agent.event_bus.cleanup()
+            
+            # Also check for global EventBus registry cleanup
+            if hasattr(self.browser_session, '_cleanup_event_system'):
+                await self.browser_session._cleanup_event_system()
+                
+        except Exception as e:
+            print(f"Warning: Could not clean up EventBus: {e}")
+            
+    async def close_browser_session(self) -> bool:
+        """Attempt to close browser gracefully using the session's built-in methods."""
+        if self.browser_session is None:
+            return True
+            
+        try:
+            await self._cleanup_event_bus()
+            # Try the standard close method first
+            if hasattr(self.browser_session, 'close'):
+                await self.browser_session.close()
+            
+            # Then try kill method
+            if hasattr(self.browser_session, 'kill'):
                 await self.browser_session.kill()
-            except Exception as e:
-                print(f"Error closing browser session: {e}")
-            finally:
-                self.browser_session = None
+            
+            # Try to close the browser if it has a browser attribute
+            if hasattr(self.browser_session, 'browser') and self.browser_session.browser:
+                await self.browser_session.browser.close()
+            
+            self.browser_session = None
+            return True
+            
+        except Exception as e:
+            print(f"Error during graceful browser closure: {e}")
+            return False
+
 
     async def __aenter__(self):
         """Async context manager entry."""

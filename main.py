@@ -9,8 +9,8 @@ from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
 from utilities.logging import setup_logging, cleanup_logging
 from contextlib import asynccontextmanager
-from dependencies import mongodb_service, init_managers
-from configs.settings import settings  # This will trigger environment loading
+from dependencies import init_managers
+from configs.settings import settings
 from fastapi.openapi.utils import get_openapi
 import os
 from initialization import AppInitializer
@@ -48,11 +48,7 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting FastAPI application...")
     os.environ["HOME"] = os.path.expanduser("~")
     try:
-        # Startup: Connect to databases
-        logger.info("📊 Connecting to MongoDB...")
-        await mongodb_service.connect()
-        logger.info("✅ MongoDB connection established")
-
+        # Startup: Connect to databases        
         logger.info("📊 Websocket Manager...")
         await init_managers()
         logger.info("✅ Websocket Manager established")
@@ -69,10 +65,6 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down FastAPI application...")
 
     try:
-        logger.info("📊 Closing MongoDB connections...")
-        await mongodb_service.close()
-        logger.info("✅ MongoDB connections closed")
-
         # Add any other cleanup tasks here
         logger.info("🧹 Application shutdown completed successfully")
 

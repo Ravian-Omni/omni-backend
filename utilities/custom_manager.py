@@ -4,12 +4,13 @@ import asyncio
 from typing import List, Optional,Dict,Any
 from loguru import logger
 from datetime import datetime,timezone
-from dependencies import get_mongodb_service
 from dependencies import get_websocket_manager
 from dataclasses import dataclass
 from omni.memory import OmniMemory
 from collections import defaultdict
-
+from utilities.api_client import api_client
+from managers.cancellation_token import CancellationToken
+from utilities.async_helpers import async_to_sync
 
 @dataclass
 class ChatContext:
@@ -22,6 +23,7 @@ class ChatContext:
     capability_name: str
     collection_name: str
     omni_memory: OmniMemory
+    cancellation_token: CancellationToken = None
     manager_kwargs: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
@@ -29,7 +31,6 @@ class ChatContext:
             self.manager_kwargs = {}
 
 async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
-    mongodb = await get_mongodb_service()
     chat_document = {
         "user_id": context.user_id,
         "chat_id": context.chat_id,
@@ -42,7 +43,13 @@ async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
     }
     
     # Create database record
-    await mongodb.insert_one(context.collection_name, chat_document)
+    create_chat = await api_client.post("/chats/new", params={"capability": context.collection_name}, data=chat_document)
+    create_chat = create_chat.standard_response()
+    if not create_chat.get("success"):
+        raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
+    
+    result = create_chat.get("data")
+    # await mongodb.insert_one(context.collection_name, chat_document)
     
     # Return standardized response using Pydantic model
     return {"chat_id":context.chat_id}
@@ -59,9 +66,7 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
     Returns:
         bool: True if update was successful
     """
-    try:
-        mongodb_service = await get_mongodb_service()
-        
+    try:        
         # Extract message fields safely
         raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message', 'usage'] if k in message}
         content_message = {k: message.get(k) for k in ['role', 'name', 'content'] if k in message}
@@ -86,12 +91,18 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
             "call_id": context.call_id,
             "capability_id": context.capability_id
         }
+
+        update_result = await api_client.post("/chats/chat_update", params={"capability": context.collection_name}, data={"filter_criteria":filter_criteria,"document":update_document})
+        update_result = update_result.standard_response()
+        if not update_result.get("success"):
+            raise Exception(f"Failed to update chat history: {update_result.get('message', 'Unknown error')}")
         
-        result = await mongodb_service.update_one(
-            context.collection_name, 
-            filter_criteria, 
-            update_document
-        )
+        result = update_result.get("data")
+        # result = await mongodb_service.update_one(
+        #     context.collection_name, 
+        #     filter_criteria, 
+        #     update_document
+        # )
         
         logger.info(
             f"Chat history updated - chat_id: {context.chat_id}, "
@@ -103,7 +114,8 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
         
     except Exception as e:
         logger.error(f"Failed to update chat history: {e}")
-        return False
+        # return False
+        raise e
 
 class CustomGroupChatManager(autogen.GroupChatManager):
     """Enhanced GroupChatManager with chat context and background processing"""
@@ -203,6 +215,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             )
         except Exception as e:
             logger.error(f"WebSocket send failed: {e}")
+            raise e
     
     async def _process_message_background(self, message_data: Dict[str, Any]) -> None:
         """Process message in background (WebSocket + Database)"""
@@ -245,8 +258,8 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         )
         
         # Process background tasks (async)
-        asyncio.run(self._send_websocket_message(websocket_message))
-        asyncio.run(update_chat_history(self.context,message_data))
+        async_to_sync(update_chat_history(self.context,message_data))
+        async_to_sync(self._send_websocket_message(websocket_message))
         
     # Additional utility methods for comprehensive usage tracking
     
@@ -331,5 +344,5 @@ class CustomGroupChatManager(autogen.GroupChatManager):
 #         db_content = {"role":"user","name":sender.name,"content":content}
 #         self.omni_memory.push_capability_message(db_content,self.capability,self.capability_id)
 #         db_content["raw_message"] = message
-#         asyncio.run(self.send_websocket(db_content))
+#         async_to_sync(self.send_websocket(db_content))
 #         asyncio.create_task(update_db(chat_id=self.chat_id, call_id=self.call_id, message=db_content, capability=self.capability, capability_id=self.capability_id))

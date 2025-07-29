@@ -1,17 +1,15 @@
 import time
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
-from dependencies import get_mongodb_service
 from datetime import datetime, timezone
 import asyncio
 from loguru import logger
-
 import os
 from pathlib import Path
 from typing import Union
-
 import subprocess
 import sys
+from utilities.api_client import api_client
 
 async def update_chat_history(chat_id: str, message: dict, collection_name: str) -> bool:
     """
@@ -29,7 +27,6 @@ async def update_chat_history(chat_id: str, message: dict, collection_name: str)
         Exception: If MongoDB operation fails
     """
     try:
-        mongodb_service = await get_mongodb_service()
         
         # Extract required fields for different message types
         required_fields = ['role', 'name', 'raw_message', 'usage']
@@ -54,11 +51,17 @@ async def update_chat_history(chat_id: str, message: dict, collection_name: str)
         
         # Execute update operation
         filter_criteria = {"chat_id": chat_id}
-        update_result = await mongodb_service.update_one(
-            collection_name, 
-            filter_criteria, 
-            update_document
-        )
+        update_result = await api_client.post("/chats/chat_update", params={"capability": collection_name}, data={"filter_criteria":filter_criteria,"document":update_document})
+        update_result = update_result.standard_response()
+        if not update_result.get("success"):
+            raise Exception(f"Failed: {update_result.get('message', 'Unknown error')}")
+        
+        update_result = update_result.get("data")
+        # update_result = await mongodb_service.update_one(
+        #     collection_name, 
+        #     filter_criteria, 
+        #     update_document
+        # )
         
         # Log the actual result, not the task object
         logger.info(f"MongoDB update completed for chat_id: {chat_id}")
