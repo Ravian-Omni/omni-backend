@@ -108,7 +108,14 @@ class CapabilityManager:
         """Prepare messages for capability manager chat"""
         # messages = self.memory.pull_recent_from_chat_manager()
         messages = []
-        
+        omni_executor = self.memory.pull_recent_from_executor()
+        if omni_executor:
+            for agent_message in omni_executor:
+                messages.append({
+                    "role": "user",
+                    "name": f"context_keeper",
+                    "content": agent_message['content']
+                })
         # Add last capability messages if available
         if self.memory.get_last_capability():
             last_content_list = self._get_last_completion_content()
@@ -119,7 +126,8 @@ class CapabilityManager:
                         "name": f"context_keeper",
                         "content": agent_message['content']
                     })
-        
+        # if executor and len(executor > 1):
+        #     messages.extend(executor)
         return messages
     
     def _get_last_completion_content(self) -> Optional[list]:

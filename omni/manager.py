@@ -250,7 +250,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         for agent in self.groupchat.agents:
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
-            
+    
 
 class CustomUserProxyAgent(UserProxyAgent):
     def __init__(self, *args, **kwargs):
@@ -276,6 +276,7 @@ class CustomUserProxyAgent(UserProxyAgent):
         
         # Safely call super, assuming you have registered an async input
         # result = await super().a_get_human_input(prompt)
+        prompt = json.dumps({"agent":self.name, "prompt":prompt})
         return await self.input_function(prompt)
         
         # print(f"✅ Got input: {result}")

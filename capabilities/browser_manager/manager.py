@@ -2,7 +2,7 @@ import os
 import asyncio
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 from typing import Annotated, List, Dict, Any, Optional
 from loguru import logger
 import requests
@@ -488,7 +488,7 @@ class BrowserManager:
             name="browser_planner",
             llm_config=self.llm_planner,
             system_message=prompts.planner.format(
-                today_date=datetime.now(),
+                today_date=date.today().isoformat(),
                 usercountry=self.user_country
             ),
         )

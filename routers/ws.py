@@ -1,7 +1,7 @@
 # api/ws.py
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from loguru import logger
 from dependencies import get_websocket_manager
@@ -19,6 +19,33 @@ from fastapi import HTTPException, Depends, status
 from utilities.custom_manager import ChatContext
 from utilities.api_client import api_client
 from configs.llm_configs_manager import LLMConfigManager
+
+
+def extract_user_summary(data: dict) -> dict:
+    """
+    Extracts a summary from raw API user data.
+
+    Args:
+        data (dict): The original API response containing user information.
+
+    Returns:
+        dict: A cleaned dictionary with selected fields.
+    """
+    first_name = data.get('first_name', '').strip()
+    last_name = data.get('last_name', '').strip()
+    full_name = f"{first_name} {last_name}".strip() if last_name else first_name
+
+    return {
+        "name": first_name,
+        "email": data.get("email", ""),
+        "full_name": full_name,
+        "dob": data.get("dob",""),
+        "gender": data.get("gender", ""),
+        "country": data.get("country", ""),
+        "date": date.today().isoformat()
+    }
+
+
 router = APIRouter()
 
 @router.websocket("/omni/{chat_id}")
@@ -48,6 +75,26 @@ async def run_websocket(
     
     omni = Omni(chat_id=chat_id,user_id=user_id, chat_dir=chat_dir)
     messages = history.get("messages",[])
+    user_details = await api_client.get("/auth/user")
+    user_details = user_details.standard_response()
+    if not user_details.get("success"):
+        raise Exception(f"Failed to update chat history: {user_details.get('message', 'Unknown error')}")
+    user_context = extract_user_summary(user_details.get("data"))
+    context = f"""
+    
+    User Information:
+    - User: {user_context['full_name']}
+    - Birth Date: {user_context['dob']}
+    - Email: {user_context['email']}
+    - Gender: {user_context['gender']}
+    - Location: {user_context['country']}
+    - Today's Date: {user_context['date']}
+
+    Please take this context into account when responding.
+    
+    """
+    omni.judge_question.update_system_message(omni.judge_question.system_message + context)
+    # messages.append({"role":"user", "name":"chat_manager", "content":context})
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
         omni.memory.load_main_messages(messages)

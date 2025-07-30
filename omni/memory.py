@@ -224,6 +224,19 @@ class OmniMemory:
             from_role="chat_manager"
         )
     
+    def pull_recent_from_executor(self, count: int = 5) -> List[Dict[str, Any]]:
+        """
+        Pull recent messages from executor in omni chat.
+        
+        Args:
+            count: Number of recent messages to return from chat_manager
+        """
+        return self.pull_recent_messages(
+            count=count, 
+            chat_type="main", 
+            from_role="agent_executor"
+        )
+    
     def get_capability_instances(self, capability_name: str) -> List[str]:
         """Get all chat_ids for a specific capability"""
         return self.capability_instances.get(capability_name, [])
