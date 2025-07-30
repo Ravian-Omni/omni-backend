@@ -52,3 +52,28 @@ class ProblemStatusResponse(BaseModel):
                 if not value.startswith("No, we have not answered the question"):
                     return f"No, we have not answered the question asked by the user. {value}"
         return value
+    
+
+class PlannerResponseFormat(BaseModel):
+    """
+    Pydantic schema for structured Planner response format.
+    """
+    objective: str = Field(
+        ..., 
+        description="Clear statement of what needs to be accomplished"
+    )
+    
+    todo_list: list[str] = Field(
+        ..., 
+        description="List of tasks to complete the objective"
+    )
+    
+    dependencies: Optional[str] = Field(
+        default="None", 
+        description="Required dependencies, tools, or prerequisites"
+    )
+    
+    assumptions: str = Field(
+        ..., 
+        description="Key assumptions made about the environment, context, or requirements"
+    )

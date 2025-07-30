@@ -4,7 +4,7 @@ from autogen.agentchat.agent import Agent
 from typing import List, Dict, Any
 from autogen import UserProxyAgent, GroupChat
 from capabilities.python_developer import prompts
-from capabilities.python_developer.response_format import ProblemStatusResponse
+from capabilities.python_developer.response_format import ProblemStatusResponse, PlannerResponseFormat
 from configs.llm_configs_manager import LLMConfigManager
 import autogen
 import asyncio
@@ -31,7 +31,9 @@ class PythonDeveloper:
     def __init__(self, context: ChatContext):
         self.context = context
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_code_writer = LLMConfigManager.get_config("kimi_k2")
+        self.llm_planner = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_planner["response_format"] = PlannerResponseFormat
+        self.llm_code_writer = LLMConfigManager.get_config("claude-sonnet-4-20250514")
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
         self.coding_language = "python"
@@ -48,7 +50,7 @@ class PythonDeveloper:
     def get_planner(self):
         return autogen.AssistantAgent(
             name="planner_agent",
-            llm_config=self.llm_config,
+            llm_config=self.llm_planner,
             system_message=prompts.planner.format(file_location=self.file_location,coding_language=self.coding_language)
         )
     
@@ -77,7 +79,7 @@ class PythonDeveloper:
     def get_code_debugger(self):
         return autogen.AssistantAgent(
             name="code_debugger_agent",
-            llm_config=self.llm_code_writer,
+            llm_config=self.llm_config,
             max_consecutive_auto_reply=5,
             system_message=prompts.debugger.format(file_location=self.file_location,coding_language=self.coding_language)
         )

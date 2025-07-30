@@ -406,6 +406,15 @@ class UserCountry(BaseModel):
         except Exception:
             return cls(country_code=None, country_name=None)
 
+class UserDetails(BaseModel):
+    """User information model"""
+    full_name: str = Field(..., description="User's full name")
+    email: str = Field(..., description="User's email address")
+    date_of_birth: str = Field(..., description="User's date of birth (YYYY-MM-DD format)")
+    gender: str = Field(..., description="User's gender")
+    country: str = Field(..., description="User's country code")
+    date: str = Field(..., description="Current date")
+
 class QuestionClassification(BaseModel):
     """
     Pydantic model for question classification results.
@@ -468,15 +477,20 @@ class QuestionClassification(BaseModel):
         example="15-20 minutes"
     )
 
+    user_details: UserDetails = Field(
+        ...,
+        description="User information for context"
+    )
 
-    user_country_code: str = Field(
-        ...,
-        description=country["code"]
-    )
-    user_country_name: str = Field(
-        ...,
-        description=country["name"]
-    )
+    # user_country_code: str = Field(
+    #     ...,
+    #     description=country["code"]
+    # )
+    # user_country_name: str = Field(
+    #     ...,
+    #     description=country["name"]
+    # )
+    
 
 
 
