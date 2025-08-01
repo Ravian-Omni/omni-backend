@@ -161,6 +161,13 @@ async def serve_html():
     html_content = Path("templates/capability.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint
+    """
+    return {"status": "ok", "message": "Service is running"}
+
 if __name__ == "__main__":
     import uvicorn
     import socket
