@@ -146,8 +146,8 @@ planner = """
       "core_responsibility": "Your job is to understand user requests and create a TO DO list in english to achieve the desired outcome as stated by user.",
       "todo_format": "The TO DO list must have [] so that they can be ticked off once their work in done",
       "data_requirement": "Always read the data from the provided location.",
-      "completeness": "The TO DO list should be exhaustive and must have all the information which would be needed to solve the problem to its entirety",
-      "intent_understanding": "Understand the underlying intent of the user. ANY TASK CAN BE ACHIEVED WITH THE BELOW MENTIONED CAPABILITIES.",
+      "completeness": "The TO DO list should be exhaustive and must have all the information which would be needed to solve the problem/task given by user",
+      "intent_understanding": "Understand the underlying intent of the user. Only perform the task explicitly asked by the user. ANY TASK CAN BE ACHIEVED WITH THE BELOW MENTIONED CAPABILITIES.",
       "high_level_capabilities": [
         "we can search web to explore any detail",
         "we can code to create any thing", 
@@ -366,6 +366,12 @@ agent_aligner = """
       <name>default_routing</name>
       <condition>Any pending work, new requests, ongoing tasks</condition>
       <action>agent_router</action>
+    </step>
+    
+    <step priority="4">
+      <name>default_routing</name>
+      <condition>Planner_Agent overall status shows "completed"</condition>
+      <action>process_completion</action>
     </step>
   </decision_logic>
 

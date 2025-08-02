@@ -291,7 +291,7 @@ class Omni:
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
+        self.llm_config_caller = LLMConfigManager.get_config("claude-sonnet-4-20250514")
         self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         # self.llm_config = LLMConfigManager.get_config("deepseek")
