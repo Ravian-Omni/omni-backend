@@ -87,6 +87,9 @@ class Status(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+class OverallStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
 
 class Task(BaseModel):
     task_id: int
@@ -94,11 +97,11 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
-    complete_response: str = Field(
-        ...,
-        description="The **full, exact** response returned by the agent that executed this task."
-        "Do NOT summarize, truncate, or paraphrase any part of the response.",
-    )   
+    # complete_response: str = Field(
+    #     ...,
+    #     description="The **full, exact** response returned by the agent that executed this task."
+    #     "Do NOT summarize, truncate, or paraphrase any part of the response.",
+    # )   
     details_of_generated_files: Optional[str] = None
     complete_location_generated_files: Optional[str] = None
 
@@ -107,6 +110,7 @@ class PlannerResponse(BaseModel):
     user_request: str
     breakdown: List[Task]
     overall_strategy: str
+    overall_status: OverallStatus
 
 
 
