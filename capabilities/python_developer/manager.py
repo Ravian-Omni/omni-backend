@@ -41,6 +41,7 @@ class PythonDeveloper:
         self.llm_planner = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_planner["response_format"] = PlannerResponseFormat
         self.llm_code_writer = LLMConfigManager.get_config("claude-sonnet-4-20250514")
+        self.llm_code_writer["max_tokens"] = 50000
         self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_config_psc["response_format"] = ProblemStatusResponse
         self.coding_language = "python"
