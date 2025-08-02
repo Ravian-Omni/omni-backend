@@ -159,7 +159,7 @@ class BrowserManager:
     async def get_search_tool(self, query: str) -> str:
         """API-based search tool using Tavily."""
         try:
-            response = await self.tavily_client.search(query, search_depth="advanced")
+            response = await self.tavily_client.search(query, search_depth="advanced", include_favicon=True)
             if response and 'results' in response:
                 result = {
                     "status": "success" if response else "failed",
