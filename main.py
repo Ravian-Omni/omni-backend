@@ -135,13 +135,10 @@ app.openapi = custom_openapi
 
 #WEBSOCKET Swagger Docs
 
+import uvicorn
 
 from fastapi.responses import HTMLResponse
 from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 @app.get("/", response_class=HTMLResponse)
 async def serve_html():
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
@@ -151,3 +148,13 @@ async def serve_html():
 async def serve_html():
     html_content = Path("templates/capability.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint
+    """
+    return {"status": "ok", "message": "Service is running"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=int(settings.PORT), reload=False)

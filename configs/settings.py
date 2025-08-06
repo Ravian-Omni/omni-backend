@@ -17,6 +17,7 @@ class Settings:
     def _load_settings(self):
         """Load settings from environment"""
         self.PROJECT_NAME = "OMNI"
+        self.PORT = os.getenv("PORT", "8000")
         self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
         self.USER_TOKEN = None
         self.ROOT_DIR = os.path.join(Path.home(),".ravian")
@@ -24,17 +25,11 @@ class Settings:
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
         self.USER_NAME = os.getenv("user_name")
+        self.AG2AI_PYTHON_PATH = os.getenv("AG2AI_PYTHON_PATH", 'python')
+        self.CHROME_EXECUTABLE_PATH= os.getenv("CHROME_EXECUTABLE_PATH","/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         
-        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-        self.AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
-        self.AZURE_OPENAI_API_KEY_O3 = os.getenv("AZURE_OPENAI_API_KEY_O3")
-        self.TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-        self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
         
         # MongoDB settings
-        self.MONGODB_URI = os.getenv("MONGODB_URI", "localhost")
-        self.DATABASE_NAME = os.getenv("DATABASE_NAME", "OMNI-DB")
         self.OMNI_COLLECTION = os.getenv("OMNI_COLLECTION", "omni")
         self.EMAIL_COLLECTION = os.getenv("EMAIL_COLLECTION", "email_manager")
         self.BROWSER_COLLECTION = os.getenv("BROWSER_COLLECTION", "browser_manager")

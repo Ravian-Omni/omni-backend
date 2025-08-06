@@ -61,7 +61,7 @@ class BrowserManager:
         self.save_results = save_results
         self.context = context
         # Setup directories
-        self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_use_data")
+        self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_data")
         
         if self.save_results:
             self.results_dir = ensure_path(os.path.join(self.context.chat_dir, "browser"))
@@ -140,6 +140,7 @@ class BrowserManager:
                 keep_alive=False,  # Don't keep alive by default
                 user_data_dir=self.browser_data_dir,
                 headless=self.headless,
+                executable_path=settings.CHROME_EXECUTABLE_PATH,
             )
             
             self.browser_session = BrowserSession(browser_profile=browser_profile)

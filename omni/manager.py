@@ -639,6 +639,14 @@ class Omni:
             self._check_cancellation()
             
             messages = groupchat.messages
+            try:
+                if last_speaker.name in ["planner_agent"]:
+                    status = json.loads(messages[-1]['content']).get("overall_status")
+                    if status == "completed":
+                        return groupchat.agent_by_name("process_completion_agent")
+            except:
+                pass
+            
             if len(messages) == 1:
             #judge a question and understand if the question is a task or  general conversation
                     return groupchat.agent_by_name("judge_question")
@@ -736,7 +744,7 @@ class Omni:
             agents=self.agents,
             messages=[],
             speaker_selection_method=self.custom_speaker_selection_func,
-            max_round=50,
+            max_round=500,
         )
         self.manager = OmniGroupChatManager(
             groupchat=self.groupchat,

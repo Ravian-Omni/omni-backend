@@ -12,6 +12,9 @@ from typing import List, Optional,Dict,Any
 from loguru import logger
 from utilities.storage import ensure_path
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
+from autogen.coding import LocalCommandLineCodeExecutor
+from configs.settings import settings
+from utilities.venv_config import AG2AIVirtualEnvContext
 
 class LoopDetector:
         def __init__(self, window_size=3):
@@ -40,6 +43,12 @@ class PythonDeveloper:
         self.coding_language = "python"
         self.results_dir = ensure_path(os.path.join(self.context.chat_dir, ".code"))
         self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
+        venv_context = AG2AIVirtualEnvContext()
+        self.executor = LocalCommandLineCodeExecutor(
+            virtual_env_context=venv_context.get_context(),
+            timeout=120,
+            work_dir=self.results_dir
+        )
         self.agents = self.get_agents()
         self.get_chat_manager()
     
@@ -72,8 +81,7 @@ class PythonDeveloper:
             name="code_executor_agent",
             human_input_mode="NEVER",
             code_execution_config={
-                "work_dir": self.results_dir,
-                "use_docker": False,
+                "executor": self.executor
             },
             llm_config=self.llm_config
         )

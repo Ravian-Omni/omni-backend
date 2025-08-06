@@ -198,3 +198,8 @@ omni_venv
 capabilities/.DS_Store
 ravian/
 test/
+
+# Build specific
+dist/
+build_resources/
+nuitka-crash-report.xml

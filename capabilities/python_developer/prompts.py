@@ -292,7 +292,6 @@ Provide brief explanation of the approach, then complete Python code:
 
 ```python
 # Complete executable Python script
-# Requirements: [list libraries]
 
 [Full implementation here]
 
