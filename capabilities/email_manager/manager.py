@@ -2,7 +2,7 @@ import os
 import autogen
 import asyncio
 import datetime
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Tuple
 from capabilities.email_manager import prompts
 from configs.llm_configs_manager import LLMConfigManager
 from configs.settings import settings
@@ -17,6 +17,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import os
+import json
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.email_manager import prompts
@@ -46,6 +47,7 @@ def validate_attachments(file_paths):
 class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.user_input_func = self.context.manager_kwargs["input_function"]
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_content_writer = LLMConfigManager.get_config("claude-sonnet-4-20250514")
         self.llm_content_writer["max_tokens"] = 50000
@@ -74,64 +76,299 @@ class EmailManager:
         if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
             raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
     
+    async def handle_email_confirmation(self, recipients: List[str], subject: str, msg_html: str, 
+                                  msg_plain: str, attachments: List[str], sender: str) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Handle user confirmation and modifications for email sending.
+        
+        Returns:
+            Tuple[bool, Dict]: (should_send, email_data_or_response)
+        """
+        
+        # Store original data for comparison
+        original_data = {
+            "recipients": recipients.copy(),
+            "subject": subject,
+            "msg_html": msg_html,
+            "msg_plain": msg_plain,
+            "attachments": attachments.copy() if attachments else [],
+            "sender": sender
+        }
+        
+        # Create confirmation request
+        confirmation_request = {
+            "action": "email_confirmation",
+            "agent": "send_email_with_attachments",
+            "email_data": {
+                "recipients": recipients,
+                "subject": subject,
+                "msg_html": msg_html,
+                "msg_plain": msg_plain,
+                "sender": sender,
+                "attachments": attachments or [],
+                "attachment_names": [os.path.basename(path) for path in (attachments or [])],
+                "recipient_count": len(recipients),
+                "has_html": bool(msg_html),
+                "has_plain": bool(msg_plain),
+                "has_attachments": bool(attachments)
+            },
+            "options": {
+                "send": "Send email as is",
+                "modify": "Modify email before sending", 
+                "cancel": "Cancel email sending"
+            },
+            "timestamp": datetime.now().isoformat(),
+            "preview": {
+                "subject_preview": subject[:50] + "..." if len(subject) > 50 else subject,
+                "content_preview": (msg_plain or msg_html or "")[:100] + "..." if len(msg_plain or msg_html or "") > 100 else (msg_plain or msg_html or "")
+            }
+        }
+        
+        # Get user response
+        user_response = await self.user_input_func(json.dumps(confirmation_request, indent=2))
+        
+        # Parse user response
+        try:
+            response_data = json.loads(user_response)
+        except json.JSONDecodeError:
+            # Handle simple string responses
+            response_data = {"action": user_response.lower().strip()}
+        
+        action = response_data.get("action", "").lower()
+        
+        # Handle cancel
+        if action == "cancel":
+            return False, {
+                "status": "cancelled",
+                "message": "Email sending cancelled by user",
+                "action_taken": "cancel",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Handle send as-is
+        if action in ["send", "yes", "y", "ok", "proceed"]:
+            return True, {
+                "recipients": recipients,
+                "subject": subject,
+                "msg_html": msg_html,
+                "msg_plain": msg_plain,
+                "attachments": attachments,
+                "sender": sender,
+                "was_modified": False,
+                "modifications": {}
+            }
+        
+        # Handle modifications
+        if action == "modify":
+            modifications = response_data.get("modifications", {})
+            changes_made = []
+            
+            # Update recipients
+            if "recipients" in modifications:
+                new_recipients = modifications["recipients"]
+                if new_recipients != recipients:
+                    added = list(set(new_recipients) - set(recipients))
+                    removed = list(set(recipients) - set(new_recipients))
+                    recipients = new_recipients
+                    
+                    if added:
+                        changes_made.append(f"Added recipients: {', '.join(added)}")
+                    if removed:
+                        changes_made.append(f"Removed recipients: {', '.join(removed)}")
+            
+            # Update subject
+            if "subject" in modifications and modifications["subject"] != subject:
+                changes_made.append(f"Subject changed from '{subject}' to '{modifications['subject']}'")
+                subject = modifications["subject"]
+            
+            # Update message content
+            if "msg_html" in modifications and modifications["msg_html"] != msg_html:
+                changes_made.append("HTML message content modified")
+                msg_html = modifications["msg_html"]
+            
+            if "msg_plain" in modifications and modifications["msg_plain"] != msg_plain:
+                changes_made.append("Plain text message content modified")
+                msg_plain = modifications["msg_plain"]
+            
+            # Update attachments
+            if "attachments" in modifications:
+                new_attachments = modifications["attachments"] or []
+                original_attachments = attachments or []
+                
+                if set(new_attachments) != set(original_attachments):
+                    added = list(set(new_attachments) - set(original_attachments))
+                    removed = list(set(original_attachments) - set(new_attachments))
+                    attachments = new_attachments
+                    
+                    if added:
+                        changes_made.append(f"Added attachments: {', '.join([os.path.basename(f) for f in added])}")
+                    if removed:
+                        changes_made.append(f"Removed attachments: {', '.join([os.path.basename(f) for f in removed])}")
+            
+            # Validate modified attachments
+            if attachments:
+                invalid_paths = validate_attachments(attachments)
+                if invalid_paths:
+                    return False, {
+                        "status": "error",
+                        "message": f"Modified attachments have invalid paths: {invalid_paths}",
+                        "error_type": "invalid_modified_attachments"
+                    }
+            
+            # Create comparison for modifications
+            modifications_summary = {}
+            current_data = {
+                "recipients": recipients,
+                "subject": subject,
+                "msg_html": msg_html,
+                "msg_plain": msg_plain,
+                "attachments": attachments or [],
+                "sender": sender
+            }
+            
+            for key in original_data:
+                if original_data[key] != current_data[key]:
+                    modifications_summary[key] = {
+                        "original": original_data[key],
+                        "current": current_data[key]
+                    }
+            
+            return True, {
+                "recipients": recipients,
+                "subject": subject,
+                "msg_html": msg_html,
+                "msg_plain": msg_plain,
+                "attachments": attachments,
+                "sender": sender,
+                "was_modified": True,
+                "changes_made": changes_made,
+                "modifications_summary": modifications_summary
+            }
+        
+        # Invalid response - treat as cancel
+        return False, {
+            "status": "cancelled",
+            "message": "Invalid response - email sending cancelled",
+            "action_taken": "cancel"
+        }
+    
     async def send_email_with_attachments(self, to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
                                     attachments: List[str] = None, sender: str = None):
-
+        """
+        Clean email sending function with separate confirmation handling.
+        """
         if sender is None:
             sender = self.username
             
+        # Validate attachments upfront
         if attachments:
             invalid_paths = validate_attachments(attachments)
             if invalid_paths:
-                return f"Error: The following attachment paths are invalid: {invalid_paths}"
+                return {
+                    "status": "error",
+                    "message": f"Invalid attachment paths: {invalid_paths}",
+                    "error_type": "invalid_attachments"
+                }
+        
+        # Handle recipients
+        recipients = to if isinstance(to, list) else [to]
         
         try:
-            # Create message
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = sender
+            # Handle user confirmation and modifications
+            should_send, confirmation_result = await self.handle_email_confirmation(
+                recipients, subject, msg_html, msg_plain, attachments or [], sender
+            )
             
-            # Handle multiple recipients
-            if isinstance(to, list):
-                msg['To'] = ", ".join(to)
-                recipients = to
-            else:
-                msg['To'] = to
-                recipients = [to]
+            # If not sending (cancelled or error), return the result
+            if not should_send:
+                return confirmation_result
+            
+            # Extract potentially modified email data
+            final_recipients = confirmation_result["recipients"]
+            final_subject = confirmation_result["subject"]
+            final_msg_html = confirmation_result["msg_html"]
+            final_msg_plain = confirmation_result["msg_plain"]
+            final_attachments = confirmation_result["attachments"]
+            final_sender = confirmation_result["sender"]
+            was_modified = confirmation_result["was_modified"]
+            
+            # Create email message
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = final_subject
+            msg['From'] = final_sender
+            msg['To'] = ", ".join(final_recipients)
             
             # Add body parts
-            if msg_plain:
-                part1 = MIMEText(msg_plain, 'plain')
+            if final_msg_plain:
+                part1 = MIMEText(final_msg_plain, 'plain')
                 msg.attach(part1)
                 
-            if msg_html:
-                part2 = MIMEText(msg_html, 'html')
+            if final_msg_html:
+                part2 = MIMEText(final_msg_html, 'html')
                 msg.attach(part2)
             
-            # Add attachments
-            if attachments:
-                for file_path in attachments:
+            # Add attachments and collect info
+            attachment_info = []
+            if final_attachments:
+                for file_path in final_attachments:
                     if os.path.exists(file_path):
-                        with open(file_path, "rb") as attachment:
+                        with open(file_path, "rb") as attachment_file:
                             part = MIMEBase('application', 'octet-stream')
-                            part.set_payload(attachment.read())
+                            part.set_payload(attachment_file.read())
                         
                         encoders.encode_base64(part)
+                        filename = os.path.basename(file_path)
                         part.add_header(
                             'Content-Disposition',
-                            f'attachment; filename= {os.path.basename(file_path)}'
+                            f'attachment; filename= {filename}'
                         )
                         msg.attach(part)
+                        attachment_info.append({
+                            "filename": filename,
+                            "path": file_path,
+                            "size": os.path.getsize(file_path)
+                        })
             
-            # Send email using SMTP
+            # Send email
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                 server.login(self.username, self.password)
-                server.send_message(msg, from_addr=self.username, to_addrs=recipients)
+                server.send_message(msg, from_addr=self.username, to_addrs=final_recipients)
             
-            return f"Email sent successfully to {msg['To']}"
+            # Create success response
+            success_response = {
+                "status": "sent",
+                "message": f"Email sent successfully to {', '.join(final_recipients)}",
+                "email_details": {
+                    "recipients": final_recipients,
+                    "subject": final_subject,
+                    "sender": final_sender,
+                    "attachments": attachment_info,
+                    "content_types": {
+                        "html": bool(final_msg_html),
+                        "plain": bool(final_msg_plain)
+                    }
+                },
+                "was_modified": was_modified,
+                "timestamp": datetime.now().isoformat(),
+                "action_taken": "send"
+            }
+            
+            # Add modification details if email was changed
+            if was_modified:
+                success_response.update({
+                    "changes_made": confirmation_result.get("changes_made", []),
+                    "modifications_summary": confirmation_result.get("modifications_summary", {})
+                })
+            
+            return success_response
             
         except Exception as e:
-            return f"Error sending email: {e}"
+            return {
+                "status": "error",
+                "message": f"Error sending email: {str(e)}",
+                "error_type": "smtp_error",
+                "timestamp": datetime.now().isoformat()
+            }
         
 
     async def read_latest_email_with_attachments(self, sender_details:str = None, attachment_dir:str = None):
