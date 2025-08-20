@@ -209,7 +209,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         # Process async operations
         # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
         async_to_sync(self._send_websocket_message(websocket_message))
-        # async_to_sync(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
+        async_to_sync(update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION))
         
     # Additional utility methods for comprehensive usage tracking
     
