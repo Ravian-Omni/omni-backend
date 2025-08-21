@@ -420,12 +420,14 @@ class Omni:
 
     async def get_python_coder(self, query: Annotated[str,"The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",],) -> Annotated[str, "The results"]:
         call_id = self.find_call_id("python_coder", query)
+        websocket_manager = await get_websocket_manager()
         self.python_coder_config = CapabilityConfig(
             name=CapabilityType.PYTHON_DEVELOPER.value,
             collection=settings.PYTHON_DEV_COLLECTION,
             manager_class=PythonDeveloper,
             completion_agent_name="process_completion_agent",
-            cancellation_token=self.cancellation_token
+            cancellation_token=self.cancellation_token,
+            manager_kwargs= {"websocket_manager": websocket_manager}
         )
         return await self.capability_manager.execute_capability(query, self.python_coder_config, call_id)
        

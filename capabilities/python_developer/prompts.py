@@ -309,6 +309,7 @@ Provide brief explanation of the approach, then complete Python code:
 - PDF: Relevant content and topic-related visual elements
 - Data validation: Always verify dataset schema before column-specific operations
 - CRITICAL: Python code provided in every response
+- CRITICAL: NEVER USE ``` INSIDE THE PYTHON CODE BLOCKS
 </quality_checklist>
 
 <filename_conventions>

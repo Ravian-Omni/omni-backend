@@ -15,7 +15,7 @@ from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from autogen.coding import LocalCommandLineCodeExecutor
 from configs.settings import settings
 from utilities.venv_config import AG2AIVirtualEnvContext
-
+from capabilities.python_developer.executor import InteractiveLocalCommandLineCodeExecutor
 class LoopDetector:
         def __init__(self, window_size=3):
             self.recent_messages = []
@@ -33,6 +33,7 @@ loop_detector = LoopDetector()
 class PythonDeveloper:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.websocket_manager = context.manager_kwargs["websocket_manager"]
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_planner = LLMConfigManager.get_config("gpt_4_1_mini")
         self.llm_planner["response_format"] = PlannerResponseFormat
@@ -44,11 +45,13 @@ class PythonDeveloper:
         self.results_dir = ensure_path(os.path.join(self.context.chat_dir, ".code"))
         self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
         venv_context = AG2AIVirtualEnvContext()
-        self.executor = LocalCommandLineCodeExecutor(
+        self.executor = InteractiveLocalCommandLineCodeExecutor(
+            session_id=self.context.chat_id,
             virtual_env_context=venv_context.get_context(),
             timeout=120,
-            work_dir=self.results_dir
+            work_dir=self.results_dir,
         )
+        self.websocket_manager.active_executor[self.context.chat_id] = self.executor
         self.agents = self.get_agents()
         self.get_chat_manager()
     

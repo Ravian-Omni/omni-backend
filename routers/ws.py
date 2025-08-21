@@ -144,6 +144,17 @@ async def run_websocket(
                     await websocket.send_json(
                         {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
                     )
+                
+                elif message.get("type") == "executor_input":
+                    logger.info(f"Received input request for executor {chat_id}")
+                    process_id = message.get("process_id")
+                    input_text = message.get("response")
+                    await ws_manager.terminal_input(session_id=chat_id, process_id=process_id, input_text=input_text)
+                    
+                elif message.get("type") == "executor_stop":
+                    logger.info(f"Received stop request for executor {chat_id}")
+                    process_id = message.get("process_id")
+                    await ws_manager.terminal_kill(session_id=chat_id, process_id=process_id)
 
                 elif message.get("type") == "input_response":
                     # Handle input response from client

@@ -28,6 +28,7 @@ class WebSocketManager:
         self._input_responses: Dict[str, asyncio.Queue[str]] = {}
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self.active_browser: Dict[str, asyncio.Task] = {}
+        self.active_executor: Dict = {}
         self._cancellation_tokens: Dict[int, CancellationToken] = {}
         self._stop_flags: Dict[str, bool] = {}
 
@@ -279,7 +280,11 @@ class WebSocketManager:
                     task = self._active_tasks[session_id]
                     if not task.done():
                         task.cancel()
-                
+                if session_id in self.active_executor:
+                    executor = self.active_executor[session_id]
+                    if hasattr(executor, 'cleanup'):
+                        await executor.cleanup()
+                    self.active_executor.pop(session_id, None)
                 if session_id in self.active_browser:
                     agent, browser = self.active_browser[session_id]
                     
@@ -358,6 +363,50 @@ class WebSocketManager:
             print(f"Error during graceful browser closure: {e}")
             return False
 
+    async def terminal_input(self, session_id: str, process_id: str, input_text: str):
+        """ Handle terminal input request
+        Args:
+            session_id: Session identifier
+            process_id: Identifier of the terminal process
+            input_text: Text input to send to the terminal
+        """
+        if session_id in self.active_executor:
+            await self.active_executor[session_id].send_input_to_process(process_id, input_text)
+        elif session_id in self._connections and session_id not in self._closed_connections:
+            await self._send_message(
+                session_id,
+                {
+                    "type": "terminal_error",
+                    "process_id": process_id,
+                    "content": f"Session {session_id} is not active for terminal input",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        else:
+            logger.warning(f"Received input response for inactive session {session_id}")
+    
+    async def terminal_kill(self, session_id: str, process_id: str):
+        """
+        Handle terminal process kill request
+        
+        Args:
+            session_id: Session identifier
+            process_id: Identifier of the process to kill
+        """
+        if session_id in self.active_executor:
+            await self.active_executor[session_id].terminate_process(process_id)
+        elif session_id in self._connections and session_id not in self._closed_connections:
+            await self._send_message(
+                session_id,
+                {
+                    "type": "terminal_error",
+                    "process_id": process_id,
+                    "content": f"Session {session_id} is not active for terminal kill",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        else:
+            logger.warning(f"Received kill request for inactive session {session_id}")
     
     async def disconnect(self, session_id: str) -> None:
         """
