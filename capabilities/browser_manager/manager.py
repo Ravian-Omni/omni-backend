@@ -36,6 +36,7 @@ from capabilities.browser_manager.function_description import (
 )
 from dependencies import get_websocket_manager
 from capabilities.browser_manager.streaming_browser import StreamingAgent
+from configs.system_ai_config import GroupchatConfigurationManager
 
 
 class BrowserManager:
@@ -60,6 +61,8 @@ class BrowserManager:
         self.window_size = window_size or {'width': 1280, 'height': 720}
         self.save_results = save_results
         self.context = context
+        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("web_browser")
         # Setup directories
         self.browser_data_dir = (ensure_path(browser_data_dir) if browser_data_dir else None) or str(Path.home() / "browser_data")
         
@@ -69,19 +72,13 @@ class BrowserManager:
             self.browser_gif = os.path.join(self.results_dir, f"{self.context.capability_id}.gif")
         
         # Initialize LLM configurations
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         tavily_llm_config = LLMConfigManager.get_config("tavily_llm_config")
         # Initialize Tavily client
         tavily_client_key = tavily_llm_config.get("config_list", [])[0].get("api_key")
         self.tavily_client = AsyncTavilyClient(tavily_client_key)
-        self.llm_config_wc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_wc["response_format"] = WebProcessCompletion
-        self.llm_planner = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
-        self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
-        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
         # Initialize vision LLM
-        browser_llm = self.llm_config.get("config_list", [])[0]
+        browser_llm = self.browser_llm_config.get("config_list", [])[0]
         if "api_type" in browser_llm.keys() and browser_llm.get("api_type") == "azure":
             self.vision_llm = AzureChatOpenAI(
                 azure_deployment=browser_llm.get("model"),
@@ -351,36 +348,57 @@ class BrowserManager:
             name="web_api_search",
             description=web_api_search
         )
-
-    def _initialize_agents(self) -> List:
-        """Initialize all agents with simplified configuration."""
-        self.planner = AssistantAgent(
+    
+    def get_browser_planner(self):
+        llm_config_name = self.groupchat_config.get_agent_config("browser_planner").llm_config or "default"
+        llm_browser_planner = LLMConfigManager.get_config(llm_config_name)
+        return AssistantAgent(
             name="browser_planner",
-            llm_config=self.llm_planner,
+            llm_config=llm_browser_planner,
             system_message=prompts.planner.format(
                 today_date=date.today().isoformat(),
                 usercountry=self.user_country
             ),
         )
-
-        self.browser_reader = AssistantAgent(
+    
+    def get_browser_reader(self):
+        llm_config_name = self.groupchat_config.get_agent_config("browser_reader").llm_config or "default"
+        llm_browser_reader = LLMConfigManager.get_config(llm_config_name)
+        llm_browser_reader['config_list'][0]["tool_choice"]={"type": "any"}
+        return AssistantAgent(
             name="browser_reader",
-            llm_config=self.llm_config_caller,
+            llm_config=llm_browser_reader,
         )
-
-        self.browser_searcher = autogen.UserProxyAgent(
+    
+    def get_browser_searcher(self):
+        # llm_config = LLMConfigManager.get_config("default")
+        return UserProxyAgent(
             name="browser_searcher",
-            llm_config=self.llm_config,
+            # llm_config=llm_config,
             code_execution_config=False,
             human_input_mode="NEVER",
         )
-
-        self.process_completion = AssistantAgent(
+    
+    def get_process_completion(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion").llm_config or "default"
+        llm_process_completion = LLMConfigManager.get_config(llm_config_name)
+        llm_process_completion["response_format"] = WebProcessCompletion
+        return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config_wc,
+            llm_config=llm_process_completion,
             description="Process completion handler.",
             system_message=prompts.process_completion,
         )
+
+    def _initialize_agents(self) -> List:
+        """Initialize all agents with simplified configuration."""
+        self.planner = self.get_browser_planner()
+
+        self.browser_reader = self.get_browser_reader()
+
+        self.browser_searcher = self.get_browser_searcher()
+
+        self.process_completion = self.get_process_completion()
 
         return [self.planner, self.browser_searcher, self.browser_reader, self.process_completion]
 
@@ -415,8 +433,8 @@ class BrowserManager:
         
         manager = CustomGroupChatManager(
             groupchat=groupchat,
-            llm_config=self.llm_config,
             chat_context=self.context,
+            llm_config=self.llm_config,
             human_input_mode="ALWAYS"
         )
 

@@ -28,8 +28,9 @@ import email
 from email.header import decode_header
 from email.message import EmailMessage
 from langchain_openai import AzureChatOpenAI
-from capabilities.email_manager.response_format import email_process_completion, intent_class
+from capabilities.email_manager.response_format import EmailProcessCompletion, IntentClassifier
 from loguru import logger
+from configs.system_ai_config import GroupchatConfigurationManager
 
 
 
@@ -47,24 +48,9 @@ def validate_attachments(file_paths):
 class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("email_sender")
         self.user_input_func = self.context.manager_kwargs["input_function"]
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_content_writer = LLMConfigManager.get_config("claude-sonnet-4-20250514")
-        self.llm_content_writer["max_tokens"] = 50000
-        # self.llm_config_caller = LLMConfigManager.get_config("claude-3-7-sonnet-20250219")
-        # self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
-        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_pc["response_format"] = email_process_completion
-        self.llm_config_ic = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_ic["response_format"] = intent_class
-        # config = LLMConfigManager.get_config("gpt4_mini")
-        # self.llm = AzureChatOpenAI(
-        #     azure_deployment=config["config_list"][0]["model"],
-        #     api_version=config["config_list"][0]["api_version"],
-        #     temperature=config["config_list"][0].get("temperature", 0.15),
-        #     azure_endpoint=config["config_list"][0]["base_url"],
-        #     api_key=config["config_list"][0]["api_key"]
-        # )
         self.username = settings.USER_EMAIL
         self.password = settings.USER_EMAIL_PASSWORD
         self.agents = self.get_agents()
@@ -644,6 +630,9 @@ class EmailManager:
         )
         
     def get_intent_classifier(self):
+        llm_config_name = self.groupchat_config.get_agent_config("intent_classifier_agent").llm_config or "default"
+        llm_intent_classifier_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_intent_classifier_agent["response_format"] = IntentClassifier
         return autogen.AssistantAgent(
             name="intent_classifier_agent",
             # llm_config=self.llm_config,
@@ -678,9 +667,12 @@ class EmailManager:
         )
 
     def get_content_writer(self):
+        llm_config_name = self.groupchat_config.get_agent_config("content_writer_agent").llm_config or "default"
+        llm_content_writer_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_content_writer_agent["max_tokens"] = 50000
         return autogen.AssistantAgent(
             name="content_writer_agent",
-            llm_config=self.llm_content_writer,
+            llm_config=llm_content_writer_agent,
             system_message=prompts.content_writer,
         )
 
@@ -707,10 +699,13 @@ class EmailManager:
         )
 
     def get_process_completion(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion_agent").llm_config or "default"
+        llm_process_completion_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_process_completion_agent["response_format"] = EmailProcessCompletion
         return autogen.AssistantAgent(
             name="process_completion_agent",
             # llm_config=self.llm_config,
-            llm_config=self.llm_config_pc,  #llm_config_pc , llm_config
+            llm_config=llm_process_completion_agent,  #llm_config_pc , llm_config
             system_message=prompts.process_completion,
         )
         

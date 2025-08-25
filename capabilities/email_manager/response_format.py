@@ -43,7 +43,7 @@ class EmailMetadata(BaseModel):
         return v
 
 
-class email_process_completion(BaseModel):
+class EmailProcessCompletion(BaseModel):
     """
     Pydantic model for structured email agent responses.
     """
@@ -143,7 +143,7 @@ class EmailIntent(str, Enum):
     SEARCH_EMAIL = "SEARCH_EMAIL"
 
 
-class intent_class(BaseModel):
+class IntentClassifier(BaseModel):
     """
     Pydantic model for Intent Classification Agent responses.
     """

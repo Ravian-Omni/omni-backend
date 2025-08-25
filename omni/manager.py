@@ -34,36 +34,15 @@ import uuid
 from omni.memory import OmniMemory
 from dependencies import get_websocket_manager
 from omni.capability_manager import CapabilityManager, CapabilityConfig
-from omni.capabilities_descriptions import capability_descriptions
+from omni.capabilities_descriptions import python_coder_description, email_manager_description, file_finder_description, web_browser_description, image_generator_description
 from utilities.async_helpers import async_to_sync
+from configs.system_ai_config import GroupchatConfigurationManager
 
-
-all_capabilities = capability_descriptions()
-
-
-def get_capability_description(capability_name: str) -> str:
-    """
-    Retrieves the description for a given capability.
-
-    Args:
-        capability_name: The name of the capability (e.g., "python_coder").
-
-    Returns:
-        The description string for the given capability, or a
-        "Capability not found" message if the name does not exist.
-    """
-    return all_capabilities.get(capability_name, "Capability not found.")
-
-email_description = get_capability_description("email_manager")
-python_description = get_capability_description("python_coder")
-file_finder_description = get_capability_description("file_finder")
-web_browser_description = get_capability_description("web_browser")
-image_generator_description = get_capability_description("image_generator")
 
 class OmniGroupChatManager(autogen.GroupChatManager):
     """Enhanced GroupChatManager with memory, WebSocket, and voice capabilities."""
     
-    def __init__(self, groupchat, llm_config, memory, chat_id: str, human_input_mode: str = "NEVER"):
+    def __init__(self, groupchat, memory, chat_id: str, llm_config=None, human_input_mode: str = "NEVER"):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.chat_id = chat_id
         self.memory = memory
@@ -290,19 +269,8 @@ class Omni:
         self.chat_id=chat_id
         self.chat_dir = chat_dir
         self.cancellation_token = None
-        self.llm_config_mini = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_caller = LLMConfigManager.get_config("claude-sonnet-4-20250514")
-        self.llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        # self.llm_config = LLMConfigManager.get_config("deepseek")
-        self.llm_config_mini_planner = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_mini_planner["response_format"] = PlannerResponse
-        self.llm_config_mini_aligner = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_mini_aligner["response_format"] = AgentSelectionResponse
-        self.llm_config_mini_router = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_mini_router["response_format"] = CapabilityRoutingResponse
-        self.llm_config_question_class = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_question_class["response_format"] = QuestionClassification
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("omni")
         
         #Memory Configuration
         self.memory = OmniMemory()
@@ -484,7 +452,7 @@ class Omni:
             executor=self.agent_executor,
             name="python_coder",
             # description="This tool will be used to write any sort of python code.",
-            description=python_description,
+            description=python_coder_description,
         )
 
         autogen.agentchat.register_function(
@@ -493,7 +461,7 @@ class Omni:
             executor=self.agent_executor,
             name="email_sender",
             # description="This tool will be used to send emails as per the user's request.",
-            description=email_description,
+            description=email_manager_description,
         )
 
         autogen.agentchat.register_function(
@@ -524,40 +492,38 @@ class Omni:
             description=image_generator_description,
         )
     def get_judge_question(self):
+        llm_config_name = self.groupchat_config.get_agent_config("judge_question").llm_config or "default"
+        llm_config_judge_question = LLMConfigManager.get_config(llm_config_name)
+        llm_config_judge_question["response_format"] = QuestionClassification
         return autogen.AssistantAgent(
             name="judge_question",
-            llm_config=self.llm_config_question_class,
+            llm_config=llm_config_judge_question,
             system_message=prompts.judge_question #update the prompt and json output format to judge question and add to speaker selection and all the agents list
         )
 
     def get_conversation_agent(self):
+        llm_config_name = self.groupchat_config.get_agent_config("conversation_agent").llm_config or "default"
+        llm_conversation_agent = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="conversation_agent",
-            llm_config=self.llm_config,
+            llm_config=llm_conversation_agent,
             system_message=prompts.conversation #update the prompt and json output format to judge question
         )
   
 
     def get_planner(self):
+        llm_config_name = self.groupchat_config.get_agent_config("conversation_agent").llm_config or "default"
+        llm_planner_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_planner_agent["response_format"] = PlannerResponse
         return autogen.AssistantAgent(
             name="planner_agent",
-            llm_config=self.llm_config_mini_planner,
+            llm_config=llm_planner_agent,
             system_message=Template(prompts.planner).substitute(today_date=today_date)
-        )
-
-    def get_get_request(self):
-        return autogen.AssistantAgent(
-            name="get_request",
-            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-            llm_config=self.llm_config,
-            description="""This agent will get the initial request from the user""",
-            system_message=prompts.get_request.format(today_date=today_date),
         )
     
     def get_user_acceptance(self):
         return CustomUserProxyAgent(
             name="get_user_acceptance",
-            llm_config=self.llm_config,
             # default_auto_reply="Awaiting for manual verification",
             human_input_mode="ALWAYS",
             code_execution_config=False,
@@ -565,25 +531,34 @@ class Omni:
         )
 
     def get_agent_aligner(self):
+        llm_config_name = self.groupchat_config.get_agent_config("agent_aligner").llm_config or "default"
+        llm_agent_aligner = LLMConfigManager.get_config(llm_config_name)
+        llm_agent_aligner["response_format"] = AgentSelectionResponse
         return autogen.AssistantAgent(
             name="agent_aligner",
-            llm_config=self.llm_config_mini_aligner,
+            llm_config=llm_agent_aligner,
             description="This agent will align the whole process and will share which agent will work next. ",
             system_message=prompts.agent_aligner,
         )
 
     def get_agent_router(self):
+        llm_config_name = self.groupchat_config.get_agent_config("agent_router").llm_config or "default"
+        llm_agent_router = LLMConfigManager.get_config(llm_config_name)
+        llm_agent_router["response_format"] = CapabilityRoutingResponse
         return autogen.AssistantAgent(
             name="agent_router",
-            llm_config=self.llm_config_mini_router,
+            llm_config=llm_agent_router,
             description="""From the initial information route to the capability which will solve the user's question.""",
             system_message=prompts.agent_router,
         )
 
     def get_agent_caller(self):
+        llm_config_name = self.groupchat_config.get_agent_config("agent_caller").llm_config or "default"
+        llm_config_caller = LLMConfigManager.get_config(llm_config_name)
+        llm_config_caller['config_list'][0]["tool_choice"]={"type": "any"}
         return autogen.AssistantAgent(
             name="agent_caller",
-            llm_config=self.llm_config_caller,
+            llm_config=llm_config_caller,
             #system_message=prompts.agent_caller,
         )
 
@@ -598,24 +573,27 @@ class Omni:
         )
 
     def get_problem_status_checker(self):
+        llm_config_name = self.groupchat_config.get_agent_config("problem_status_checker").llm_config or "default"
+        llm_problem_status_checker = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="problem_status_checker",
-            llm_config=self.llm_config,
+            llm_config=llm_problem_status_checker,
             description="""call this agent to check if the Task specified by the user has been completed""",
             system_message=prompts.prob_status_checker,
         )
     
     def get_manual_verification(self):
+        llm_config_name = self.groupchat_config.get_agent_config("manual_verification").llm_config or "default"
+        llm_config_mini = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="manual_verification",
-            llm_config=self.llm_config_mini,
+            llm_config=llm_config_mini,
             system_message="Ask the question to the user and wait for the response. " 
         )
 
     def get_user_input(self):
         return CustomUserProxyAgent(
             name="user_input",
-            llm_config=self.llm_config,
             default_auto_reply="Awaiting for manual verification",
             human_input_mode="ALWAYS",
             code_execution_config=False,
@@ -623,19 +601,14 @@ class Omni:
         )
 
     def get_process_completion(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion_agent").llm_config or "default"
+        llm_process_completion_agent = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="process_completion_agent",
-            llm_config=self.llm_config,
+            llm_config=llm_process_completion_agent,
             system_message=prompts.process_completion,
         )
 
-    def get_questions_generator(self):
-        return autogen.AssistantAgent(
-            "questions_generator",
-            is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
-            llm_config=self.llm_config,
-            system_message=prompts.questions_generator.format(today_date=today_date),
-        )
         
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
@@ -717,32 +690,26 @@ class Omni:
         self.judge_question = self.get_judge_question()
         self.conversation_agent = self.get_conversation_agent()
         self.planner = self.get_planner()
-        self.get_request = self.get_get_request()
         self.agent_aligner = self.get_agent_aligner()
         self.agent_router = self.get_agent_router()
         self.agent_caller = self.get_agent_caller()
         self.agent_executor = self.get_agent_executor()
-        self.problem_status_checker = self.get_problem_status_checker()
         self.manual_verification = self.get_manual_verification()
         self.get_user_acceptance = self.get_user_acceptance()
         self.user_input = self.get_user_input()
         self.process_completion = self.get_process_completion()
-        self.questions_generator = self.get_questions_generator()
         return [
             self.judge_question,
             self.conversation_agent,
             self.planner,
-            self.get_request,
             self.agent_aligner,
             self.agent_router,
             self.agent_caller,
             self.agent_executor,
-            self.problem_status_checker,
             self.get_user_acceptance,
             self.manual_verification,
             self.user_input,
-            self.process_completion,
-            self.questions_generator
+            self.process_completion
         ]
 
     def get_chat_manager(self):
@@ -754,8 +721,8 @@ class Omni:
         )
         self.manager = OmniGroupChatManager(
             groupchat=self.groupchat,
-            llm_config=self.llm_config,
             memory=self.memory,
+            llm_config=self.llm_config,
             human_input_mode="ALWAYS",
             chat_id=self.chat_id
         )

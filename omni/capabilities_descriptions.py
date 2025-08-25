@@ -182,7 +182,7 @@ Advanced web browsing and automation system with dual capabilities: API-based in
 - Secure credential handling and privacy protection
  """
 
-Image_generator_description = """
+image_generator_description = """
 Advanced AI image generation system that creates high-quality images through a multi-agent approach. Uses intent classification to understand user requirements, generates optimized prompts for image creation, and provides completion status with file locations. Supports photorealistic images, artistic illustrations, logos, presentations, and creative content with professional quality output.
 
 **Parameters:**
@@ -223,22 +223,3 @@ Advanced AI image generation system that creates high-quality images through a m
 - Self-contained image files ready for immediate use
 - Generic naming convention for easy file management
 """
-
-
-def capability_descriptions():
-
-    return {
-        "python_coder": python_coder_description,
-        "email_manager": email_manager_description,
-        "file_finder": file_finder_description,
-        "web_browser": web_browser_description,
-        "image_generator": Image_generator_description
-    }
-
-if __name__ == "__main__":
-    # Retrieve all capabilities and their descriptions
-    all_caps = capability_descriptions()
-
-    # Print all capabilities and their descriptions
-    for capability, description in all_caps.items():
-        print(f"Capability: {capability}\nDescription: {description}\n")  

@@ -22,6 +22,7 @@ from configs.llm_configs_manager import LLMConfigManager
 from utilities.custom_manager import CustomGroupChatManager, ChatContext
 from configs.settings import settings
 from capabilities.file_finder.response_format import ProblemStatusResponse, FileFinderResponse
+from configs.system_ai_config import GroupchatConfigurationManager
 from loguru import logger
 class FileSearchAgent:
     def __init__(self, root_dir: str = str(Path.home())):
@@ -180,11 +181,8 @@ def search_files_with_agent(search_term: str, file_type: Optional[str] = None) -
 class FileFinder:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("file_finder")
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_psc["response_format"] = ProblemStatusResponse
-        self.llm_config_process_comp = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_process_comp["response_format"] = FileFinderResponse
         self.agents = self.get_agents()
         autogen.register_function(search_files_with_agent,
                                   caller=self.file_finder,
@@ -203,15 +201,19 @@ class FileFinder:
 
 
     def file_finder_planner(self):
+        llm_config_name = self.groupchat_config.get_agent_config("file_finder_planner").llm_config or "default"
+        llm_file_finder_planner = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="file_finder_planner",
-            llm_config=self.llm_config,
+            llm_config=llm_file_finder_planner,
             system_message=prompts.planner
         )
     def file_finder(self):
+        llm_config_name = self.groupchat_config.get_agent_config("file_finder").llm_config or "default"
+        llm_file_finder = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="file_finder",
-            llm_config=self.llm_config,
+            llm_config=llm_file_finder,
             system_message=prompts.file_finder
         )
     def user_proxy(self):
@@ -226,16 +228,22 @@ class FileFinder:
                 }
             )
     def prob_status_checker(self):
+        llm_config_name = self.groupchat_config.get_agent_config("prob_status_checker").llm_config or "default"
+        llm_prob_status_checker = LLMConfigManager.get_config(llm_config_name)
+        llm_prob_status_checker["response_format"] = ProblemStatusResponse
         return AssistantAgent(
             name="prob_status_checker",
             description="""call this agent to check if the Task specified by the user has been completed""",
             system_message=prompts.prob_status_checker,
-            llm_config=self.llm_config_psc
+            llm_config=llm_prob_status_checker
             )
     def process_completion(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion").llm_config or "default"
+        llm_process_completion = LLMConfigManager.get_config(llm_config_name)
+        llm_process_completion["response_format"] = FileFinderResponse
         return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config_process_comp,
+            llm_config=llm_process_completion,
             description="Let group manager know that the process is completed. ",
             system_message=prompts.process_completion)
     

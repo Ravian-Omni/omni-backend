@@ -22,15 +22,15 @@ from utilities.storage import ensure_path
 import requests
 from together import Together
 from capabilities.image_generator.response_format import ProcessCompletionResponse
+from configs.system_ai_config import GroupchatConfigurationManager
 from loguru import logger
 
 class ImageGenerator:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("image_generator")
         self.image_dir = ensure_path(os.path.join(self.context.chat_dir, "images"))
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_pc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_pc["response_format"] = ProcessCompletionResponse
         image_llm_config = LLMConfigManager.get_config("image_together_llm")
         self.image_llm_config = image_llm_config.get("config_list", [])[0]
         self.agents = self.get_agents()
@@ -92,23 +92,29 @@ class ImageGenerator:
         )
 
     def get_user_intent_agent(self):
+        llm_config_name = self.groupchat_config.get_agent_config("user_intent").llm_config or "default"
+        llm_user_intent = LLMConfigManager.get_config(llm_config_name)
         return AssistantAgent(
             name="user_intent",
             system_message=prompts.user_intent,
-            llm_config=self.llm_config
+            llm_config=llm_user_intent
         )
     
     def get_image_prompt_generator_agent(self):
+        llm_config_name = self.groupchat_config.get_agent_config("image_prompt_generator").llm_config or "default"
+        llm_image_prompt_generator = LLMConfigManager.get_config(llm_config_name)
         return AssistantAgent(
             name="image_prompt_generator",
             system_message=prompts.image_prompt_generator,
-            llm_config=self.llm_config
+            llm_config=llm_image_prompt_generator
         )
     def get_image_generator_caller_agent(self):
+        llm_config_name = self.groupchat_config.get_agent_config("image_generator_caller").llm_config or "default"
+        llm_image_generator_caller = LLMConfigManager.get_config(llm_config_name)
         return AssistantAgent(
             name="image_generator_caller",
             #system_message=prompts.image_generator_caller,
-            llm_config=self.llm_config
+            llm_config=llm_image_generator_caller
         )
     def get_image_generator_agent(self):
         return UserProxyAgent(
@@ -119,9 +125,12 @@ class ImageGenerator:
         )
     
     def get_process_completion_agent(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion").llm_config or "default"
+        llm_process_completion = LLMConfigManager.get_config(llm_config_name)
+        llm_process_completion["response_format"] = ProcessCompletionResponse
         return AssistantAgent(
             name="process_completion",
-            llm_config=self.llm_config_pc,
+            llm_config=llm_process_completion,
             description="Let group manager know that the process is completed. ",
             system_message=prompts.process_completion
         )

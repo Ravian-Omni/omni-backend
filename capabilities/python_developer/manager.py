@@ -16,6 +16,8 @@ from autogen.coding import LocalCommandLineCodeExecutor
 from configs.settings import settings
 from utilities.venv_config import AG2AIVirtualEnvContext
 from capabilities.python_developer.executor import InteractiveLocalCommandLineCodeExecutor
+from configs.system_ai_config import GroupchatConfigurationManager
+
 class LoopDetector:
         def __init__(self, window_size=3):
             self.recent_messages = []
@@ -33,14 +35,9 @@ loop_detector = LoopDetector()
 class PythonDeveloper:
     def __init__(self, context: ChatContext):
         self.context = context
+        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("python_coder")
         self.websocket_manager = context.manager_kwargs["websocket_manager"]
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_planner = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_planner["response_format"] = PlannerResponseFormat
-        self.llm_code_writer = LLMConfigManager.get_config("claude-sonnet-4-20250514")
-        self.llm_code_writer["max_tokens"] = 50000
-        self.llm_config_psc = LLMConfigManager.get_config("gpt_4_1_mini")
-        self.llm_config_psc["response_format"] = ProblemStatusResponse
         self.coding_language = "python"
         self.results_dir = ensure_path(os.path.join(self.context.chat_dir, ".code"))
         self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
@@ -61,9 +58,12 @@ class PythonDeveloper:
             raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
         
     def get_planner(self):
+        llm_config_name = self.groupchat_config.get_agent_config("planner_agent").llm_config or "default"
+        llm_planner_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_planner_agent["response_format"] = PlannerResponseFormat
         return autogen.AssistantAgent(
             name="planner_agent",
-            llm_config=self.llm_planner,
+            llm_config=llm_planner_agent,
             system_message=prompts.planner.format(file_location=self.file_location,coding_language=self.coding_language)
         )
     
@@ -74,9 +74,12 @@ class PythonDeveloper:
         )
     
     def get_code_writer(self):
+        llm_config_name = self.groupchat_config.get_agent_config("code_writer_agent").llm_config or "default"
+        llm_code_writer_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_code_writer_agent["max_tokens"] = 50000
         return autogen.AssistantAgent(
             name="code_writer_agent",
-            llm_config=self.llm_code_writer,
+            llm_config=llm_code_writer_agent,
             system_message=prompts.code_writer.format(file_location=self.file_location)
         )
     def get_code_executor(self):
@@ -89,22 +92,29 @@ class PythonDeveloper:
             llm_config=self.llm_config
         )
     def get_code_debugger(self):
+        llm_config_name = self.groupchat_config.get_agent_config("code_debugger_agent").llm_config or "default"
+        llm_code_debugger_agent = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="code_debugger_agent",
-            llm_config=self.llm_config,
+            llm_config=llm_code_debugger_agent,
             max_consecutive_auto_reply=5,
             system_message=prompts.debugger.format(file_location=self.file_location,coding_language=self.coding_language)
         )
     def problem_status_checker(self):
+        llm_config_name = self.groupchat_config.get_agent_config("problem_status_checker_agent").llm_config or "default"
+        llm_problem_status_checker_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_problem_status_checker_agent["response_format"] = ProblemStatusResponse
         return autogen.AssistantAgent(
             name="problem_status_checker_agent",
             system_message=prompts.prob_status_checker,
-            llm_config=self.llm_config_psc
+            llm_config=llm_problem_status_checker_agent
         )
     def get_process_completion(self):
+        llm_config_name = self.groupchat_config.get_agent_config("process_completion_agent").llm_config or "default"
+        llm_process_completion_agent = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="process_completion_agent",
-            llm_config=self.llm_config,
+            llm_config=llm_process_completion_agent,
             system_message=prompts.process_completion
         )
     

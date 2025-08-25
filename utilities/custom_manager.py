@@ -120,7 +120,7 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
 class CustomGroupChatManager(autogen.GroupChatManager):
     """Enhanced GroupChatManager with chat context and background processing"""
     
-    def __init__(self, groupchat, llm_config, chat_context: ChatContext, 
+    def __init__(self, groupchat, chat_context: ChatContext, llm_config=None,
                  human_input_mode: str = "NEVER"):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.context = chat_context
