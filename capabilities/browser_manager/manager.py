@@ -37,8 +37,92 @@ from capabilities.browser_manager.function_description import (
 from dependencies import get_websocket_manager
 from capabilities.browser_manager.streaming_browser import StreamingAgent
 from configs.system_ai_config import GroupchatConfigurationManager
+import aiohttp
 
-
+class BraveSearchClient:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.search.brave.com/res/v1"
+        self.headers = {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": api_key
+        }
+    
+    async def search(
+        self,
+        query: str,
+        country: str = "US",
+        search_lang: str = "en",
+        ui_lang: str = "en-US",
+        count: int = 2,
+        offset: int = 0,
+        safesearch: str = "moderate",
+        freshness: Optional[str] = None,
+        text_decorations: bool = False,
+        spellcheck: bool = True,
+        result_filter: Optional[str] = None,
+        goggles_id: Optional[str] = None,
+        units: str = "metric",
+        extra_snippets: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Perform a web search using Brave Search API
+        
+        Args:
+            query: Search query string
+            country: Country code for search results (default: "US")
+            search_lang: Language for search (default: "en") 
+            ui_lang: UI language (default: "en-US")
+            count: Number of results (1-20, default: 20)
+            offset: Offset for pagination (default: 0)
+            safesearch: Safe search level - "strict", "moderate", "off" (default: "moderate")
+            freshness: Time filter - "pd" (past day), "pw" (past week), "pm" (past month), "py" (past year)
+            text_decorations: Include text decorations in results
+            spellcheck: Enable spell checking
+            result_filter: Filter results - "discussions", "videos", "news", "infobox"
+            goggles_id: Goggles ID for custom ranking
+            units: Unit system - "metric" or "imperial"
+            extra_snippets: Include extra snippets in results
+        """
+        
+        params = {
+            "q": query,
+            # "country": country,
+            "search_lang": search_lang,
+            "ui_lang": ui_lang,
+            "count": min(max(count, 1), 20),
+            "offset": offset,
+            "safesearch": safesearch,
+            "text_decorations": "true" if text_decorations else "false",  # Convert bool to string
+            "spellcheck": "true" if spellcheck else "false",  # Convert bool to string
+            "units": units,
+            "extra_snippets": "true" if extra_snippets else "false"  # Convert bool to string
+        }
+        
+        # Add optional parameters if provided
+        if freshness:
+            params["freshness"] = freshness
+        if result_filter:
+            params["result_filter"] = result_filter
+        if goggles_id:
+            params["goggles_id"] = goggles_id
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"{self.base_url}/web/search",
+                    headers=self.headers,
+                    params=params
+                ) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"Brave API error {response.status}: {error_text}")
+            except Exception as e:
+                raise Exception(f"Request failed: {str(e)}")
+            
 class BrowserManager:
     def __init__(
         self, 
@@ -73,9 +157,12 @@ class BrowserManager:
         
         # Initialize LLM configurations
         tavily_llm_config = LLMConfigManager.get_config("tavily_llm_config")
+        brave_llm_config = LLMConfigManager.get_config("brave_llm_config")
         # Initialize Tavily client
         tavily_client_key = tavily_llm_config.get("config_list", [])[0].get("api_key")
+        brave_client_key = brave_llm_config.get("config_list", [])[0].get("api_key")
         self.tavily_client = AsyncTavilyClient(tavily_client_key)
+        self.brave_client = BraveSearchClient(brave_client_key)
         self.browser_llm_config = LLMConfigManager.get_config("browser_llm_config")
         # Initialize vision LLM
         browser_llm = self.browser_llm_config.get("config_list", [])[0]
@@ -228,6 +315,329 @@ class BrowserManager:
                     
         except Exception as e:
             print(f"Warning: Could not clear module registries: {e}")
+            
+    async def get_brave_search_tool(
+        self, 
+        query: str,
+        search_type: str = "comprehensive",
+        count: int = 5,
+        freshness: Optional[str] = None,
+        country: str = "US",
+        safesearch: str = "moderate"
+    ) -> Dict[str, Any]:
+        """
+        Brave Search API tool with comprehensive result formatting
+        
+        Args:
+            query: Search query
+            search_type: "quick" (basic), "comprehensive" (detailed), "recent" (with freshness filter)
+            count: Number of results (1-20)
+            freshness: Time filter - "pd", "pw", "pm", "py" 
+            country: Country code
+            safesearch: Safe search level
+        """
+        try:
+            # Adjust parameters based on search type
+            if search_type == "recent":
+                freshness = freshness or "pw"  # Default to past week for recent searches
+            elif search_type == "comprehensive":
+                count = min(count, 20)  # Max results for comprehensive
+            
+            response = await self.brave_client.search(
+                query=query,
+                count=count,
+                freshness=freshness,
+                country=country,
+                safesearch=safesearch,
+                extra_snippets=True,  # Get more detailed snippets
+                text_decorations=False  # Clean text
+            )
+            
+            if response and 'web' in response:
+                web_results = response['web']['results']
+                
+                # Format results similar to Tavily structure
+                formatted_result = {
+                    "status": "success",
+                    "query": {
+                        "original": response.get('query', {}).get('original', query),
+                        "altered": response.get('query', {}).get('altered'),
+                        "show_strict_warning": response.get('query', {}).get('show_strict_warning', False),
+                        "is_navigational": response.get('query', {}).get('is_navigational', False),
+                        "is_news_breaking": response.get('query', {}).get('is_news_breaking', False),
+                        "spellcheck_off": response.get('query', {}).get('spellcheck_off', False),
+                        "country": response.get('query', {}).get('country', country),
+                        "bad_results": response.get('query', {}).get('bad_results', False),
+                        "should_fallback": response.get('query', {}).get('should_fallback', False),
+                        "more_results_available": response.get('query', {}).get('more_results_available', False),
+                        "postal_code": response.get('query', {}).get('postal_code', ''),
+                        "city": response.get('query', {}).get('city', ''),
+                        "state": response.get('query', {}).get('state', '')
+                    },
+                    "results_count": len(web_results),
+                    "answer": self._generate_answer_summary(web_results),
+                    "urls": [result['url'] for result in web_results],
+                    
+                    # WEB RESULTS with full metadata
+                    "web": {
+                        "type": response.get('web', {}).get('type', 'search'),
+                        "results": [
+                            {
+                                "title": result.get('title', ''),
+                                "url": result.get('url', ''),
+                                "description": result.get('description', ''),
+                                "is_source_local": result.get('is_source_local', False),
+                                "is_source_both": result.get('is_source_both', False),
+                                "language": result.get('language', 'en'),
+                                "family_friendly": result.get('family_friendly', True),
+                                "type": result.get('type', 'search_result'),
+                                "subtype": result.get('subtype', 'generic'),
+                                "is_live": result.get('is_live', False),
+                                "age": result.get('age', ''),
+                                "page_age": result.get('page_age', ''),
+                                "page_fetched": result.get('page_fetched', ''),
+                                "page_ranking": result.get('page_ranking', 0),
+                                "profile": {
+                                    "name": result.get('profile', {}).get('name', ''),
+                                    "url": result.get('profile', {}).get('url', ''),
+                                    "long_name": result.get('profile', {}).get('long_name', ''),
+                                    "img": result.get('profile', {}).get('img', '')
+                                },
+                                "meta_url": {
+                                    "scheme": result.get('meta_url', {}).get('scheme', ''),
+                                    "netloc": result.get('meta_url', {}).get('netloc', ''),
+                                    "hostname": result.get('meta_url', {}).get('hostname', ''),
+                                    "favicon": result.get('meta_url', {}).get('favicon', ''),
+                                    "path": result.get('meta_url', {}).get('path', '')
+                                },
+                                "thumbnail": {
+                                    "src": result.get('thumbnail', {}).get('src', ''),
+                                    "original": result.get('thumbnail', {}).get('original', ''),
+                                    "logo": result.get('thumbnail', {}).get('logo', False)
+                                } if result.get('thumbnail') else None,
+                                "clustered_results": result.get('clustered_results', []),
+                                "extra_snippets": result.get('extra_snippets', [])
+                            }
+                            for result in web_results
+                        ],
+                        "family_friendly": response.get('web', {}).get('family_friendly', True)
+                    },
+                    
+                    # VIDEOS with thumbnails and metadata
+                    "videos": {
+                        "type": response.get('videos', {}).get('type', ''),
+                        "results": [
+                            {
+                                "title": video.get('title', ''),
+                                "url": video.get('url', ''),
+                                "description": video.get('description', ''),
+                                "duration": video.get('duration', ''),
+                                "views": video.get('views', ''),
+                                "age": video.get('age', ''),
+                                "thumbnail": {
+                                    "src": video.get('thumbnail', {}).get('src', ''),
+                                    "original": video.get('thumbnail', {}).get('original', ''),
+                                    "logo": video.get('thumbnail', {}).get('logo', False)
+                                } if video.get('thumbnail') else None,
+                                "profile": {
+                                    "name": video.get('profile', {}).get('name', ''),
+                                    "url": video.get('profile', {}).get('url', ''),
+                                    "long_name": video.get('profile', {}).get('long_name', ''),
+                                    "img": video.get('profile', {}).get('img', '')
+                                },
+                                "meta_url": video.get('meta_url', {}),
+                                "language": video.get('language', 'en'),
+                                "family_friendly": video.get('family_friendly', True)
+                            }
+                            for video in response.get('videos', {}).get('results', [])
+                        ],
+                        "mutated_by_goggles": response.get('videos', {}).get('mutated_by_goggles', False)
+                    } if response.get('videos') else None,
+                    
+                    # IMAGES with full metadata
+                    "images": {
+                        "type": response.get('images', {}).get('type', ''),
+                        "results": [
+                            {
+                                "title": img.get('title', ''),
+                                "url": img.get('url', ''),
+                                "thumbnail": {
+                                    "src": img.get('thumbnail', {}).get('src', ''),
+                                    "original": img.get('thumbnail', {}).get('original', ''),
+                                    "logo": img.get('thumbnail', {}).get('logo', False)
+                                } if img.get('thumbnail') else None,
+                                "properties": {
+                                    "url": img.get('properties', {}).get('url', ''),
+                                    "width": img.get('properties', {}).get('width', 0),
+                                    "height": img.get('properties', {}).get('height', 0),
+                                    "format": img.get('properties', {}).get('format', ''),
+                                    "size": img.get('properties', {}).get('size', 0)
+                                } if img.get('properties') else None,
+                                "profile": {
+                                    "name": img.get('profile', {}).get('name', ''),
+                                    "url": img.get('profile', {}).get('url', ''),
+                                    "long_name": img.get('profile', {}).get('long_name', ''),
+                                    "img": img.get('profile', {}).get('img', '')
+                                },
+                                "meta_url": img.get('meta_url', {}),
+                                "age": img.get('age', ''),
+                                "language": img.get('language', 'en'),
+                                "family_friendly": img.get('family_friendly', True)
+                            }
+                            for img in response.get('images', {}).get('results', [])
+                        ],
+                        "mutated_by_goggles": response.get('images', {}).get('mutated_by_goggles', False)
+                    } if response.get('images') else None,
+                    
+                    # NEWS with thumbnails
+                    "news": {
+                        "type": response.get('news', {}).get('type', ''),
+                        "results": [
+                            {
+                                "title": news.get('title', ''),
+                                "url": news.get('url', ''),
+                                "description": news.get('description', ''),
+                                "age": news.get('age', ''),
+                                "breaking": news.get('breaking', False),
+                                "thumbnail": {
+                                    "src": news.get('thumbnail', {}).get('src', ''),
+                                    "original": news.get('thumbnail', {}).get('original', ''),
+                                    "logo": news.get('thumbnail', {}).get('logo', False)
+                                } if news.get('thumbnail') else None,
+                                "profile": {
+                                    "name": news.get('profile', {}).get('name', ''),
+                                    "url": news.get('profile', {}).get('url', ''),
+                                    "long_name": news.get('profile', {}).get('long_name', ''),
+                                    "img": news.get('profile', {}).get('img', '')
+                                },
+                                "meta_url": news.get('meta_url', {}),
+                                "language": news.get('language', 'en'),
+                                "family_friendly": news.get('family_friendly', True)
+                            }
+                            for news in response.get('news', {}).get('results', [])
+                        ],
+                        "mutated_by_goggles": response.get('news', {}).get('mutated_by_goggles', False)
+                    } if response.get('news') else None,
+                    
+                    # DISCUSSIONS (forums, reddit, etc.)
+                    "discussions": {
+                        "type": response.get('discussions', {}).get('type', ''),
+                        "results": [
+                            {
+                                "title": disc.get('title', ''),
+                                "url": disc.get('url', ''),
+                                "description": disc.get('description', ''),
+                                "age": disc.get('age', ''),
+                                "number_of_answers": disc.get('number_of_answers', 0),
+                                "forum": disc.get('forum', ''),
+                                "profile": disc.get('profile', {}),
+                                "meta_url": disc.get('meta_url', {}),
+                                "language": disc.get('language', 'en'),
+                                "family_friendly": disc.get('family_friendly', True)
+                            }
+                            for disc in response.get('discussions', {}).get('results', [])
+                        ],
+                        "mutated_by_goggles": response.get('discussions', {}).get('mutated_by_goggles', False)
+                    } if response.get('discussions') else None,
+                    
+                    # LOCATIONS (maps, local business)
+                    "locations": {
+                        "type": response.get('locations', {}).get('type', ''),
+                        "results": [
+                            {
+                                "title": loc.get('title', ''),
+                                "url": loc.get('url', ''),
+                                "description": loc.get('description', ''),
+                                "coordinates": loc.get('coordinates', []),
+                                "postal_address": loc.get('postal_address', {}),
+                                "contact": loc.get('contact', {}),
+                                "rating": loc.get('rating', 0),
+                                "reviews": loc.get('reviews', 0),
+                                "price_range": loc.get('price_range', ''),
+                                "thumbnail": loc.get('thumbnail', {}),
+                                "profile": loc.get('profile', {}),
+                                "meta_url": loc.get('meta_url', {})
+                            }
+                            for loc in response.get('locations', {}).get('results', [])
+                        ]
+                    } if response.get('locations') else None,
+                    
+                    # FAQ
+                    "faq": {
+                        "type": response.get('faq', {}).get('type', ''),
+                        "results": [
+                            {
+                                "question": faq.get('question', ''),
+                                "answer": faq.get('answer', ''),
+                                "title": faq.get('title', ''),
+                                "url": faq.get('url', ''),
+                                "meta_url": faq.get('meta_url', {})
+                            }
+                            for faq in response.get('faq', {}).get('results', [])
+                        ]
+                    } if response.get('faq') else None,
+                    
+                    # INFOBOX with thumbnails
+                    "infobox": {
+                        "type": response.get('infobox', {}).get('type', ''),
+                        "title": response.get('infobox', {}).get('title', ''),
+                        "description": response.get('infobox', {}).get('description', ''),
+                        "long_desc": response.get('infobox', {}).get('long_desc', []),
+                        "url": response.get('infobox', {}).get('url', ''),
+                        "thumbnail": {
+                            "src": response.get('infobox', {}).get('thumbnail', {}).get('src', ''),
+                            "original": response.get('infobox', {}).get('thumbnail', {}).get('original', ''),
+                            "logo": response.get('infobox', {}).get('thumbnail', {}).get('logo', False)
+                        } if response.get('infobox', {}).get('thumbnail') else None,
+                        "provider": {
+                            "name": response.get('infobox', {}).get('provider', {}).get('name', ''),
+                            "url": response.get('infobox', {}).get('provider', {}).get('url', ''),
+                            "long_name": response.get('infobox', {}).get('provider', {}).get('long_name', ''),
+                            "img": response.get('infobox', {}).get('provider', {}).get('img', '')
+                        },
+                        "meta_url": response.get('infobox', {}).get('meta_url', {}),
+                        "attributes": response.get('infobox', {}).get('attributes', [])
+                    } if response.get('infobox') else None,
+                    
+                    # MIXED LAYOUT
+                    "mixed": {
+                        "type": response.get('mixed', {}).get('type', 'mixed'),
+                        "main": response.get('mixed', {}).get('main', []),
+                        "top": response.get('mixed', {}).get('top', []),
+                        "side": response.get('mixed', {}).get('side', [])
+                    }
+                }
+                return formatted_result
+                
+            else:
+                return {
+                    "status": "failed",
+                    "query": query,
+                    "results_count": 0,
+                    "error": "No web results found in response"
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "query": query,
+                "results_count": 0,
+                "error": str(e)
+            }
+    
+    def _generate_answer_summary(self, results: List[Dict]) -> str:
+        """Generate a brief answer summary from top results"""
+        if not results:
+            return ""
+        
+        # Combine descriptions from top 3 results
+        descriptions = []
+        for result in results[:3]:
+            desc = result.get('description', '').strip()
+            if desc and desc not in descriptions:
+                descriptions.append(desc)
+        
+        return " ".join(descriptions)[:500] + "..." if descriptions else ""
 
     async def get_browser_search_function(self, task_goal: str, starting_url: str = None) -> str:
         """Browser automation function with optional result saving."""
@@ -327,9 +737,24 @@ class BrowserManager:
             """Browser automation function."""
             return await self.get_browser_search_function(task_goal, starting_url)
         
-        async def search_tool_wrapper(query: str):
-            """API-based search tool using Tavily."""
-            return await self.get_search_tool(query)
+        # async def search_tool_wrapper(query: str):
+        #     """API-based search tool using Tavily."""
+        #     return await self.get_search_tool(query)
+        
+        async def search_tool_wrapper(query: Annotated[str, "The search query string - be specific and descriptive for better results. Include relevant keywords, context, and relationships to the topic being searched"],
+            search_type: Annotated[str, "Search mode: 'comprehensive' (detailed results with extra snippets), 'quick' (fast basic results), 'recent' (time-filtered results)"] = "comprehensive"):
+            """
+            Brave Search API tool with comprehensive result formatting
+            
+            Args:
+                query: Search query
+                search_type: "quick" (basic), "comprehensive" (detailed), "recent" (with freshness filter)
+                count: Number of results (1-20)
+                freshness: Time filter - "pd", "pw", "pm", "py" 
+                country: Country code
+                safesearch: Safe search level
+            """
+            return await self.get_brave_search_tool(query=query, search_type=search_type)
         
         # Register browser search function
         autogen.register_function(
