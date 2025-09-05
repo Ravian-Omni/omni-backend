@@ -14,6 +14,7 @@ class CapabilityConfig:
     completion_agent_name: str = "process_completion"
     use_chat_messages: bool = True
     cancellation_token: CancellationToken = None
+    task_id: str = None
     manager_kwargs: Optional[Dict[str, Any]] = None  # Additional arguments for manager class
     
     def __post_init__(self):
@@ -66,6 +67,7 @@ class CapabilityManager:
                 collection_name=config.collection,
                 omni_memory=self.memory,
                 cancellation_token=config.cancellation_token,
+                task_id=config.task_id,
                 manager_kwargs=config.manager_kwargs
             )
             

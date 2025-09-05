@@ -29,7 +29,7 @@ async def update_chat_history(chat_id: str, message: dict, collection_name: str)
     try:
         
         # Extract required fields for different message types
-        required_fields = ['role', 'name', 'raw_message', 'usage']
+        required_fields = ['role', 'name', 'raw_message', 'usage', 'task_id']
         content_fields = ['role', 'name', 'content']
         
         raw_message_data = {field: message[field] for field in required_fields if field in message}

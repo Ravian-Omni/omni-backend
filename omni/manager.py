@@ -42,9 +42,10 @@ from configs.system_ai_config import GroupchatConfigurationManager
 class OmniGroupChatManager(autogen.GroupChatManager):
     """Enhanced GroupChatManager with memory, WebSocket, and voice capabilities."""
     
-    def __init__(self, groupchat, memory, chat_id: str, llm_config=None, human_input_mode: str = "NEVER"):
+    def __init__(self, groupchat, memory, chat_id: str, task_id:str = None, llm_config=None, human_input_mode: str = "NEVER"):
         super().__init__(groupchat=groupchat, llm_config=llm_config, human_input_mode=human_input_mode)
         self.chat_id = chat_id
+        self.task_id = task_id
         self.memory = memory
         # Track previous usage state for each agent to calculate deltas
         self._agent_previous_usage = defaultdict(lambda: {
@@ -167,7 +168,8 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             "name": sender.name,
             "content": content,
             "raw_message": message,
-            "usage": sender_usage
+            "usage": sender_usage,
+            "task_id": self.task_id
         }
         websocket_message = {
             "role": "user",
@@ -269,6 +271,7 @@ class Omni:
         self.chat_id=chat_id
         self.chat_dir = chat_dir
         self.cancellation_token = None
+        self.task_id = None
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("omni")
         
@@ -292,6 +295,10 @@ class Omni:
     
     def _set_cancellation_token(self, cancellation_token):
         self.cancellation_token = cancellation_token
+    
+    def set_task_id(self, task_id):
+        self.task_id = task_id
+        self.manager.task_id = task_id
     
     def _check_cancellation(self):
         """Check if operations should be cancelled"""
@@ -367,6 +374,7 @@ class Omni:
             collection=settings.IMAGE_GENERATOR_COLLECTION,
             manager_class=ImageGenerator,
             completion_agent_name="process_completion",
+            task_id=self.task_id,
             cancellation_token=self.cancellation_token
         )
         return await self.capability_manager.execute_capability(query, self.image_gen_config, call_id)
@@ -378,6 +386,7 @@ class Omni:
             collection=settings.BROWSER_COLLECTION,
             manager_class=BrowserManager,
             completion_agent_name="process_completion",
+            task_id=self.task_id,
             cancellation_token=self.cancellation_token,
             use_chat_messages=False,
             manager_kwargs= {"input_function": self.input_function}
@@ -394,6 +403,7 @@ class Omni:
             collection=settings.PYTHON_DEV_COLLECTION,
             manager_class=PythonDeveloper,
             completion_agent_name="process_completion_agent",
+            task_id=self.task_id,
             cancellation_token=self.cancellation_token,
             manager_kwargs= {"websocket_manager": websocket_manager}
         )
@@ -407,6 +417,7 @@ class Omni:
             collection=settings.EMAIL_COLLECTION,
             manager_class=EmailManager,
             completion_agent_name="process_completion_agent",
+            task_id=self.task_id,
             cancellation_token=self.cancellation_token,
             manager_kwargs= {"input_function": self.input_function}
         )
@@ -421,6 +432,7 @@ class Omni:
             collection=settings.FILE_FINDER_COLLECTION,
             manager_class=FileFinder,
             completion_agent_name="process_completion",
+            task_id=self.task_id,
             cancellation_token=self.cancellation_token,
             use_chat_messages=False
         )
@@ -724,6 +736,7 @@ class Omni:
             memory=self.memory,
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
-            chat_id=self.chat_id
+            chat_id=self.chat_id,
+            task_id=self.task_id
         )
         return self.manager, self.groupchat

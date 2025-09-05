@@ -24,6 +24,7 @@ class ChatContext:
     collection_name: str
     omni_memory: OmniMemory
     cancellation_token: CancellationToken = None
+    task_id: str = None
     manager_kwargs: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
@@ -68,7 +69,7 @@ async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> 
     """
     try:        
         # Extract message fields safely
-        raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message', 'usage'] if k in message}
+        raw_message = {k: message.get(k) for k in ['role', 'name', 'raw_message', 'usage', 'task_id'] if k in message}
         content_message = {k: message.get(k) for k in ['role', 'name', 'content'] if k in message}
         
         raw_message['timestamp'] = datetime.now(timezone.utc).isoformat()  # Add timestamp to raw message
@@ -240,7 +241,8 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "name": sender.name,
             "content": content,
             "raw_message": message,
-            "usage": sender_usage
+            "usage": sender_usage,
+            "task_id": self.context.task_id
         }
         websocket_message = {
             "role": "user",

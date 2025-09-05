@@ -3,7 +3,7 @@ import logging
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Callable, Awaitable
-import json
+import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 from configs.llm_configs_manager import LLMConfigManager
 from managers.cancellation_token import CancellationToken
@@ -103,6 +103,7 @@ class WebSocketManager:
                 )
 
             omni._set_cancellation_token(self._cancellation_tokens.get(session_id, None))
+            omni.set_task_id(str(uuid.uuid4()))
             task = asyncio.create_task(omni.manager.a_initiate_chat(omni.manager,message=initial_message.get("task"),clear_history=False))
             self._active_tasks[session_id] = task
 
