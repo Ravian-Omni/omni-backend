@@ -175,7 +175,8 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             "role": "user",
             "name": sender.name,
             "content": content,
-            "raw_message": message
+            "raw_message": message,
+            "task_id": self.task_id
         }
         # Log the usage information for debugging
         logger.info(f"Agent {sender.name} usage - "
