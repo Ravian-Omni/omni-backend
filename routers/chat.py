@@ -161,6 +161,7 @@ class RawMessage(BaseModel):
     role: str
     name: str
     raw_message: Any
+    task_id: Optional[str] = None
     timestamp: str
 
 
@@ -201,6 +202,7 @@ async def get_specific_chat(
                     "role": message.get("role", ""),
                     "name": message.get("name", ""),
                     "raw_message": message.get("raw_message", ""),  # Using content as raw_message
+                    "task_id": message.get("task_id", ""),  # Using content as raw_message
                     "timestamp": message.get("timestamp", "")  # Using content as raw_message
                 })
         
@@ -262,6 +264,7 @@ async def get_specific_chat(
                     "role": message.get("role", ""),
                     "name": message.get("name", ""),
                     "raw_message": message.get("raw_message", ""),
+                    "task_id": message.get("task_id", ""),
                     "timestamp": message.get("timestamp", "")
                 })
         
