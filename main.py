@@ -1,8 +1,13 @@
+from pathlib import Path
+from fastapi.responses import HTMLResponse
+import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from starlette.responses import RedirectResponse
 # from routers import apis
 from routers import chat
+from routers.chat_mode import chat as chat_mode_router
+from routers.chat_mode import ws as chat_mode_ws_router
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
 from utilities.logging import setup_logging, cleanup_logging
@@ -22,7 +27,9 @@ prefix = base + "api/v1"
 openapi_url = prefix + "/openapi.json"
 docs_url = prefix + "/docs"
 
-middleware = [Middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])]
+middleware = [Middleware(CORSMiddleware, allow_origins=[
+                         '*'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,34 +37,34 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for the FastAPI application
     Handles startup and shutdown events
     """
-    
+
     nest_asyncio.apply()  # 🧠 Patch the loop here
-    
+
     # Startup: Setup logging first
     logger = setup_logging(log_file="app.log")
     logger.info("🚀 Starting FastAPI application...")
     os.environ["HOME"] = os.path.expanduser("~")
     try:
-        # Startup: Connect to databases        
+        # Startup: Connect to databases
         logger.info("📊 Websocket Manager...")
         await init_managers()
         logger.info("✅ Websocket Manager established")
         # Add any other startup tasks here
         logger.info("🎯 Application startup completed successfully")
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to start application: {e}")
         raise
-    
+
     yield  # App is running and handling requests here
-    
+
     # Shutdown: Close database connections and cleanup
     logger.info("🛑 Shutting down FastAPI application...")
-    
+
     try:
         # Add any other cleanup tasks here
         logger.info("🧹 Application shutdown completed successfully")
-        
+
     except Exception as e:
         logger.error(f"❌ Error during shutdown: {e}")
     finally:
@@ -77,9 +84,19 @@ app = FastAPI(
 # app.include_router(apis.router)
 app.include_router(
     chat.router,
-    prefix="/chats", 
+    prefix="/chats",
     tags=["Chat Management"]
-    )
+)
+app.include_router(
+    chat_mode_router.router,
+    prefix="/chat_mode",
+    tags=["Chat Mode Management"]
+)
+app.include_router(
+    chat_mode_ws_router.router,
+    prefix="/chat_mode",
+    tags=["Chat Mode Websocket"]
+)
 app.include_router(
     ws.router,
     prefix="/ws",
@@ -127,27 +144,29 @@ def custom_openapi():
     # Apply security to all endpoints
     for path in openapi_schema["paths"]:
         for method in openapi_schema["paths"][path]:
-            openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
+            openapi_schema["paths"][path][method]["security"] = [
+                {"BearerAuth": []}]
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
+
 app.openapi = custom_openapi
 
-#WEBSOCKET Swagger Docs
+# WEBSOCKET Swagger Docs
 
-import uvicorn
 
-from fastapi.responses import HTMLResponse
-from pathlib import Path
 @app.get("/", response_class=HTMLResponse)
 async def serve_html():
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
 
+
 @app.get("/capability", response_class=HTMLResponse)
 async def serve_html():
-    html_content = Path("templates/capability.html").read_text(encoding="utf-8")
+    html_content = Path(
+        "templates/capability.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
+
 
 @app.get("/health")
 async def health_check():

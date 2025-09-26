@@ -20,35 +20,31 @@ from utilities.api_client import api_client
 
 router = APIRouter()
 
+
 class ChatRequest(BaseModel):
     chat_id: str
     message: str
-    
+
+
 class Message(BaseModel):
     role: str
     name: str
     content: str
 
+
 @router.post("/new_chat")
-async def create_new_chat(request:Request, user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian")):
+async def create_new_chat(request: Request, user_id: str = "default_user"):
     try:
+        # Get chat_dir and agent_mode from query parameters
+        chat_dir = request.query_params.get(
+            "chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
         chat_dir = ensure_path(chat_dir)
+        agent_mode_str = request.query_params.get("agent_mode", "true")
+        agent_mode = True if agent_mode_str.lower() == "true" else False
+
         # Generate unique chat identifier
         chat_id = str(uuid.uuid4())
-        
-        
-        # Check if the chat_id already exists for this user
-        # existing_chat = await mongodb.find_one(
-        #     settings.OMNI_COLLECTION,
-        #     {"user_id": user_id, "chat_id": chat_id}
-        # )
-        
-        # if existing_chat:
-        #     raise HTTPException(
-        #         status_code=status.HTTP_409_CONFLICT, 
-        #         detail="Chat already exists for this user with the generated ID"
-        #     )
-        
+
         # Prepare chat document
         chat_document = {
             "user_id": user_id,  # Placeholder for user_id, can be replaced with actual user ID logic
@@ -57,37 +53,40 @@ async def create_new_chat(request:Request, user_id:str = "default_user", chat_di
             "messages": [],
             "raw_messages": [],
             "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": datetime.now(timezone.utc),
+            "agent_mode": agent_mode  # Add agent_mode flag to chat_document
         }
-        
+
         # Create database record
         create_chat = await api_client.post("/chats/new", params={"capability": "omni"}, data=chat_document)
         create_chat = create_chat.standard_response()
         if not create_chat.get("success"):
-            raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
-        
+            raise Exception(
+                f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
+
         result = create_chat.get("data")
-        
+
         # Return standardized response using Pydantic model
         return result
-    
+
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
-    
+
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat creation failed due to server error: {e}"
         )
 
+
 @router.post("capability/new-chat")
-async def create_new_chat(request:Request, capability_name: str = Query(..., description="Capability name"), user_id:str = "default_user", chat_dir = os.path.join(settings.ROOT_DIR, "ravian")):
+async def create_new_chat(request: Request, capability_name: str = Query(..., description="Capability name"), user_id: str = "default_user", chat_dir=os.path.join(settings.ROOT_DIR, "ravian")):
     try:
         chat_dir = ensure_path(chat_dir)
         # Generate unique chat identifier
         chat_id = str(uuid.uuid4())
-        
+
         capability = CapabilityType.from_string(capability_name)
         collection_name = capability.collection
         # Check if the chat_id already exists for this user
@@ -95,13 +94,13 @@ async def create_new_chat(request:Request, capability_name: str = Query(..., des
         #     collection_name,
         #     {"user_id": user_id, "chat_id": chat_id}
         # )
-        
+
         # if existing_chat:
         #     raise HTTPException(
-        #         status_code=status.HTTP_409_CONFLICT, 
+        #         status_code=status.HTTP_409_CONFLICT,
         #         detail="Chat already exists for this user with the generated ID"
         #     )
-        
+
         # Prepare chat document
         chat_document = {
             "user_id": user_id,  # Placeholder for user_id, can be replaced with actual user ID logic
@@ -114,27 +113,27 @@ async def create_new_chat(request:Request, capability_name: str = Query(..., des
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc)
         }
-        
+
         # Create database record
         # await mongodb.insert_one(collection_name, chat_document)
         create_chat = await api_client.post("/chats/new", params={"capability": collection_name}, data=chat_document)
         create_chat = create_chat.standard_response()
         if not create_chat.get("success"):
-            raise Exception(f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
-        
+            raise Exception(
+                f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}")
+
         result = create_chat.get("data")
-        
-        
+
         # Return standardized response using Pydantic model
         return result
-    
+
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
-    
+
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat creation failed due to server error: {e}"
         )
 
@@ -143,19 +142,20 @@ def serialize_document(doc: Dict[Any, Any]) -> Dict[str, Any]:
     """Convert MongoDB document to JSON serializable format"""
     if doc is None:
         return None
-    
+
     # Convert ObjectId to string
     if "_id" in doc:
         doc["_id"] = str(doc["_id"])
-    
+
     # Convert datetime objects to ISO format
     for key, value in doc.items():
         if isinstance(value, datetime):
             doc[key] = value.isoformat()
         elif isinstance(value, ObjectId):
             doc[key] = str(value)
-    
+
     return doc
+
 
 class RawMessage(BaseModel):
     role: str
@@ -181,19 +181,19 @@ async def get_specific_chat(
     try:
         query = {"user_id": user_id, "chat_id": chat_id}
         # document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
-        chat_history = await api_client.post("/chats/history", params={"capability":"omni"}, data=query)
+        chat_history = await api_client.post("/chats/history", params={"capability": "omni"}, data=query)
         chat_history = chat_history.standard_response()
         if not chat_history.get("success"):
             raise HTTPException(
                 status_code=404,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
             )
-        
+
         document = chat_history.get("data")
-        
+
         # Serialize the full document first
         serialized_doc = serialize_document(document)
-        
+
         # Transform messages to raw_messages format
         raw_messages = []
         if "raw_messages" in serialized_doc:
@@ -201,28 +201,34 @@ async def get_specific_chat(
                 raw_messages.append({
                     "role": message.get("role", ""),
                     "name": message.get("name", ""),
-                    "raw_message": message.get("raw_message", ""),  # Using content as raw_message
-                    "task_id": message.get("task_id", ""),  # Using content as raw_message
-                    "timestamp": message.get("timestamp", "")  # Using content as raw_message
+                    # Using content as raw_message
+                    "raw_message": message.get("raw_message", ""),
+                    # Using content as raw_message
+                    "task_id": message.get("task_id", ""),
+                    # Using content as raw_message
+                    "timestamp": message.get("timestamp", "")
                 })
-        
+
         # Return only chat_id and raw_messages
         return {
             "chat_id": serialized_doc.get("chat_id", ""),
             "chat_dir": serialized_doc.get("chat_dir", ""),
             "raw_messages": raw_messages
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+
 
 class EnhancedChatHistory(BaseModel):
     call_id: str
     capability_name: str
     chat_id: str
     raw_messages: List[RawMessage]
+
 
 @router.get("/chat-history/capability/{user_id}/{chat_id}", response_model=EnhancedChatHistory)
 async def get_specific_chat(
@@ -240,22 +246,21 @@ async def get_specific_chat(
                 detail=f"Invalid capability name: {capability_name}. Must be one of the valid capability names"
             )
         capability = CapabilityType._value2member_map_.get(capability_name)
-        collection_name = capability.collection 
+        collection_name = capability.collection
         # document = await mongodb.find_one(collection_name, query)
-        chat_history = await api_client.post("/chats/history", params={"capability":collection_name}, data=query)
+        chat_history = await api_client.post("/chats/history", params={"capability": collection_name}, data=query)
         chat_history = chat_history.standard_response()
         if not chat_history.get("success"):
             raise HTTPException(
                 status_code=404,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}"
             )
-        
+
         document = chat_history.get("data")
-        
-        
+
         # Serialize the full document first
         serialized_doc = serialize_document(document)
-        
+
         # Transform messages to raw_messages format
         raw_messages = []
         if "raw_messages" in serialized_doc:
@@ -267,7 +272,7 @@ async def get_specific_chat(
                     "task_id": message.get("task_id", ""),
                     "timestamp": message.get("timestamp", "")
                 })
-        
+
         # Return call_id, capability_name, chat_id and raw_messages
         return {
             "call_id": call_id,
@@ -275,8 +280,9 @@ async def get_specific_chat(
             "chat_id": serialized_doc.get("chat_id", ""),
             "raw_messages": raw_messages
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch chat: {str(e)}")

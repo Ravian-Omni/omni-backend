@@ -8,13 +8,88 @@ from fastapi import WebSocket, WebSocketDisconnect
 from configs.llm_configs_manager import LLMConfigManager
 from managers.cancellation_token import CancellationToken
 logger = logging.getLogger(__name__)
-from managers.cancellation_token import CancellationToken
 # Type aliases for input handling
 InputFuncType = Callable[[str, str], Awaitable[str]]
 InputRequestType = str  # "text_input", "file_upload", etc.
 
 
 class WebSocketManager:
+    async def start_chat_stream_chat_mode(
+        self,
+        session_id: str,
+        initial_message: str = "",
+        chat=None
+    ) -> None:
+        """
+        Start a chat_mode groupchat stream with the provided handler
+        Args:
+            session_id: Session identifier
+            chat: AgentChat instance for chat_mode
+            initial_message: Optional initial message to start the conversation
+        """
+        if session_id not in self._connections or session_id in self._closed_connections:
+            raise ValueError(f"No active connection for session {session_id}")
+
+        self._stop_flags[session_id] = False
+        cancellation_token = CancellationToken()
+        self._cancellation_tokens[session_id] = cancellation_token
+
+        try:
+            # Send initial message if provided
+            if initial_message:
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "message",
+                        "data": {
+                            "source": "user",
+                            "content": initial_message,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    },
+                )
+
+            # Set cancellation token for chat_mode agent
+            if hasattr(chat, "_set_cancellation_token"):
+                chat._set_cancellation_token(
+                    self._cancellation_tokens.get(session_id, None))
+
+            # Start the chat_mode groupchat logic
+            # This assumes chat.manager.a_initiate_chat exists and works for chat_mode
+            task = asyncio.create_task(chat.manager.a_initiate_chat(
+                chat.manager, message=initial_message.get("task"), clear_history=False))
+            self._active_tasks[session_id] = task
+
+            # Wait for completion or cancellation
+            await task
+
+            if not self._stop_flags.get(session_id, True) and session_id not in self._closed_connections:
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "completion",
+                        "status": "complete",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            else:
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "completion",
+                        "status": "cancelled",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            await self._handle_stream_error(session_id, e)
+        finally:
+            self._cancellation_tokens.pop(session_id, None)
+            self._active_tasks.pop(session_id, None)
+            self._stop_flags.pop(session_id, None)
     """
     Simplified WebSocket manager for AG2AI GroupChat workflows
     
@@ -35,11 +110,11 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
         """
         Accept a new WebSocket connection
-        
+
         Args:
             websocket: FastAPI WebSocket instance
             session_id: Unique identifier for this session
-            
+
         Returns:
             bool: True if connection successful, False otherwise
         """
@@ -70,11 +145,11 @@ class WebSocketManager:
         session_id: str,
         # chat_handler: Callable[[str, InputFuncType], Awaitable[Any]],
         initial_message: str = "",
-        omni = None
+        omni=None
     ) -> None:
         """
         Start a chat stream with the provided handler
-        
+
         Args:
             session_id: Session identifier
             chat_handler: Async function that handles the chat logic
@@ -102,9 +177,11 @@ class WebSocketManager:
                     },
                 )
 
-            omni._set_cancellation_token(self._cancellation_tokens.get(session_id, None))
+            omni._set_cancellation_token(
+                self._cancellation_tokens.get(session_id, None))
             omni.set_task_id(str(uuid.uuid4()))
-            task = asyncio.create_task(omni.manager.a_initiate_chat(omni.manager,message=initial_message.get("task"),clear_history=False))
+            task = asyncio.create_task(omni.manager.a_initiate_chat(
+                omni.manager, message=initial_message.get("task"), clear_history=False))
             self._active_tasks[session_id] = task
 
             # Wait for completion or cancellation
@@ -141,11 +218,11 @@ class WebSocketManager:
     def _create_input_func(self, session_id: str, timeout: int = 600) -> InputFuncType:
         """
         Create an input function for requesting user input during chat
-        
+
         Args:
             session_id: Session identifier
             timeout: Timeout in seconds for input response
-            
+
         Returns:
             Input function that can be used by chat handlers
         """
@@ -155,8 +232,9 @@ class WebSocketManager:
             input_type: InputRequestType = "text_input",
         ) -> str:
             try:
-                logger.info(f"Requesting input for session {session_id}: ({input_type}) {prompt}")
-                
+                logger.info(
+                    f"Requesting input for session {session_id}: ({input_type}) {prompt}")
+
                 # Send input request to client
                 await self._send_message(
                     session_id,
@@ -176,12 +254,14 @@ class WebSocketManager:
                             while True:
                                 # Check if session was closed/stopped
                                 if session_id in self._closed_connections or self._stop_flags.get(session_id, False):
-                                    raise ValueError("Session was closed or stopped")
+                                    raise ValueError(
+                                        "Session was closed or stopped")
 
                                 # Try to get response with short timeout
                                 try:
                                     response = await asyncio.wait_for(
-                                        self._input_responses[session_id].get(),
+                                        self._input_responses[session_id].get(
+                                        ),
                                         timeout=min(timeout, 5),
                                     )
                                     return response
@@ -194,14 +274,17 @@ class WebSocketManager:
                         return response
 
                     except asyncio.TimeoutError:
-                        logger.warning(f"Input response timeout for session {session_id}")
+                        logger.warning(
+                            f"Input response timeout for session {session_id}")
                         await self.stop_session(session_id, "Input timeout")
                         raise
                 else:
-                    raise ValueError(f"No input queue for session {session_id}")
+                    raise ValueError(
+                        f"No input queue for session {session_id}")
 
             except Exception as e:
-                logger.error(f"Error handling input for session {session_id}: {e}")
+                logger.error(
+                    f"Error handling input for session {session_id}: {e}")
                 raise
 
         return input_handler
@@ -209,7 +292,7 @@ class WebSocketManager:
     async def send_message(self, session_id: str, message: Dict[str, Any]) -> None:
         """
         Send a message to the client
-        
+
         Args:
             session_id: Session identifier
             message: Message dictionary to send
@@ -219,7 +302,7 @@ class WebSocketManager:
     async def send_chat_message(self, session_id: str, content: str, source: str = "assistant") -> None:
         """
         Send a formatted chat message to the client
-        
+
         Args:
             session_id: Session identifier
             content: Message content
@@ -240,7 +323,7 @@ class WebSocketManager:
     async def send_agent_message(self, session_id: str, agent_name: str, content: str) -> None:
         """
         Send a message from a specific agent
-        
+
         Args:
             session_id: Session identifier
             agent_name: Name of the agent sending the message
@@ -251,7 +334,7 @@ class WebSocketManager:
     async def handle_input_response(self, session_id: str, response: str) -> None:
         """
         Handle input response from client
-        
+
         Args:
             session_id: Session identifier
             response: User's input response
@@ -259,12 +342,13 @@ class WebSocketManager:
         if session_id in self._input_responses:
             await self._input_responses[session_id].put(response)
         else:
-            logger.warning(f"Received input response for inactive session {session_id}")
+            logger.warning(
+                f"Received input response for inactive session {session_id}")
 
     async def stop_session(self, session_id: str, reason: str = "Session stopped") -> None:
         """
         Stop an active session
-        
+
         Args:
             session_id: Session identifier
             reason: Reason for stopping
@@ -288,7 +372,7 @@ class WebSocketManager:
                     self.active_executor.pop(session_id, None)
                 if session_id in self.active_browser:
                     agent, browser = self.active_browser[session_id]
-                    
+
                     if not agent.done():
                         agent.cancel()
                         try:
@@ -297,15 +381,16 @@ class WebSocketManager:
                         except asyncio.CancelledError:
                             pass
                         except Exception as e:
-                            logger.error(f"Error cancelling task for {session_id}: {e}")
+                            logger.error(
+                                f"Error cancelling task for {session_id}: {e}")
                 try:
                     await task
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    logger.error(f"Error cancelling task for {session_id}: {e}")
+                    logger.error(
+                        f"Error cancelling task for {session_id}: {e}")
                     raise e
-                    
 
                 # Finally cancel the token
                 self._cancellation_tokens[session_id].cancel()
@@ -320,16 +405,15 @@ class WebSocketManager:
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
-                    
+
             except Exception as e:
                 logger.error(f"Error stopping session {session_id}: {e}")
-
 
     async def close_browser_session(self, browser_session) -> bool:
         """Attempt to close browser gracefully using the session's built-in methods."""
         if browser_session is None:
             return True
-            
+
         try:
             if hasattr(browser_session, 'agent'):
                 agent = browser_session.agent
@@ -341,25 +425,25 @@ class WebSocketManager:
                         await agent.event_bus.close()
                     elif hasattr(agent.event_bus, 'cleanup'):
                         await agent.event_bus.cleanup()
-            
+
             # Also check for global EventBus registry cleanup
             if hasattr(browser_session, '_cleanup_event_system'):
                 await browser_session._cleanup_event_system()
-                
+
             # Try the standard close method first
             if hasattr(browser_session, 'close'):
                 await browser_session.close()
-            
+
             # Then try kill method
             if hasattr(browser_session, 'kill'):
                 await browser_session.kill()
-            
+
             # Try to close the browser if it has a browser attribute
             if hasattr(browser_session, 'browser') and browser_session.browser:
                 await browser_session.browser.close()
             browser_session = None
             return True
-            
+
         except Exception as e:
             print(f"Error during graceful browser closure: {e}")
             return False
@@ -384,12 +468,13 @@ class WebSocketManager:
                 },
             )
         else:
-            logger.warning(f"Received input response for inactive session {session_id}")
-    
+            logger.warning(
+                f"Received input response for inactive session {session_id}")
+
     async def terminal_kill(self, session_id: str, process_id: str):
         """
         Handle terminal process kill request
-        
+
         Args:
             session_id: Session identifier
             process_id: Identifier of the process to kill
@@ -407,12 +492,13 @@ class WebSocketManager:
                 },
             )
         else:
-            logger.warning(f"Received kill request for inactive session {session_id}")
-    
+            logger.warning(
+                f"Received kill request for inactive session {session_id}")
+
     async def disconnect(self, session_id: str) -> None:
         """
         Clean up connection and associated resources
-        
+
         Args:
             session_id: Session identifier
         """
@@ -435,13 +521,14 @@ class WebSocketManager:
     async def _send_message(self, session_id: str, message: Dict[str, Any]) -> None:
         """
         Internal method to send a message through WebSocket
-        
+
         Args:
             session_id: Session identifier
             message: Message dictionary to send
         """
         if session_id in self._closed_connections:
-            logger.warning(f"Attempted to send message to closed session {session_id}")
+            logger.warning(
+                f"Attempted to send message to closed session {session_id}")
             raise Exception(f"Session closed for {session_id}")
 
         try:
@@ -452,13 +539,14 @@ class WebSocketManager:
             logger.warning(f"WebSocket disconnected for session {session_id}")
             await self.disconnect(session_id)
         except Exception as e:
-            logger.error(f"Error sending message for session {session_id}: {e}")
+            logger.error(
+                f"Error sending message for session {session_id}: {e}")
             await self.disconnect(session_id)
 
     async def _handle_stream_error(self, session_id: str, error: Exception) -> None:
         """
         Handle stream errors
-        
+
         Args:
             session_id: Session identifier
             error: Exception that occurred
@@ -475,7 +563,8 @@ class WebSocketManager:
 
     async def cleanup(self) -> None:
         """Clean up all active connections and resources"""
-        logger.info(f"Cleaning up {len(self.active_connections)} active connections")
+        logger.info(
+            f"Cleaning up {len(self.active_connections)} active connections")
 
         try:
             # Stop all sessions
@@ -490,9 +579,11 @@ class WebSocketManager:
                     try:
                         await asyncio.wait_for(self.disconnect(session_id), timeout=2)
                     except asyncio.TimeoutError:
-                        logger.warning(f"Timeout disconnecting session {session_id}")
+                        logger.warning(
+                            f"Timeout disconnecting session {session_id}")
                     except Exception as e:
-                        logger.error(f"Error disconnecting session {session_id}: {e}")
+                        logger.error(
+                            f"Error disconnecting session {session_id}: {e}")
 
             await asyncio.wait_for(disconnect_all(), timeout=10)
 
@@ -527,11 +618,11 @@ class WebSocketManager:
     def is_session_stopped(self, session_id: str) -> bool:
         """Check if a session has been stopped"""
         return self._stop_flags.get(session_id, False)
-    
+
     def get_cancellation_token(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
         return self._cancellation_tokens.get(session_id)
-    
+
     def get_active_browser(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
         return self.active_browser.get(session_id)

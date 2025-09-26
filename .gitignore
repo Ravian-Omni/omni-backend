@@ -203,3 +203,10 @@ test/
 dist/
 build_resources/
 nuitka-crash-report.xml
+
+
+bundled_python/
+omniEnv/
+resources/
+base_venv/
+scripts/
