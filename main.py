@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from starlette.responses import RedirectResponse
 # from routers import apis
 from routers import chat
-from routers.chat_mode import chat as chat_mode_router
 from routers.chat_mode import ws as chat_mode_ws_router
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware import Middleware
@@ -87,11 +86,7 @@ app.include_router(
     prefix="/chats",
     tags=["Chat Management"]
 )
-app.include_router(
-    chat_mode_router.router,
-    prefix="/chat_mode",
-    tags=["Chat Mode Management"]
-)
+
 app.include_router(
     chat_mode_ws_router.router,
     prefix="/chat_mode",

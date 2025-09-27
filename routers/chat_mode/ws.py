@@ -62,7 +62,7 @@ async def run_chat_mode_websocket(
                 if message.get("type") == "start":
                     # Handle start message
                     if message.get("task"):
-                        # Pass arguments positionally to avoid TypeError
+                        # Use chat_mode specific method
                         asyncio.create_task(
                             ws_manager.start_chat_stream_chat_mode(chat_id, message, chat))
                     else:

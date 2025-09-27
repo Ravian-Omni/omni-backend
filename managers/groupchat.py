@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 from composio import Composio
 from composio_autogen import AutogenProvider
 from together import Together
@@ -7,6 +8,8 @@ from autogen import LLMConfig
 from capabilities.chat_mode import prompts
 from capabilities.chat_mode.helpers import async_to_sync
 from dependencies import get_websocket_manager
+from utilities.storage import update_chat_history
+from configs.settings import settings
 import autogen
 from autogen import UserProxyAgent
 import os
@@ -18,9 +21,9 @@ from string import Template
 from typing import List, Optional, Dict, Any
 today_date = datetime.now()
 
-from dotenv import load_dotenv
 
 load_dotenv()
+
 
 class CustomGroupChatManager(autogen.GroupChatManager):
     def __init__(self, groupchat, llm_config, chat_id=None, human_input_mode="NEVER", queue: Optional[asyncio.Queue] = None):
@@ -36,11 +39,38 @@ class CustomGroupChatManager(autogen.GroupChatManager):
 
     def _print_received_message(self, message: Dict[str, Any], sender: "autogen.Agent") -> None:
         super()._print_received_message(message, sender)
+
         content = message.get("content", "") if isinstance(
             message, dict) else str(message)
-        db_content = {"role": "user", "name": sender.name, "content": content}
-        db_content["raw_message"] = message
-        async_to_sync(self.send_websocket(db_content))
+
+        # Create message_data object exactly like omni does
+        message_data = {
+            "role": "user",
+            "name": sender.name,
+            "content": content,
+            "raw_message": message,
+            "usage": {},  # Chat mode doesn't have usage tracking like omni
+            "task_id": None  # Chat mode doesn't have task_id like omni
+        }
+
+        # Create websocket message (without usage and task_id for WebSocket)
+        websocket_message = {
+            "role": "user",
+            "name": sender.name,
+            "content": content,
+            "raw_message": message,
+        }
+
+        # Send to WebSocket
+        async_to_sync(self.send_websocket(websocket_message))
+
+        # Store in omni collection exactly like omni does
+        try:
+            async_to_sync(update_chat_history(
+                self.chat_id, message_data, settings.OMNI_COLLECTION))
+        except Exception as e:
+            print(f"Warning: Failed to store chat history: {e}")
+            # Continue execution without crashing
 
 
 class CustomUserProxyAgent(UserProxyAgent):
