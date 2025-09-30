@@ -40,7 +40,8 @@ async def run_chat_mode_websocket(
     chat_dir = history.get(
         "chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
 
-    chat = AgentChat(chat_id=chat_id)
+    # Pass user_id from WebSocket query parameter to AgentChat
+    chat = AgentChat(chat_id=chat_id, user_id=user_id)
     messages = history.get("messages", [])
     # If you want to resume previous messages, add logic here (if supported by AgentChat)
 

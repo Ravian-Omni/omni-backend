@@ -89,11 +89,12 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 
 class AgentChat:
-    def __init__(self, chat_id: str):
+    def __init__(self, chat_id: str, user_id: str = None):
         self.chat_id = chat_id
+        self.user_id = user_id
         self.cancellation_token = None
         self.llm_config = LLMConfig(
-            api_type="openai", model="gpt-4.1-mini", api_key=os.environ["OPENAI_API_KEY"])
+            api_type="openai", model="o4-mini", api_key=os.environ["OPENAI_API_KEY"])
 
         self.agents = self.get_agents()
         self._register_functions()
@@ -194,14 +195,35 @@ class AgentChat:
         composio_api_key = os.environ.get("COMPOSIO_API_KEY", "")
         composio = Composio(api_key=composio_api_key)
 
-        # User ID must be a valid UUID format
-        # Replace with actual user UUID from your database
-        user_id = "9239298d-389c-5315-905c-464469e5d397"
+        # Use the user_id passed to the constructor
+        user_id = self.user_id
+        print(f"🆔 Registering tools for user: {user_id}")
         # Wrapper functions before registring to agents
         toolset = AutogenProvider()
-        raw_tools = composio.tools.get(user_id=user_id, toolkits=["GMAIL",])
 
-        print(f"Got {len(raw_tools)} tools")
+        # Get tools for each toolkit separately and combine them
+        # This is needed because composio.tools.get() with multiple toolkits
+        # seems to only return tools from the last toolkit
+        toolkits = os.environ.get(
+            "COMPOSIO_TOOLKITS", "GMAIL,GITHUB").split(",")
+        toolkits = [toolkit.strip()
+                    for toolkit in toolkits]  # Remove whitespace
+        raw_tools = []
+
+        for toolkit in toolkits:
+            try:
+                toolkit_tools = composio.tools.get(
+                    user_id=user_id, toolkits=[toolkit])
+                raw_tools.extend(toolkit_tools)
+                print(f"✅ Added {len(toolkit_tools)} tools from {toolkit}")
+            except Exception as e:
+                print(f"❌ Failed to get tools for {toolkit}: {e}")
+
+        print(
+            f"🔧 Got {len(raw_tools)} total tools from {len(toolkits)} toolkits")
+        print("Raw tools:")
+        for tool in raw_tools:
+            print(f"  - {tool.get('function', {}).get('name', 'unknown')}")
 
         def create_tool_wrapper(tool_data):
             class ToolObject:
@@ -213,6 +235,9 @@ class AgentChat:
             return ToolObject(tool_data)
 
         tools = [create_tool_wrapper(tool) for tool in raw_tools]
+        print("Available tools:")
+        for tool in tools:
+            print(f"  - {tool.slug}: {tool.description}")
 
         def execute_tool(slug: str, arguments: dict) -> dict:
             """Execute Composio action using the correct API"""
@@ -247,13 +272,34 @@ class AgentChat:
             tools=function_tools,
         )
 
-        print(f"✅ Successfully registered {len(function_tools)} Gmail tools")
+        print(
+            f"✅ Successfully registered {len(function_tools)} tools from multiple toolkits")
 
-        # Print some tool names for verification
-        for i, tool in enumerate(tools[:5]):
-            print(f"  {i+1}. {tool.slug}")
-        if len(tools) > 5:
-            print(f"  ... and {len(tools) - 5} more tools")
+        # Count tools by toolkit and show breakdown
+        toolkit_counts = {}
+        for tool in tools:
+            tool_name = tool.slug
+            if 'GMAIL' in tool_name.upper():
+                toolkit_counts['GMAIL'] = toolkit_counts.get('GMAIL', 0) + 1
+            elif 'GITHUB' in tool_name.upper():
+                toolkit_counts['GITHUB'] = toolkit_counts.get('GITHUB', 0) + 1
+            else:
+                toolkit_counts['OTHER'] = toolkit_counts.get('OTHER', 0) + 1
+
+        print(f"📊 Tool breakdown by toolkit:")
+        for toolkit, count in toolkit_counts.items():
+            print(f"  • {toolkit}: {count} tools")
+
+        # Print first few tools from each toolkit for verification
+        print(f"🔍 Sample tools:")
+        gmail_shown = github_shown = 0
+        for i, tool in enumerate(tools):
+            if 'GMAIL' in tool.slug.upper() and gmail_shown < 3:
+                print(f"  📧 {tool.slug}")
+                gmail_shown += 1
+            elif 'GITHUB' in tool.slug.upper() and github_shown < 3:
+                print(f"  🐙 {tool.slug}")
+                github_shown += 1
 
         async def image_generator_wrapper(prompt: Annotated[str, "The image generation prompt"], filename: Annotated[str, "The filename to save the image as"]):
             return await self.get_image_generator(prompt=prompt, filename=filename)

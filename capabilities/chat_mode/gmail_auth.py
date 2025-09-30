@@ -5,47 +5,108 @@ import uuid
 from fastapi import HTTPException
 
 
-class GmailAuthService:
+class ComposioAuthService:
     def __init__(self):
         self.composio = Composio(api_key=os.getenv("COMPOSIO_API_KEY"))
-        # You can configure this as environment variable or fetch from your auth config
-        self.gmail_auth_config_id = os.getenv(
-            "GMAIL_AUTH_CONFIG_ID", "ac_YOUR_GMAIL_CONFIG_ID")
 
-    def generate_user_id(self, email: str) -> str:
-        """Generate a consistent user ID from email address"""
-        # Create a deterministic UUID based on email
-        # Standard namespace
-        namespace = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
-        return str(uuid.uuid5(namespace, email))
+        # Get supported apps from environment variable
+        supported_apps = os.getenv(
+            "COMPOSIO_SUPPORTED_APPS", "gmail,github").lower()
+        app_list = [app.strip() for app in supported_apps.split(",")]
 
-    async def authenticate_gmail_account(self, email: str) -> Dict[str, Any]:
+        # Dynamically build auth config mapping from environment variables
+        self.auth_config_mapping = {}
+        for app in app_list:
+            env_var_name = f"{app.upper()}_AUTH_CONFIG_ID"
+            config_id = os.getenv(env_var_name)
+            if config_id:
+                self.auth_config_mapping[app] = config_id
+            else:
+                # Add with placeholder if not configured
+                self.auth_config_mapping[app] = f"ac_YOUR_{app.upper()}_CONFIG_ID"
+
+        # Add common aliases
+        if "gmail" in self.auth_config_mapping:
+            self.auth_config_mapping["google"] = self.auth_config_mapping["gmail"]
+
+        # Dynamically build toolkit mapping
+        self.toolkit_mapping = {}
+        for app in app_list:
+            # Map common app names to their toolkit equivalents
+            toolkit_name = self._get_toolkit_name(app)
+            self.toolkit_mapping[app] = [toolkit_name]
+
+        # Add aliases
+        if "gmail" in self.toolkit_mapping:
+            self.toolkit_mapping["google"] = self.toolkit_mapping["gmail"]
+
+    def _get_toolkit_name(self, app: str) -> str:
+        """Map app names to their corresponding toolkit names"""
+        toolkit_mapping = {
+            "gmail": "GMAIL",
+            "google": "GMAIL",
+            "github": "GITHUB",
+            "slack": "SLACK",
+            "notion": "NOTION",
+            "trello": "TRELLO",
+            "asana": "ASANA",
+            "jira": "JIRA",
+            "linear": "LINEAR",
+            "discord": "DISCORD",
+            "telegram": "TELEGRAM",
+            "whatsapp": "WHATSAPP",
+            "twitter": "TWITTER",
+            "linkedin": "LINKEDIN",
+            "youtube": "YOUTUBE",
+            "calendar": "GOOGLECALENDAR",
+            "drive": "GOOGLEDRIVE",
+            "sheets": "GOOGLESHEETS",
+            "docs": "GOOGLEDOCS",
+            # Add more mappings as needed
+        }
+        return toolkit_mapping.get(app.lower(), app.upper())
+
+    def get_auth_config_id(self, provider: str) -> str:
+        """Get auth config ID for a specific provider"""
+        if provider not in self.auth_config_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported provider: {provider}. Supported providers: {list(self.auth_config_mapping.keys())}"
+            )
+        return self.auth_config_mapping[provider]
+
+    def get_toolkits(self, provider: str) -> list:
+        """Get toolkits for a specific provider"""
+        return self.toolkit_mapping.get(provider, [provider.upper()])
+
+    async def authenticate_provider(self, user_id: str, provider: str) -> Dict[str, Any]:
         """
-        Initiate Gmail authentication for a user
+        Initiate authentication for a specific provider
 
         Args:
-            email: User's Gmail address
+            user_id: User's ID from your application/database
+            provider: Provider name (google, github, etc.)
 
         Returns:
             Dict containing authentication URL and connection details
         """
         try:
-            # Generate consistent user ID from email
-            user_id = self.generate_user_id(email)
+            # Get the auth config ID for the provider
+            auth_config_id = self.get_auth_config_id(provider)
 
             # Initiate connection request with proper parameters
             connection_request = self.composio.connected_accounts.initiate(
                 user_id=user_id,
-                auth_config_id=self.gmail_auth_config_id,
+                auth_config_id=auth_config_id,
             )
 
             return {
                 "success": True,
                 "user_id": user_id,
-                "email": email,
+                "provider": provider,
                 "auth_url": connection_request.redirect_url,
                 "connection_request_id": connection_request.id,
-                "message": "Visit the auth_url to complete Gmail authentication",
+                "message": f"Visit the auth_url to complete {provider} authentication",
                 "instructions": "After visiting the URL and completing authentication, use the connection_request_id to check status"
             }
 
@@ -53,11 +114,11 @@ class GmailAuthService:
             # More detailed error handling
             error_msg = str(e)
             if "auth_config_id" in error_msg.lower():
-                error_msg = f"Invalid GMAIL_AUTH_CONFIG_ID. Please check your Composio dashboard for the correct auth config ID. Error: {error_msg}"
+                error_msg = f"Invalid {provider.upper()}_AUTH_CONFIG_ID. Please check your Composio dashboard for the correct auth config ID. Error: {error_msg}"
 
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to initiate Gmail authentication: {error_msg}"
+                detail=f"Failed to initiate {provider} authentication: {error_msg}"
             )
 
     async def check_connection_status(self, connection_id: str) -> Dict[str, Any]:
@@ -138,41 +199,50 @@ class GmailAuthService:
                 detail=f"Authentication timeout or failed: {str(e)}"
             )
 
-    async def list_user_connections(self, email: str) -> Dict[str, Any]:
+    async def list_user_connections(self, user_id: str, provider: str = None) -> Dict[str, Any]:
         """
         List all connections for a user
 
         Args:
-            email: User's email address
+            user_id: User's ID from your application/database
+            provider: Optional provider filter (google, github, etc.)
 
         Returns:
             Dict containing user's connections
         """
         try:
-            user_id = self.generate_user_id(email)
-
             # Get user's connections - using the correct API method
             connections = self.composio.connected_accounts.list()
 
-            # Filter connections by user_id if the API returns user-specific data
-            # If not, we'll return all connections for now
+            # Filter connections by user_id and optionally by provider
             user_connections = []
             for conn in connections:
                 # Check if this connection belongs to our user
                 if hasattr(conn, 'user_id') and str(conn.user_id) == user_id:
-                    user_connections.append(str(conn))
-                elif hasattr(conn, 'metadata') and conn.metadata and conn.metadata.get('user_id') == user_id:
-                    user_connections.append(str(conn))
-                else:
-                    # If we can't filter by user, include all for now
-                    user_connections.append(str(conn))
+                    # If provider filter is specified, check if connection matches
+                    if provider:
+                        # You might need to check toolkit or other attributes to filter by provider
+                        # This depends on how Composio structures the connection data
+                        user_connections.append({
+                            "id": getattr(conn, 'id', 'unknown'),
+                            "status": getattr(conn, 'status', 'unknown'),
+                            "toolkit": getattr(conn, 'toolkit', 'unknown'),
+                            "created_at": getattr(conn, 'created_at', 'unknown'),
+                        })
+                    else:
+                        user_connections.append({
+                            "id": getattr(conn, 'id', 'unknown'),
+                            "status": getattr(conn, 'status', 'unknown'),
+                            "toolkit": getattr(conn, 'toolkit', 'unknown'),
+                            "created_at": getattr(conn, 'created_at', 'unknown'),
+                        })
 
             return {
                 "success": True,
                 "user_id": user_id,
-                "email": email,
+                "provider": provider,
                 "connections": user_connections[:10],  # Limit to first 10
-                "total_connections": len(connections)
+                "total_connections": len(user_connections)
             }
 
         except Exception as e:
@@ -214,14 +284,132 @@ class GmailAuthService:
                 detail=f"Failed to get all connections: {str(e)}"
             )
 
+    async def get_provider_tools(self, user_id: str, provider: str) -> Dict[str, Any]:
+        """
+        Get available tools for a specific provider
+
+        Args:
+            user_id: User's ID from your application/database
+            provider: Provider name (google, github, etc.)
+
+        Returns:
+            Dict containing available tools for the provider
+        """
+        try:
+            toolkits = self.get_toolkits(provider)
+            tools = self.composio.tools.get(user_id=user_id, toolkits=toolkits)
+
+            return {
+                "success": True,
+                "user_id": user_id,
+                "provider": provider,
+                "toolkits": toolkits,
+                "tools": tools,
+                "total_tools": len(tools)
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get {provider} tools: {str(e)}"
+            )
+
+    async def enable_provider(self, connection_id: str) -> Dict[str, Any]:
+        """
+        Enable a provider connection
+
+        Args:
+            connection_id: The connection ID to enable
+
+        Returns:
+            Dict containing enable status
+        """
+        try:
+            result = self.composio.connected_accounts.enable(connection_id)
+
+            return {
+                "success": True,
+                "connection_id": connection_id,
+                "message": "Provider enabled successfully",
+                "status": "enabled",
+                "result": str(result) if result else "Enabled"
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to enable provider: {str(e)}"
+            )
+
+    async def disable_provider(self, connection_id: str) -> Dict[str, Any]:
+        """
+        Disable a provider connection (without deleting it)
+
+        Args:
+            connection_id: The connection ID to disable
+
+        Returns:
+            Dict containing disable status
+        """
+        try:
+            result = self.composio.connected_accounts.disable(connection_id)
+
+            return {
+                "success": True,
+                "connection_id": connection_id,
+                "message": "Provider disabled successfully",
+                "status": "disabled",
+                "result": str(result) if result else "Disabled"
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to disable provider: {str(e)}"
+            )
+
+    async def disconnect_provider(self, connection_id: str) -> Dict[str, Any]:
+        """
+        Permanently delete a provider connection
+
+        Args:
+            connection_id: The connection ID to delete
+
+        Returns:
+            Dict containing deletion status
+        """
+        try:
+            result = self.composio.connected_accounts.delete(connection_id)
+
+            return {
+                "success": True,
+                "connection_id": connection_id,
+                "message": "Provider connection permanently deleted",
+                "status": "deleted",
+                "result": str(result) if result else "Deleted"
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete provider connection: {str(e)}"
+            )
+
 
 # Global instance
-_gmail_auth_service = None
+_composio_auth_service = None
 
 
-def get_gmail_auth_service() -> GmailAuthService:
-    """Get Gmail authentication service instance"""
-    global _gmail_auth_service
-    if _gmail_auth_service is None:
-        _gmail_auth_service = GmailAuthService()
-    return _gmail_auth_service
+def get_composio_auth_service() -> ComposioAuthService:
+    """Get Composio authentication service instance"""
+    global _composio_auth_service
+    if _composio_auth_service is None:
+        _composio_auth_service = ComposioAuthService()
+    return _composio_auth_service
+
+# Backward compatibility
+
+
+def get_gmail_auth_service() -> ComposioAuthService:
+    """Get authentication service instance (backward compatibility)"""
+    return get_composio_auth_service()

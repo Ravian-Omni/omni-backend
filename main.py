@@ -17,7 +17,7 @@ from fastapi.openapi.utils import get_openapi
 import os
 from initialization import AppInitializer
 import nest_asyncio
-from routers import ws, config
+from routers import ws, config, auth
 # Initialize application
 load_dotenv()
 
@@ -102,6 +102,12 @@ app.include_router(
     config.router,
     prefix="/settings",
     tags=["Settings Management"],
+    responses={404: {"description": "Not found"}},
+)
+app.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["Authentication"],
     responses={404: {"description": "Not found"}},
 )
 

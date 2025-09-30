@@ -132,9 +132,7 @@ Provide response to the users Question.
 
 {{
   "user_details": {{
-    "user_name": "<user_name>Lokesh</user_name>",
-    "user_email": "<user_email>codelokiyt@gmail.com</user_email>",
-    "user_country": "<user_country>India</user_country>",
+    
     "today": "<today>{today}</today>"
   }},
 
