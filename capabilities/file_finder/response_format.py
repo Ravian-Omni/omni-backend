@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,12 +18,12 @@ class ProblemStatusResponse(BaseModel):
     explanation: str = Field(
         ..., title="Explanation", description="Detailed explanation of the decision"
     )
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         None,
         title="Reason",
         description="Reason why the question was not answered (only required when decision is No)",
     )
-    original_query: Optional[str] = Field(
+    original_query: str | None = Field(
         None,
         title="Original Query",
         description="The original user question being evaluated",
@@ -105,7 +104,7 @@ class FileFinderResponse(BaseModel):
         title="Formatted Message",
         description="Human-readable formatted message summarizing the file search results",
     )
-    files_found: List[FileInfo] = Field(
+    files_found: list[FileInfo] = Field(
         default_factory=list,
         title="Files Found",
         description="List of files found by the search",

@@ -41,7 +41,7 @@ def create_requirements_copy():
     build_req = Path("build_requirements.txt")
 
     # Read original requirements
-    with open("requirements.txt", "r") as f:
+    with open("requirements.txt") as f:
         lines = f.readlines()
 
     # Process requirements (remove git+ lines for main package install)

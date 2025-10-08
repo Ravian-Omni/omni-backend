@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from typing import Annotated, Any, List
+from typing import Annotated, Any
 
 import autogen
 import requests
@@ -190,7 +190,7 @@ class ImageGenerator:
             # Return process_completion to gracefully end the chat
             raise
 
-    def get_agents(self) -> List[Agent]:
+    def get_agents(self) -> list[Agent]:
         self.user_intent = self.get_user_intent_agent()
         self.context_keeper = self.get_context_keeper()
         self.image_prompt_generator = self.get_image_prompt_generator_agent()

@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import HTTPException, status
 from loguru import logger
 
@@ -8,7 +6,7 @@ from managers.connection import WebSocketManager
 # Global manager instances
 
 
-_websocket_manager: Optional[WebSocketManager] = None
+_websocket_manager: WebSocketManager | None = None
 
 # Singleton instance of MongoDB service
 

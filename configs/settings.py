@@ -3,7 +3,7 @@ import os
 import threading
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -52,7 +52,7 @@ class Settings:
                 return True
             return False
 
-    def update_settings(self, updates: Dict[str, Any]) -> Dict[str, bool]:
+    def update_settings(self, updates: dict[str, Any]) -> dict[str, bool]:
         """Update multiple settings at once"""
         with self._lock:
             results = {}
@@ -64,7 +64,7 @@ class Settings:
         """Get a setting value"""
         return getattr(self, key, default)
 
-    def get_all_settings(self) -> Dict[str, Any]:
+    def get_all_settings(self) -> dict[str, Any]:
         """Get all settings as dictionary"""
         return {
             key: value

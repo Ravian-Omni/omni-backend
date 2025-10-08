@@ -4,7 +4,7 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from string import Template
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any
 
 import autogen
 from autogen import UserProxyAgent
@@ -81,7 +81,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
 
-    def _get_agent_current_usage(self, agent) -> Dict[str, Any]:
+    def _get_agent_current_usage(self, agent) -> dict[str, Any]:
         """Get current usage for a specific agent"""
         default_usage = {
             "model": "unknown",
@@ -115,7 +115,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             "cost": model_usage.get("cost", 0.0),
         }
 
-    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> Dict[str, Any]:
+    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> dict[str, Any]:
         """Calculate usage delta for a specific agent since last check"""
         current_usage = self._get_agent_current_usage(agent)
         previous_usage = self._agent_previous_usage[agent_name]
@@ -141,7 +141,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             "agent_name": agent_name,
         }
 
-    def _get_sender_agent_usage(self, sender) -> Dict[str, Any]:
+    def _get_sender_agent_usage(self, sender) -> dict[str, Any]:
         """Get usage details for the sender agent when message is received"""
         return self._calculate_agent_usage_delta(sender, sender.name)
 
@@ -174,7 +174,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         await update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION)
 
     def _print_received_message(
-        self, message: Dict[str, Any], sender: "autogen.Agent"
+        self, message: dict[str, Any], sender: "autogen.Agent"
     ) -> None:
         """Override to handle received messages with enhanced processing."""
         logger.info(f"Received from {sender.name}: {message}")
@@ -224,14 +224,14 @@ class OmniGroupChatManager(autogen.GroupChatManager):
 
     # Additional utility methods for comprehensive usage tracking
 
-    def get_all_agents_current_usage(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_agents_current_usage(self) -> dict[str, dict[str, Any]]:
         """Get current usage for all agents in the group"""
         all_usage = {}
         for agent in self.groupchat.agents:
             all_usage[agent.name] = self._get_agent_current_usage(agent)
         return all_usage
 
-    def get_group_usage_summary(self) -> Dict[str, Any]:
+    def get_group_usage_summary(self) -> dict[str, Any]:
         """Get aggregated usage summary for the entire group"""
         all_usage = self.get_all_agents_current_usage()
 
@@ -366,7 +366,7 @@ class Omni:
             return result
         return None
 
-    def find_call_id(self, capability_name: str, query: str) -> Optional[str]:
+    def find_call_id(self, capability_name: str, query: str) -> str | None:
         """
         Find matching call ID for any capability
 

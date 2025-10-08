@@ -203,3 +203,4 @@ test/
 dist/
 build_resources/
 nuitka-crash-report.xml
+.secrets.baseline

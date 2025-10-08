@@ -1,7 +1,7 @@
 import asyncio
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from utilities.async_helpers import async_to_sync
 
@@ -11,13 +11,13 @@ class AgentConfiguration:
     """Holds configuration for individual agents"""
 
     name: str
-    llm_config: Optional[str] = None  # Reference to LLM config key
+    llm_config: str | None = None  # Reference to LLM config key
     system_message: str = ""
     description: str = ""
-    max_consecutive_auto_reply: Optional[int] = None
+    max_consecutive_auto_reply: int | None = None
     human_input_mode: str = "NEVER"
-    code_execution_config: Optional[Dict[str, Any]] = None
-    custom_properties: Dict[str, Any] = field(default_factory=dict)
+    code_execution_config: dict[str, Any] | None = None
+    custom_properties: dict[str, Any] = field(default_factory=dict)
 
     def get_system_message_with_substitutions(self, **kwargs) -> str:
         """Get system message with dynamic substitutions"""
@@ -42,12 +42,12 @@ class GroupchatConfiguration:
     """Holds configuration for a specific groupchat type"""
 
     groupchat_key: str  # e.g., "python_developer", "file_finder"
-    groupchat_settings: Dict[str, Any] = field(default_factory=dict)
-    agents_config: Dict[str, AgentConfiguration] = field(default_factory=dict)
-    function_descriptions: Dict[str, str] = field(default_factory=dict)
-    custom_properties: Dict[str, Any] = field(default_factory=dict)
+    groupchat_settings: dict[str, Any] = field(default_factory=dict)
+    agents_config: dict[str, AgentConfiguration] = field(default_factory=dict)
+    function_descriptions: dict[str, str] = field(default_factory=dict)
+    custom_properties: dict[str, Any] = field(default_factory=dict)
 
-    def get_agent_config(self, agent_name: str) -> Optional[AgentConfiguration]:
+    def get_agent_config(self, agent_name: str) -> AgentConfiguration | None:
         """Get configuration for a specific agent"""
         return self.agents_config.get(agent_name)
 
@@ -59,7 +59,7 @@ class GroupchatConfiguration:
         """Get human input mode setting"""
         return self.groupchat_settings.get("human_input_mode", "ALWAYS")
 
-    def get_function_description(self, function_name: str) -> Optional[str]:
+    def get_function_description(self, function_name: str) -> str | None:
         """Get description for a specific function"""
         return self.function_descriptions.get(function_name)
 
@@ -73,15 +73,15 @@ class GroupchatConfigurationManager:
     def __new__(cls):
         """Ensure only one instance exists using __new__ magic method"""
         if cls._instance is None:
-            cls._instance = super(GroupchatConfigurationManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
         """Initialize only once"""
         if not GroupchatConfigurationManager._initialized:
-            self.configurations: Dict[str, GroupchatConfiguration] = {}
-            self.llm_configs: Dict[str, Dict[str, Any]] = {}
-            self.global_settings: Dict[str, Any] = {}
+            self.configurations: dict[str, GroupchatConfiguration] = {}
+            self.llm_configs: dict[str, dict[str, Any]] = {}
+            self.global_settings: dict[str, Any] = {}
             self.api_client = None
             GroupchatConfigurationManager._initialized = True
             async_to_sync(self.load_configurations_from_api())
@@ -106,7 +106,7 @@ class GroupchatConfigurationManager:
             print(f"Error loading configurations from API: {e}")
             self._load_default_configurations()
 
-    async def _fetch_all_configs_from_api(self) -> Dict[str, Any]:
+    async def _fetch_all_configs_from_api(self) -> dict[str, Any]:
         """Fetch all configurations from your API"""
         # Replace this with your actual API call
         # result = await api_client.get("/chats/configurations")
@@ -296,7 +296,7 @@ class GroupchatConfigurationManager:
             },
         }
 
-    def _parse_and_store_configurations(self, api_data: Dict[str, Any]) -> None:
+    def _parse_and_store_configurations(self, api_data: dict[str, Any]) -> None:
         """Parse API response and store configurations"""
         # Clear existing configurations
         self.configurations.clear()
@@ -311,7 +311,7 @@ class GroupchatConfigurationManager:
         )
 
     def _parse_groupchat_config(
-        self, groupchat_key: str, config_data: Dict[str, Any]
+        self, groupchat_key: str, config_data: dict[str, Any]
     ) -> GroupchatConfiguration:
         """Parse individual groupchat configuration"""
 
@@ -351,27 +351,27 @@ class GroupchatConfigurationManager:
 
     def get_groupchat_configuration(
         self, groupchat_key: str
-    ) -> Optional[GroupchatConfiguration]:
+    ) -> GroupchatConfiguration | None:
         """Get configuration for a specific groupchat type"""
         return self.configurations.get(groupchat_key)
 
-    def set_llm_config(self, config_key: str, llm_config: Dict[str, Any]) -> None:
+    def set_llm_config(self, config_key: str, llm_config: dict[str, Any]) -> None:
         """Set LLM configuration for a specific key"""
         self.llm_configs[config_key] = llm_config
 
-    def get_llm_config(self, config_key: str) -> Optional[Dict[str, Any]]:
+    def get_llm_config(self, config_key: str) -> dict[str, Any] | None:
         """Get LLM configuration by key"""
         return self.llm_configs.get(config_key)
 
-    def set_global_settings(self, settings: Dict[str, Any]) -> None:
+    def set_global_settings(self, settings: dict[str, Any]) -> None:
         """Set global settings like chart_location"""
         self.global_settings.update(settings)
 
-    def get_global_settings(self) -> Dict[str, Any]:
+    def get_global_settings(self) -> dict[str, Any]:
         """Get global settings"""
         return self.global_settings.copy()
 
-    def list_groupchat_keys(self) -> List[str]:
+    def list_groupchat_keys(self) -> list[str]:
         """Get list of all available groupchat keys"""
         return list(self.configurations.keys())
 
@@ -394,7 +394,7 @@ class ConfigurableAgentChat:
 
         # Get the singleton configuration manager
         self.config_manager = GroupchatConfigurationManager.get_instance()
-        self.groupchat_config: Optional[GroupchatConfiguration] = None
+        self.groupchat_config: GroupchatConfiguration | None = None
 
         self.cancellation_token = None
         self.llm_config = None
@@ -619,7 +619,7 @@ class ConfigurableAgentChat:
         self.input_function = input_function
         return self.input_function
 
-    def get_function_description(self, function_name: str) -> Optional[str]:
+    def get_function_description(self, function_name: str) -> str | None:
         """Get function description from configuration"""
         return self.groupchat_config.get_function_description(function_name)
 

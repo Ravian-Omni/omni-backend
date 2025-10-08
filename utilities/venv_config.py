@@ -8,7 +8,6 @@ import platform
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional, Union
 
 from configs.settings import settings
 
@@ -16,7 +15,7 @@ from configs.settings import settings
 class AG2AIVirtualEnvContext:
     """Virtual environment context compatible with AG2AI configuration structure."""
 
-    def __init__(self, venv_path: Optional[str] = None):
+    def __init__(self, venv_path: str | None = None):
         """
         Initialize with AG2AI configuration.
 
@@ -146,8 +145,8 @@ class AG2AIVirtualEnvContext:
 
 
 def create_ag2ai_executor(
-    venv_path: Optional[str] = None,
-    work_dir: Union[str, Path] = "./code_execution",
+    venv_path: str | None = None,
+    work_dir: str | Path = "./code_execution",
     timeout: int = 60,
     **kwargs,
 ):

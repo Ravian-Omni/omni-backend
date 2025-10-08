@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 from datetime import date, datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -40,7 +40,7 @@ class PureDateEncryption:
         return hashlib.sha256(combined).digest()
 
     @staticmethod
-    def decrypt_data(encrypted_data: str) -> Dict[str, Any]:
+    def decrypt_data(encrypted_data: str) -> dict[str, Any]:
         """Decrypt data using current date as key"""
         try:
             current_date = date.today().isoformat()
@@ -97,7 +97,7 @@ class PureDateEncryption:
             raise Exception(f"Decryption failed with date key {current_date}: {str(e)}")
 
     @staticmethod
-    def get_current_date_info() -> Dict[str, Any]:
+    def get_current_date_info() -> dict[str, Any]:
         """Get information about current date-based encryption"""
         current_date = date.today().isoformat()
 
@@ -121,12 +121,12 @@ class PureDateEncryption:
 class LLMConfigManager:
     """LLM Configuration Manager with pure date-based encryption"""
 
-    _cache: Dict[str, Any] = {}
+    _cache: dict[str, Any] = {}
     _cache_time: float = 0
     _cache_date: str = ""  # Track which date the cache was created
 
     @classmethod
-    def get_config(cls, config_name: str) -> Dict[str, Any]:
+    def get_config(cls, config_name: str) -> dict[str, Any]:
         """Get LLM configuration by name - Main method to use"""
         configs = cls._get_all_configs()
 
@@ -147,7 +147,7 @@ class LLMConfigManager:
         return list(configs.keys())
 
     @classmethod
-    def _get_all_configs(cls) -> Dict[str, Any]:
+    def _get_all_configs(cls) -> dict[str, Any]:
         """Get all configs - decrypt if needed, check date-based cache validity"""
         current_date = date.today().isoformat()
 
@@ -249,7 +249,7 @@ class LLMConfigManager:
             return False
 
     @classmethod
-    def get_cache_info(cls) -> Dict[str, Any]:
+    def get_cache_info(cls) -> dict[str, Any]:
         """Get cache information with date-based encryption details"""
         current_date = date.today().isoformat()
         encryption_info = PureDateEncryption.get_current_date_info()
@@ -268,13 +268,13 @@ class LLMConfigManager:
         }
 
     @classmethod
-    def get_encryption_info(cls) -> Dict[str, Any]:
+    def get_encryption_info(cls) -> dict[str, Any]:
         """Get detailed encryption information"""
         return PureDateEncryption.get_current_date_info()
 
 
 # Simple convenience functions - Use these for easy access
-def get_llm_config(config_name: str) -> Dict[str, Any]:
+def get_llm_config(config_name: str) -> dict[str, Any]:
     """Get LLM config - Simple function"""
     return LLMConfigManager.get_config(config_name)
 
@@ -294,12 +294,12 @@ def refresh_llm_configs() -> bool:
     return LLMConfigManager.refresh_configs()
 
 
-def get_cache_info() -> Dict[str, Any]:
+def get_cache_info() -> dict[str, Any]:
     """Get cache information"""
     return LLMConfigManager.get_cache_info()
 
 
-def get_encryption_info() -> Dict[str, Any]:
+def get_encryption_info() -> dict[str, Any]:
     """Get encryption strength information"""
     return LLMConfigManager.get_encryption_info()
 
@@ -331,7 +331,7 @@ class LLMConfigContext:
 
 
 # Easy-to-use function with auto-cleanup
-def get_llm_config_clean(config_name: str) -> Dict[str, Any]:
+def get_llm_config_clean(config_name: str) -> dict[str, Any]:
     """Get LLM config and automatically clear cache after"""
     try:
         config = get_llm_config(config_name)

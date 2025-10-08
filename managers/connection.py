@@ -2,8 +2,9 @@ import asyncio
 import logging
 import traceback
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -26,14 +27,14 @@ class WebSocketManager:
     """
 
     def __init__(self):
-        self._connections: Dict[str, WebSocket] = {}
+        self._connections: dict[str, WebSocket] = {}
         self._closed_connections: set[str] = set()
-        self._input_responses: Dict[str, asyncio.Queue[str]] = {}
-        self._active_tasks: Dict[str, asyncio.Task] = {}
-        self.active_browser: Dict[str, asyncio.Task] = {}
-        self.active_executor: Dict = {}
-        self._cancellation_tokens: Dict[int, CancellationToken] = {}
-        self._stop_flags: Dict[str, bool] = {}
+        self._input_responses: dict[str, asyncio.Queue[str]] = {}
+        self._active_tasks: dict[str, asyncio.Task] = {}
+        self.active_browser: dict[str, asyncio.Task] = {}
+        self.active_executor: dict = {}
+        self._cancellation_tokens: dict[int, CancellationToken] = {}
+        self._stop_flags: dict[str, bool] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
         """
@@ -208,7 +209,7 @@ class WebSocketManager:
                                         timeout=min(timeout, 5),
                                     )
                                     return response
-                                except asyncio.TimeoutError:
+                                except TimeoutError:
                                     continue  # Keep checking for closed status
 
                         response = await asyncio.wait_for(
@@ -216,7 +217,7 @@ class WebSocketManager:
                         )
                         return response
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning(
                             f"Input response timeout for session {session_id}"
                         )
@@ -231,7 +232,7 @@ class WebSocketManager:
 
         return input_handler
 
-    async def send_message(self, session_id: str, message: Dict[str, Any]) -> None:
+    async def send_message(self, session_id: str, message: dict[str, Any]) -> None:
         """
         Send a message to the client
 
@@ -472,7 +473,7 @@ class WebSocketManager:
         self._active_tasks.pop(session_id, None)
         self._stop_flags.pop(session_id, None)
 
-    async def _send_message(self, session_id: str, message: Dict[str, Any]) -> None:
+    async def _send_message(self, session_id: str, message: dict[str, Any]) -> None:
         """
         Internal method to send a message through WebSocket
 
@@ -529,14 +530,14 @@ class WebSocketManager:
                 for session_id in list(self.active_connections):
                     try:
                         await asyncio.wait_for(self.disconnect(session_id), timeout=2)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning(f"Timeout disconnecting session {session_id}")
                     except Exception as e:
                         logger.error(f"Error disconnecting session {session_id}: {e}")
 
             await asyncio.wait_for(disconnect_all(), timeout=10)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("WebSocketManager cleanup timed out")
         except Exception as e:
             logger.error(f"Error during WebSocketManager cleanup: {e}")
@@ -571,10 +572,10 @@ class WebSocketManager:
         """Check if a session has been stopped"""
         return self._stop_flags.get(session_id, False)
 
-    def get_cancellation_token(self, session_id: str) -> Optional[CancellationToken]:
+    def get_cancellation_token(self, session_id: str) -> CancellationToken | None:
         """Get the cancellation token for a session"""
         return self._cancellation_tokens.get(session_id)
 
-    def get_active_browser(self, session_id: str) -> Optional[CancellationToken]:
+    def get_active_browser(self, session_id: str) -> CancellationToken | None:
         """Get the cancellation token for a session"""
         return self.active_browser.get(session_id)

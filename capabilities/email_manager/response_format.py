@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -27,8 +26,8 @@ class QualityStatus(str, Enum):
 class EmailMetadata(BaseModel):
     """Model for email metadata information."""
 
-    message_id: Optional[str] = Field(None, description="Email message ID")
-    senders_email_id: Optional[str] = Field(
+    message_id: str | None = Field(None, description="Email message ID")
+    senders_email_id: str | None = Field(
         None, description="Email ID (sender's email address)"
     )
     subject: str = Field(..., description="Email subject line")
@@ -64,23 +63,23 @@ class EmailProcessCompletion(BaseModel):
     )
 
     # Email data (can be single email or list of emails)
-    email_data: Union[EmailMetadata, List[EmailMetadata]] = Field(
+    email_data: EmailMetadata | list[EmailMetadata] = Field(
         ..., description="Email metadata - single email or list"
     )
 
     # Achievements and insights
-    key_achievements: List[str] = Field(
+    key_achievements: list[str] = Field(
         default_factory=list, description="List of key achievements"
     )
 
     # Optional fields
-    additional_notes: Optional[str] = Field(
+    additional_notes: str | None = Field(
         None, description="Any additional notes or observations"
     )
-    error_messages: List[str] = Field(
+    error_messages: list[str] = Field(
         default_factory=list, description="Any error messages encountered"
     )
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list, description="Any warnings or caveats"
     )
 
@@ -169,13 +168,13 @@ class IntentClassifier(BaseModel):
     )
 
     # Optional metadata
-    confidence_score: Optional[float] = Field(
+    confidence_score: float | None = Field(
         None,
         description="Confidence score (0.0-1.0) for the classification",
         ge=0.0,
         le=1.0,
     )
-    user_input: Optional[str] = Field(
+    user_input: str | None = Field(
         None, description="The original user input that was classified"
     )
     # extracted_entities: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Any entities extracted from the user input")

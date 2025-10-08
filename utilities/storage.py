@@ -4,7 +4,6 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Union
 
 from loguru import logger
 
@@ -163,7 +162,7 @@ def list_available_voices():
         print(f"Error listing voices: {e}")
 
 
-def ensure_path(path: Union[str, Path], create_if_missing: bool = True) -> str:
+def ensure_path(path: str | Path, create_if_missing: bool = True) -> str:
     """
     Ensure a directory path exists and return the absolute path.
 
@@ -202,7 +201,7 @@ def ensure_path(path: Union[str, Path], create_if_missing: bool = True) -> str:
     return str(abs_path)
 
 
-def simple_ensure_path(path: Union[str, Path]) -> str:
+def simple_ensure_path(path: str | Path) -> str:
     """
     Simple version: create directory if it doesn't exist and return absolute path.
 
@@ -217,7 +216,7 @@ def simple_ensure_path(path: Union[str, Path]) -> str:
     return abs_path
 
 
-def ensure_paths(*paths: Union[str, Path], create_if_missing: bool = True) -> list[str]:
+def ensure_paths(*paths: str | Path, create_if_missing: bool = True) -> list[str]:
     """
     Ensure multiple directory paths exist and return their absolute paths.
 

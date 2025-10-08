@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,12 +17,12 @@ class ProblemStatusResponse(BaseModel):
     explanation: str = Field(
         ..., title="Explanation", description="Detailed explanation of the decision"
     )
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         None,
         title="Reason",
         description="Reason why the question was not answered (only required when decision is No)",
     )
-    original_query: Optional[str] = Field(
+    original_query: str | None = Field(
         None,
         title="Original Query",
         description="The original user question being evaluated",
@@ -68,7 +67,7 @@ class PlannerResponseFormat(BaseModel):
         ..., description="List of tasks to complete the objective"
     )
 
-    dependencies: Optional[str] = Field(
+    dependencies: str | None = Field(
         default="None", description="Required dependencies, tools, or prerequisites"
     )
 

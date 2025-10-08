@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 import autogen
 from autogen import AssistantAgent
@@ -31,8 +31,8 @@ class FileSearchAgent:
             root_dir (str): The root directory path to index, defaults to user's home directory
         """
         self.root_dir = root_dir
-        self.file_index: Dict[str, Dict] = {}
-        self.inverted_index: Dict[str, Set[str]] = defaultdict(set)
+        self.file_index: dict[str, dict] = {}
+        self.inverted_index: dict[str, set[str]] = defaultdict(set)
         self._build_index()
 
     def _build_index(self) -> None:
@@ -64,11 +64,11 @@ class FileSearchAgent:
                     for trigram in trigrams:
                         self.inverted_index[trigram].add(file_path)
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into searchable terms."""
         return re.findall(r"\w+", text.lower())
 
-    def _get_trigrams(self, text: str) -> Set[str]:
+    def _get_trigrams(self, text: str) -> set[str]:
         """Generate character trigrams for fuzzy matching."""
         if len(text) < 3:
             return {text}
@@ -82,7 +82,7 @@ class FileSearchAgent:
             size_bytes /= 1024
         return f"{size_bytes:.1f} PB"
 
-    def _calculate_relevance(self, query_tokens: List[str], file_path: str) -> float:
+    def _calculate_relevance(self, query_tokens: list[str], file_path: str) -> float:
         """Calculate relevance score for a file based on the query."""
         file_name = os.path.basename(file_path).lower()
 
@@ -99,8 +99,8 @@ class FileSearchAgent:
         return 0.6 * exact_match_score / len(query_tokens) + 0.4 * fuzzy_score
 
     def search_files(
-        self, search_term: str, file_type: Optional[str] = None, max_results: int = 20
-    ) -> List[Dict[str, str]]:
+        self, search_term: str, file_type: str | None = None, max_results: int = 20
+    ) -> list[dict[str, str]]:
         """
         Search for files matching the term and optional file type.
 
@@ -159,8 +159,8 @@ class FileSearchAgent:
 
 
 def search_files_with_agent(
-    search_term: str, file_type: Optional[str] = None
-) -> List[Dict[str, str]]:
+    search_term: str, file_type: str | None = None
+) -> list[dict[str, str]]:
     file_agent = FileSearchAgent()
 
     # Perform the search
@@ -307,7 +307,7 @@ class FileFinder:
             # Return process_completion to gracefully end the chat
             raise
 
-    def get_agents(self) -> List[Agent]:
+    def get_agents(self) -> list[Agent]:
         self.file_finder_planner = self.file_finder_planner()
         self.file_finder = self.file_finder()
         self.user_proxy = self.user_proxy()

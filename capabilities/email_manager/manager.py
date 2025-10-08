@@ -14,7 +14,7 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import parseaddr
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any
 
 import autogen
 from loguru import logger
@@ -72,13 +72,13 @@ class EmailManager:
 
     async def handle_email_confirmation(
         self,
-        recipients: List[str],
+        recipients: list[str],
         subject: str,
         msg_html: str,
         msg_plain: str,
-        attachments: List[str],
+        attachments: list[str],
         sender: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Handle user confirmation and modifications for email sending.
 
@@ -271,11 +271,11 @@ class EmailManager:
 
     async def send_email_with_attachments(
         self,
-        to: Union[List[str], str],
+        to: list[str] | str,
         subject: str,
         msg_html: str,
         msg_plain: str,
-        attachments: List[str] = None,
+        attachments: list[str] = None,
         sender: str = None,
     ):
         """
@@ -662,11 +662,11 @@ class EmailManager:
         # Wrapper functions before registering to agents
 
         async def send_email_with_attachments_wrapper(
-            to: Union[List[str], str],
+            to: list[str] | str,
             subject: str,
             msg_html: str,
             msg_plain: str,
-            attachments: List[str] = None,
+            attachments: list[str] = None,
             sender: str = None,
         ):
             return await self.send_email_with_attachments(

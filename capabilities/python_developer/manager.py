@@ -1,6 +1,5 @@
 import asyncio
 import os
-from typing import List
 
 import autogen
 from autogen import GroupChat, UserProxyAgent
@@ -206,7 +205,7 @@ class PythonDeveloper:
 
         # return groupchat.agent_by_name("stop_agent")
 
-    def get_agents(self) -> List[Agent]:
+    def get_agents(self) -> list[Agent]:
         self.planner = self.get_planner()
         self.context_keeper = self.get_context_keeper()
         self.code_writer = self.get_code_writer()

@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 import aiohttp
 
@@ -61,14 +61,14 @@ class BraveSearchClient:
         count: int = 2,
         offset: int = 0,
         safesearch: str = "moderate",
-        freshness: Optional[str] = None,
+        freshness: str | None = None,
         text_decorations: bool = False,
         spellcheck: bool = True,
-        result_filter: Optional[str] = None,
-        goggles_id: Optional[str] = None,
+        result_filter: str | None = None,
+        goggles_id: str | None = None,
         units: str = "metric",
         extra_snippets: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Perform a web search using Brave Search API
 
@@ -136,9 +136,9 @@ class BrowserManager:
         self,
         context: ChatContext,
         headless: bool = False,
-        window_size: Dict[str, int] = None,
+        window_size: dict[str, int] = None,
         save_results: bool = True,
-        browser_data_dir: Optional[str] = None,
+        browser_data_dir: str | None = None,
     ):
         """
         Initialize BrowserManager with simplified configuration.
@@ -357,10 +357,10 @@ class BrowserManager:
         query: str,
         search_type: str = "comprehensive",
         count: int = 5,
-        freshness: Optional[str] = None,
+        freshness: str | None = None,
         country: str = "US",
         safesearch: str = "moderate",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Brave Search API tool with comprehensive result formatting
 
@@ -818,7 +818,7 @@ class BrowserManager:
                 "error": str(e),
             }
 
-    def _generate_answer_summary(self, results: List[Dict]) -> str:
+    def _generate_answer_summary(self, results: list[dict]) -> str:
         """Generate a brief answer summary from top results"""
         if not results:
             return ""
@@ -1035,7 +1035,7 @@ class BrowserManager:
             system_message=prompts.process_completion,
         )
 
-    def _initialize_agents(self) -> List:
+    def _initialize_agents(self) -> list:
         """Initialize all agents with simplified configuration."""
         self.planner = self.get_browser_planner()
 

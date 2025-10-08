@@ -131,7 +131,7 @@ Assumptions: What assumptions does the question make (explicit or implicit)?
 # JUST PERFORM TASK WHAT USER HAS ASKED TO DO
 
 
-# ###RESPONSE TEMPELATE
+# ###RESPONSE TEMPLATE
 # Task <task1> --> Capability <Capability1>
 # """
 

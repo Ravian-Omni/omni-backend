@@ -2,7 +2,7 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 import autogen
 from loguru import logger
@@ -28,14 +28,14 @@ class ChatContext:
     omni_memory: OmniMemory
     cancellation_token: CancellationToken = None
     task_id: str = None
-    manager_kwargs: Optional[Dict[str, Any]] = None
+    manager_kwargs: dict[str, Any] | None = None
 
     def __post_init__(self):
         if self.manager_kwargs is None:
             self.manager_kwargs = {}
 
 
-async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
+async def create_capability_chat(context: ChatContext) -> dict[str, str]:
     chat_document = {
         "user_id": context.user_id,
         "chat_id": context.chat_id,
@@ -64,7 +64,7 @@ async def create_capability_chat(context: ChatContext) -> Dict[str, str]:
     return {"chat_id": context.chat_id}
 
 
-async def update_chat_history(context: ChatContext, message: Dict[str, Any]) -> bool:
+async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> bool:
     """
     Update chat history in MongoDB.
 
@@ -178,7 +178,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
 
-    def _get_agent_current_usage(self, agent) -> Dict[str, Any]:
+    def _get_agent_current_usage(self, agent) -> dict[str, Any]:
         """Get current usage for a specific agent"""
         default_usage = {
             "model": "unknown",
@@ -212,7 +212,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "cost": model_usage.get("cost", 0.0),
         }
 
-    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> Dict[str, Any]:
+    def _calculate_agent_usage_delta(self, agent, agent_name: str) -> dict[str, Any]:
         """Calculate usage delta for a specific agent since last check"""
         current_usage = self._get_agent_current_usage(agent)
         previous_usage = self._agent_previous_usage[agent_name]
@@ -238,11 +238,11 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "agent_name": agent_name,
         }
 
-    def _get_sender_agent_usage(self, sender) -> Dict[str, Any]:
+    def _get_sender_agent_usage(self, sender) -> dict[str, Any]:
         """Get usage details for the sender agent when message is received"""
         return self._calculate_agent_usage_delta(sender, sender.name)
 
-    async def _send_websocket_message(self, message: Dict[str, Any]) -> None:
+    async def _send_websocket_message(self, message: dict[str, Any]) -> None:
         """Send message to WebSocket clients"""
         try:
             websocket_manager = await get_websocket_manager()
@@ -255,7 +255,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             logger.error(f"WebSocket send failed: {e}")
             raise e
 
-    async def _process_message_background(self, message_data: Dict[str, Any]) -> None:
+    async def _process_message_background(self, message_data: dict[str, Any]) -> None:
         """Process message in background (WebSocket + Database)"""
         await asyncio.gather(
             self._send_websocket_message(message_data),
@@ -264,7 +264,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         )
 
     def _print_received_message(
-        self, message: Dict[str, Any], sender: "autogen.Agent"
+        self, message: dict[str, Any], sender: "autogen.Agent"
     ) -> None:
         """Override to handle received messages with enhanced processing"""
         logger.info(f"Received from {sender.name}: {message}")
@@ -305,14 +305,14 @@ class CustomGroupChatManager(autogen.GroupChatManager):
 
     # Additional utility methods for comprehensive usage tracking
 
-    def get_all_agents_current_usage(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_agents_current_usage(self) -> dict[str, dict[str, Any]]:
         """Get current usage for all agents in the group"""
         all_usage = {}
         for agent in self.groupchat.agents:
             all_usage[agent.name] = self._get_agent_current_usage(agent)
         return all_usage
 
-    def get_group_usage_summary(self) -> Dict[str, Any]:
+    def get_group_usage_summary(self) -> dict[str, Any]:
         """Get aggregated usage summary for the entire group"""
         all_usage = self.get_all_agents_current_usage()
 

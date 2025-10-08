@@ -1,11 +1,9 @@
-from typing import Dict, List
-
 import requests
 
 from .country_data import country_codes
 
 
-def _get_user_country(country_codes: List[Dict[str, str]]) -> Dict[str, str]:
+def _get_user_country(country_codes: list[dict[str, str]]) -> dict[str, str]:
     """Get user's country from IP address."""
     try:
         response = requests.get("https://ipinfo.io/json", timeout=5)

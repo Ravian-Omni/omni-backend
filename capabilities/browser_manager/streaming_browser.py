@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
 from browser_use import Agent
 from browser_use.agent.message_manager.utils import extract_json_from_model_output
@@ -56,7 +56,7 @@ class StreamingAgent(Agent):
         self.websocket_manager = ws_manager
         self.llm_calls_metadata = []  # Store all LLM call metadata
 
-    def _extract_llm_metadata(self, response) -> Dict[str, Any]:
+    def _extract_llm_metadata(self, response) -> dict[str, Any]:
         """Extract metadata from LLM response with proper token extraction"""
         if not response:
             return {}
@@ -192,7 +192,7 @@ class StreamingAgent(Agent):
 
         return metadata
 
-    def get_token_summary(self) -> Dict[str, Any]:
+    def get_token_summary(self) -> dict[str, Any]:
         """Get summary of token usage across all LLM calls"""
         total_input_tokens = 0
         total_output_tokens = 0
@@ -214,11 +214,11 @@ class StreamingAgent(Agent):
             ),
         }
 
-    def get_latest_llm_metadata(self) -> Dict[str, Any]:
+    def get_latest_llm_metadata(self) -> dict[str, Any]:
         """Get metadata from the most recent LLM call"""
         return self.llm_calls_metadata[-1] if self.llm_calls_metadata else {}
 
-    async def get_token_details(self) -> Dict[str, Any]:
+    async def get_token_details(self) -> dict[str, Any]:
         """Get current token consumption details"""
         try:
             current_tokens = getattr(
@@ -242,7 +242,7 @@ class StreamingAgent(Agent):
         except Exception as e:
             return {"error": f"Could not get token details: {str(e)}"}
 
-    async def stream_action(self, action_data: Dict[str, Any]):
+    async def stream_action(self, action_data: dict[str, Any]):
         """Stream action to all connected clients"""
         # Add token information to every streamed action
         # token_details = await self.get_token_details()
@@ -562,7 +562,7 @@ class StreamingAgent(Agent):
 
         return results
 
-    def _get_action_summary(self, action: ActionModel) -> Dict[str, Any]:
+    def _get_action_summary(self, action: ActionModel) -> dict[str, Any]:
         """Extract summary information from an action"""
         action_data = action.model_dump(exclude_unset=True)
         if not action_data:
@@ -591,7 +591,7 @@ class StreamingAgent(Agent):
             "description": description,
         }
 
-    async def _get_browser_context(self) -> Dict[str, Any]:
+    async def _get_browser_context(self) -> dict[str, Any]:
         """Get current browser context information"""
         try:
             if not self.browser_session:

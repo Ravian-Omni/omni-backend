@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
@@ -151,7 +151,7 @@ async def create_new_capability_chat(
         )
 
 
-def serialize_document(doc: Dict[Any, Any]) -> Dict[str, Any]:
+def serialize_document(doc: dict[Any, Any]) -> dict[str, Any]:
     """Convert MongoDB document to JSON serializable format"""
     if doc is None:
         return None
@@ -174,15 +174,15 @@ class RawMessage(BaseModel):
     role: str
     name: str
     raw_message: Any
-    task_id: Optional[str] = None
+    task_id: str | None = None
     timestamp: str
 
 
 # Modified response model to only include chat_id and raw_messages
 class SimplifiedChatHistory(BaseModel):
     chat_id: str
-    chat_dir: Optional[str] = None
-    raw_messages: List[RawMessage]
+    chat_dir: str | None = None
+    raw_messages: list[RawMessage]
 
 
 @router.get("/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory)
@@ -278,7 +278,7 @@ class EnhancedChatHistory(BaseModel):
     call_id: str
     capability_name: str
     chat_id: str
-    raw_messages: List[RawMessage]
+    raw_messages: list[RawMessage]
 
 
 @router.get(

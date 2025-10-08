@@ -2,7 +2,7 @@ import asyncio
 import os
 import signal
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from autogen.code_utils import WIN32, _cmd
 from autogen.coding import LocalCommandLineCodeExecutor
@@ -20,16 +20,16 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         super().__init__(*args, **kwargs)
 
         # Enhanced process management
-        self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
-        self._execution_futures: Dict[str, asyncio.Future] = (
+        self.active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._execution_futures: dict[str, asyncio.Future] = (
             {}
         )  # Track execution futures
-        self._process_monitor_tasks: Dict[str, asyncio.Task] = {}  # Monitor tasks
-        self._output_tasks: Dict[str, List[asyncio.Task]] = (
+        self._process_monitor_tasks: dict[str, asyncio.Task] = {}  # Monitor tasks
+        self._output_tasks: dict[str, list[asyncio.Task]] = (
             {}
         )  # Output monitoring tasks
 
-    async def stream_action(self, action_data: Dict[str, Any]):
+    async def stream_action(self, action_data: dict[str, Any]):
         """Stream action to all connected clients"""
         try:
             websocket_manager = await get_websocket_manager()
@@ -40,7 +40,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             print(f"Error streaming action: {e}")
 
     def _execute_code_dont_check_setup(
-        self, code_blocks: List[CodeBlock]
+        self, code_blocks: list[CodeBlock]
     ) -> CommandLineCodeResult:
         """Override to make ALL code execution async and interactive"""
         try:
@@ -51,7 +51,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             )
 
     async def _async_execute_blocks(
-        self, code_blocks: List[CodeBlock]
+        self, code_blocks: list[CodeBlock]
     ) -> CommandLineCodeResult:
         """Execute all code blocks asynchronously with proper lifecycle management"""
 
@@ -231,7 +231,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
                             # Wait indefinitely
                             return_code = await execution_future
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # Handle timeout
                         await self._handle_process_timeout(process_id)
                         return_code = 124
@@ -407,7 +407,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
                     "timestamp": time.time(),
                 }
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Force kill
             process.kill()
             await process.wait()
@@ -420,7 +420,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             )
 
     async def _monitor_and_collect_stdout(
-        self, process: asyncio.subprocess.Process, process_id: str, collector: List[str]
+        self, process: asyncio.subprocess.Process, process_id: str, collector: list[str]
     ):
         """Monitor stdout with enhanced input detection and real-time streaming"""
         try:
@@ -496,7 +496,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             )
 
     async def _monitor_and_collect_stderr(
-        self, process: asyncio.subprocess.Process, process_id: str, collector: List[str]
+        self, process: asyncio.subprocess.Process, process_id: str, collector: list[str]
     ):
         """Monitor stderr with real-time streaming"""
         try:
@@ -662,7 +662,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
                         "timestamp": time.time(),
                     }
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Force kill if doesn't terminate gracefully
                 process.kill()
                 await process.wait()
@@ -786,11 +786,11 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         except Exception as e:
             print(f"Error during executor cleanup: {e}")
 
-    def get_active_processes(self) -> List[str]:
+    def get_active_processes(self) -> list[str]:
         """Get list of active process IDs"""
         return list(self.active_processes.keys())
 
-    async def get_process_info(self, process_id: str) -> Dict[str, Any]:
+    async def get_process_info(self, process_id: str) -> dict[str, Any]:
         """Get detailed process information for debugging"""
         if process_id not in self.active_processes:
             return {"error": "Process not found", "process_id": process_id}
@@ -838,7 +838,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         except Exception as e:
             print(f"Error during cleanup: {e}")
 
-    def get_process_info_sync(self, process_id: str) -> Dict[str, Any]:
+    def get_process_info_sync(self, process_id: str) -> dict[str, Any]:
         """Sync wrapper for getting process info"""
         try:
             return async_to_sync(self.get_process_info(process_id))

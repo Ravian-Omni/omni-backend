@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,13 +53,13 @@ class ProcessCompletionResponse(BaseModel):
     outcome: OutcomeStatus = Field(
         ..., description="Whether the generated images meet user requirements"
     )
-    generated_images: List[GeneratedImage] = Field(
+    generated_images: list[GeneratedImage] = Field(
         default_factory=list, description="List of successfully generated images"
     )
     summary: str = Field(
         ..., description="Brief 1-2 sentence summary of generation results"
     )
-    issues: Optional[str] = Field(
+    issues: str | None = Field(
         default="NONE",
         description="Critical issues encountered during generation, or 'NONE' if no issues",
     )

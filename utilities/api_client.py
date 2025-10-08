@@ -1,7 +1,7 @@
 import json
 import time
 from datetime import date, datetime
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import httpx
 
@@ -45,7 +45,7 @@ class APIError(Exception):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
+        status_code: int | None = None,
         error_type: str = "API_ERROR",
     ):
         self.message = message
@@ -53,7 +53,7 @@ class APIError(Exception):
         self.error_type = error_type
         super().__init__(self.message)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert error to dictionary format"""
         return {
             "success": False,
@@ -84,7 +84,7 @@ class APIResponse:
         )
 
     @property
-    def headers(self) -> Dict[str, str]:
+    def headers(self) -> dict[str, str]:
         return dict(self.response.headers) if self.response else {}
 
     @property
@@ -99,7 +99,7 @@ class APIResponse:
     def content(self) -> bytes:
         return self.response.content if self.response else b""
 
-    def json(self) -> Dict[str, Any]:
+    def json(self) -> dict[str, Any]:
         """Get JSON response with error handling"""
         if self.error:
             return self.error.to_dict()
@@ -116,7 +116,7 @@ class APIResponse:
                 "data": {"raw_response": self.text},
             }
 
-    def standard_response(self) -> Dict[str, Any]:
+    def standard_response(self) -> dict[str, Any]:
         """
         Parse response as StandardResponse and return key values directly
 
@@ -167,7 +167,7 @@ class APIResponse:
             return self.text
 
     @property
-    def data(self) -> Dict[str, Any]:
+    def data(self) -> dict[str, Any]:
         """Get data from StandardResponse"""
         if self.error:
             return self.error.to_dict()["data"]
@@ -220,8 +220,8 @@ class ServerAPIClient:
         return self._client
 
     def _get_headers(
-        self, custom_headers: Optional[Dict[str, str]] = None
-    ) -> Dict[str, str]:
+        self, custom_headers: dict[str, str] | None = None
+    ) -> dict[str, str]:
         """Build headers with JWT token and custom headers"""
         headers = self.default_headers.copy()
 
@@ -244,10 +244,10 @@ class ServerAPIClient:
         self,
         method: str,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        data: Optional[Union[Dict, str]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        params: dict[str, Any] | None = None,
+        data: dict | str | None = None,
+        json_data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """
         Make HTTP request with structured error handling
@@ -350,8 +350,8 @@ class ServerAPIClient:
     async def get(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make GET request"""
         return await self.request("GET", endpoint, params=params, headers=headers)
@@ -359,10 +359,10 @@ class ServerAPIClient:
     async def post(
         self,
         endpoint: str,
-        data: Optional[Union[Dict, str]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        data: dict | str | None = None,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make POST request"""
         return await self.request(
@@ -377,10 +377,10 @@ class ServerAPIClient:
     async def put(
         self,
         endpoint: str,
-        data: Optional[Union[Dict, str]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        data: dict | str | None = None,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make PUT request"""
         return await self.request(
@@ -395,10 +395,10 @@ class ServerAPIClient:
     async def patch(
         self,
         endpoint: str,
-        data: Optional[Union[Dict, str]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        data: dict | str | None = None,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make PATCH request"""
         return await self.request(
@@ -413,8 +413,8 @@ class ServerAPIClient:
     async def delete(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make DELETE request"""
         return await self.request("DELETE", endpoint, params=params, headers=headers)
@@ -422,8 +422,8 @@ class ServerAPIClient:
     async def head(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make HEAD request"""
         return await self.request("HEAD", endpoint, params=params, headers=headers)
@@ -431,8 +431,8 @@ class ServerAPIClient:
     async def options(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> APIResponse:
         """Make OPTIONS request"""
         return await self.request("OPTIONS", endpoint, params=params, headers=headers)
@@ -446,7 +446,7 @@ class ServerAPIClient:
         """Update default timeout"""
         self.timeout = timeout
 
-    def set_default_headers(self, headers: Dict[str, str]):
+    def set_default_headers(self, headers: dict[str, str]):
         """Update default headers"""
         self.default_headers.update(headers)
 

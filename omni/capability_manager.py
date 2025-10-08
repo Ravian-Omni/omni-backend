@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from loguru import logger
 
@@ -14,12 +14,12 @@ class CapabilityConfig:
 
     name: str
     collection: str
-    manager_class: Type
+    manager_class: type
     completion_agent_name: str = "process_completion"
     use_chat_messages: bool = True
     cancellation_token: CancellationToken = None
     task_id: str = None
-    manager_kwargs: Optional[Dict[str, Any]] = (
+    manager_kwargs: dict[str, Any] | None = (
         None  # Additional arguments for manager class
     )
 
@@ -39,7 +39,7 @@ class CapabilityManager:
 
     async def execute_capability(
         self, query: str, config: CapabilityConfig, call_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a capability with the given configuration
 
@@ -108,7 +108,7 @@ class CapabilityManager:
             logger.error(f"{config.name} process failed for query '{query}': {e}")
             return {"error": f"{config.name} process failed: {str(e)}", "query": query}
 
-    def _prepare_chat_messages(self) -> List[Dict[str, Any]]:
+    def _prepare_chat_messages(self) -> list[dict[str, Any]]:
         """Prepare messages for capability manager chat"""
         # messages = self.memory.pull_recent_from_chat_manager()
         messages = []
@@ -138,7 +138,7 @@ class CapabilityManager:
         #     messages.extend(executor)
         return messages
 
-    def _get_last_completion_content(self) -> Optional[list]:
+    def _get_last_completion_content(self) -> list | None:
         """Get last completion content from capability messages for all specified agents"""
         try:
             capability_messages = self.memory.pull_last_capability_messages()
@@ -161,8 +161,8 @@ class CapabilityManager:
             return None
 
     def _extract_completion_result(
-        self, messages: List[Dict[str, Any]], completion_agent_name: str
-    ) -> Optional[str]:
+        self, messages: list[dict[str, Any]], completion_agent_name: str
+    ) -> str | None:
         """Extract completion result from chat messages"""
         try:
             # Search from most recent messages

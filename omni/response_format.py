@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -103,13 +103,13 @@ class Task(BaseModel):
     #     description="The **full, exact** response returned by the agent that executed this task."
     #     "Do NOT summarize, truncate, or paraphrase any part of the response.",
     # )
-    details_of_generated_files: Optional[str] = None
-    complete_location_generated_files: Optional[str] = None
+    details_of_generated_files: str | None = None
+    complete_location_generated_files: str | None = None
 
 
 class PlannerResponse(BaseModel):
     user_request: str
-    breakdown: List[Task]
+    breakdown: list[Task]
     overall_strategy: str
     overall_status: OverallStatus
 
@@ -194,7 +194,7 @@ class Step(BaseModel):
 
 
 class AgentSelectionResponse(BaseModel):
-    steps: List[Step] = Field(..., title="Steps")
+    steps: list[Step] = Field(..., title="Steps")
     final_answer: AllowedAgents = Field(..., title="Final Answer")
 
     @field_validator("final_answer")
@@ -271,10 +271,10 @@ class TaskCapabilityMapping(BaseModel):
     capability: Capability = Field(
         ..., title="Capability", description="The capability to handle this task"
     )
-    task_id: Optional[int] = Field(
+    task_id: int | None = Field(
         None, title="Task ID", description="Optional task identifier"
     )
-    priority: Optional[int] = Field(
+    priority: int | None = Field(
         None, title="Priority", description="Task priority for execution order"
     )
 
@@ -297,10 +297,10 @@ class TaskCapabilityMapping(BaseModel):
 
 
 class CapabilityRoutingResponse(BaseModel):
-    task_assignments: List[TaskCapabilityMapping] = Field(
+    task_assignments: list[TaskCapabilityMapping] = Field(
         ..., title="Task Assignments", description="List of task to capability mappings"
     )
-    execution_notes: Optional[str] = Field(
+    execution_notes: str | None = Field(
         None,
         title="Execution Notes",
         description="Additional notes about task dependencies or parallel execution",
@@ -401,10 +401,10 @@ class UserCountry(BaseModel):
     Pydantic model for user country information.
     """
 
-    country_code: Optional[str] = Field(
+    country_code: str | None = Field(
         None, description="ISO country code (e.g., 'US', 'GB', 'IN')", example="US"
     )
-    country_name: Optional[str] = Field(
+    country_name: str | None = Field(
         None, description="Full country name", example="Great Britain"
     )
 
@@ -479,17 +479,17 @@ class QuestionClassification(BaseModel):
         example="How are you doing today?",
     )
 
-    complexity_score: Optional[int] = Field(
+    complexity_score: int | None = Field(
         None,
         ge=1,
         le=10,
         description="Optional complexity score from 1-10, where 1 is simple and 10 is highly complex",
     )
-    suggested_response_type: Optional[str] = Field(
+    suggested_response_type: str | None = Field(
         None,
         description="Optional suggestion for how to respond to this type of question",
     )
-    eta_minutes: Optional[str] = Field(
+    eta_minutes: str | None = Field(
         None,
         description=(
             "Estimated time to complete the task. MUST correspond to complexity_score: "
@@ -539,7 +539,7 @@ class FunctionCall(BaseModel):
 
 
 class AgentCallerResponse(BaseModel):
-    function_calls: List[FunctionCall]
+    function_calls: list[FunctionCall]
 
     # class Config:
     #     extra = "forbid"
@@ -561,10 +561,10 @@ class SolutionStep(BaseModel):
     description: str = Field(
         ..., description="Detailed description of what happens in this step"
     )
-    solution_details: Optional[str] = Field(
+    solution_details: str | None = Field(
         None, description="Detailed solution and process"
     )
-    result: Optional[str] = Field(None, description="Result of this step")
+    result: str | None = Field(None, description="Result of this step")
 
 
 class FileOutput(BaseModel):
@@ -573,7 +573,7 @@ class FileOutput(BaseModel):
     file_name: str = Field(..., description="Name of the generated file")
     file_type: str = Field(..., description="Type of file (txt, json, pdf, etc.)")
     file_path: str = Field(..., description="Complete path to the file")
-    description: Optional[str] = Field(None, description="Description of file contents")
+    description: str | None = Field(None, description="Description of file contents")
 
 
 class process_completion_response(BaseModel):
@@ -587,7 +587,7 @@ class process_completion_response(BaseModel):
     status: Status = Field(..., description="Current status of the task")
 
     # Solution process
-    solution_steps: List[SolutionStep] = Field(
+    solution_steps: list[SolutionStep] = Field(
         default_factory=list, description="All steps taken to solve the problem"
     )
 
@@ -598,32 +598,32 @@ class process_completion_response(BaseModel):
     )
 
     # Final answers
-    final_answers: List[str] = Field(
+    final_answers: list[str] = Field(
         default_factory=list, description="Final numerical or symbolic answers"
     )
 
     # File outputs
-    details_of_generated_files: Optional[str] = Field(
+    details_of_generated_files: str | None = Field(
         None, description="Description of files that were generated"
     )
-    complete_location_generated_files: Optional[str] = Field(
+    complete_location_generated_files: str | None = Field(
         None, description="Complete path to directory containing generated files"
     )
-    generated_files: List[FileOutput] = Field(
+    generated_files: list[FileOutput] = Field(
         default_factory=list, description="List of generated files with details"
     )
 
     # Summary and insights
     summary: str = Field(..., description="Summary of the problem-solving process")
-    insights: List[str] = Field(
+    insights: list[str] = Field(
         default_factory=list, description="Key insights from the solution process"
     )
-    learnings: List[str] = Field(
+    learnings: list[str] = Field(
         default_factory=list, description="Learnings and observations"
     )
 
     # Additional metadata
-    accuracy_notes: Optional[str] = Field(
+    accuracy_notes: str | None = Field(
         None, description="Notes about solution accuracy and precision"
     )
     validation_performed: bool = Field(
@@ -632,7 +632,7 @@ class process_completion_response(BaseModel):
 
     @field_validator("solution_steps")
     @classmethod
-    def validate_solution_steps(cls, v: List[SolutionStep]) -> List[SolutionStep]:
+    def validate_solution_steps(cls, v: list[SolutionStep]) -> list[SolutionStep]:
         """Validate that step numbers are sequential."""
         if v:
             step_numbers = [step.step_number for step in v]
@@ -642,7 +642,7 @@ class process_completion_response(BaseModel):
 
     @field_validator("final_answers")
     @classmethod
-    def validate_final_answers(cls, v: List[str]) -> List[str]:
+    def validate_final_answers(cls, v: list[str]) -> list[str]:
         """Validate that final answers are non-empty strings."""
         if v:
             for answer in v:
@@ -664,10 +664,10 @@ class process_completion_response(BaseModel):
         self,
         step_title: str,
         description: str,
-        equation_before: Optional[str] = None,
-        equation_after: Optional[str] = None,
-        calculation_details: Optional[str] = None,
-        result: Optional[str] = None,
+        equation_before: str | None = None,
+        equation_after: str | None = None,
+        calculation_details: str | None = None,
+        result: str | None = None,
     ) -> None:
         """Helper method to add a solution step."""
         step_number = len(self.solution_steps) + 1
@@ -687,7 +687,7 @@ class process_completion_response(BaseModel):
         file_name: str,
         file_type: str,
         file_path: str,
-        description: Optional[str] = None,
+        description: str | None = None,
     ) -> None:
         """Helper method to add a generated file."""
         file_output = FileOutput(
