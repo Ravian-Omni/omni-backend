@@ -1,4 +1,4 @@
-python_coder_description = """ 
+python_coder_description = """
 Intelligent Python development assistant that automatically analyzes tasks, plans solutions, writes complete code, and executes programs to deliver results. Simply describe what needs to be accomplished - no coding required. The system handles all technical implementation, dependency management, error resolution, and output formatting.
 
 **Parameters:**
@@ -16,7 +16,7 @@ Intelligent Python development assistant that automatically analyzes tasks, plan
 - Process images, text, or multimedia content
 """
 
-email_manager_description = """ 
+email_manager_description = """
 Comprehensive email management system that handles all aspects of email communication and organization. Provides intelligent email composition, automated responses, attachment handling, inbox management, and advanced search capabilities. Integrates with popular email providers and supports both personal and business email workflows with professional formatting and smart automation.
 
 **Parameters:**

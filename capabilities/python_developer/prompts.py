@@ -1,12 +1,12 @@
 # planner = """
-# You are a Planner Agent. 
+# You are a Planner Agent.
 
-# Read this carefully, this is the last process completion message from. 
+# Read this carefully, this is the last process completion message from.
 # And these are all the messages till now
 
-# Your job is to understand user requests and create a TO DO list in english to achieve the desired outcome.  
+# Your job is to understand user requests and create a TO DO list in english to achieve the desired outcome.
 # The TO DO list must have [] so that they can be ticked off once their work in done
-# Always read the data from the location provided. 
+# Always read the data from the location provided.
 
 # The TO DO  list should be exhaustive and must have all the information which would be necessary to solve the problem to its entirety
 
@@ -119,7 +119,7 @@ planner = """
 </expected_output>
 """
 # code_writer = """
-# You are a {coding_language} Code writer Agent. You will receive instructions from the Planner to generate code in {coding_language} 3.x language. 
+# You are a {coding_language} Code writer Agent. You will receive instructions from the Planner to generate code in {coding_language} 3.x language.
 # - The code should be functional and complete.
 # - Specify the programming language {coding_language} using code blocks (```{coding_language} ... ```).
 # - Use subprocess.popen  to do !pip install any module.
@@ -136,7 +136,7 @@ planner = """
 # - SAVE ALL TYPES OF FILES LIKE PPT, PPTX, PDF, HTML, CSV, XLS and other files in this location --> {file_location}
 
 
-# FOR ANY HTML FILE, RUN THEM LIKE THIS 
+# FOR ANY HTML FILE, RUN THEM LIKE THIS
 # import webbrowser
 # import os
 
@@ -585,7 +585,7 @@ debugger = """
 {{
   "diagnostic_steps": [
     "1. identify error type and root cause",
-    "2. determine impact on code execution", 
+    "2. determine impact on code execution",
     "3. verify fix doesn't introduce prohibited elements",
     "4. create complete working solution",
     "5. provide validation steps for verification"
@@ -626,7 +626,7 @@ debugger = """
       "console_output": "installation progress and success confirmation"
     }},
     "file_path_resolution": {{
-      "pattern": "use pathlib with directory creation and error handling", 
+      "pattern": "use pathlib with directory creation and error handling",
       "console_output": "directory status and file creation confirmation"
     }},
     "data_handling": {{
@@ -640,7 +640,7 @@ debugger = """
   }},
   "quality_validation": [
     "fix addresses root cause specifically",
-    "solution is complete and self-contained", 
+    "solution is complete and self-contained",
     "no user interaction or server components introduced",
     "console output patterns maintained",
     "generic filename conventions preserved",
@@ -651,10 +651,10 @@ debugger = """
 """
 
 prob_status_checker = """
-Check if the problem is solved as what user has asked for.                         
+Check if the problem is solved as what user has asked for.
 
-CHECK CLOSELY IF WE HAVE ANSWERED THE QUESTION ASKED BY USER. 
-Your answer will be  yes or no. 
+CHECK CLOSELY IF WE HAVE ANSWERED THE QUESTION ASKED BY USER.
+Your answer will be  yes or no.
 Think step by step and then respond.
 If we have not answered the question say NO
 If we have  answered the question say YES.

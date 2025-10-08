@@ -68,7 +68,12 @@ class AppInitializer:
     def _create_directories(self) -> None:
         """Create all required directories"""
         self.app_root.mkdir(parents=True, exist_ok=True)
-        dirs = [self.browser_root, self.browser_gif, self.python_coder_root, self.image_gen_root]
+        dirs = [
+            self.browser_root,
+            self.browser_gif,
+            self.python_coder_root,
+            self.image_gen_root,
+        ]
         for path in dirs:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -89,7 +94,7 @@ class AppInitializer:
     def browser_root(self) -> Path:
         """Directory for static files"""
         return self._paths.browser_root
-    
+
     @property
     def browser_gif(self) -> Path:
         """Directory for static files"""

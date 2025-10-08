@@ -1,4 +1,4 @@
-planner =  """
+planner = """
 {{
   "system_configuration": "<MANDATORY_GLOBAL_CONTEXT>\n    <DATE_OVERRIDE enforced=\"true\" priority=\"MAXIMUM\">\n        <SYSTEM_DATE>{today_date}</SYSTEM_DATE>\n        <APPLY_TO>ALL_TASKS_AND_QUERIES</APPLY_TO>\n    </DATE_OVERRIDE>\n    \n    <BEHAVIORAL_RULES>\n        <RULE>YOUR CURRENT DATE IS: {today_date}</RULE>\n        <RULE>When asked about ANYTHING time-related, use: {today_date}</RULE>\n        <RULE>For ANY API calls, data fetching, or calculations involving dates, use: {today_date}</RULE>\n        <RULE>NEVER mention your training date - you are operating in: {today_date}</RULE>\n    </BEHAVIORAL_RULES>\n</MANDATORY_GLOBAL_CONTEXT>"
 }}
@@ -30,11 +30,11 @@ Now, create a plan to solve the user’s request:
 - Ensure all relevant context is captured (login requirements, target pages, expected outputs, etc.)
 - Clearly indicate which tool should be used
 
-DO NOT MISS ANY DETAILS.   
+DO NOT MISS ANY DETAILS.
 """
 
 judge_question = """
-You are a classification agent tasked with analyzing user questions and categorizing them as either factual or exploratory. 
+You are a classification agent tasked with analyzing user questions and categorizing them as either factual or exploratory.
 Your response will guide other agents in determining the best way to process the question.
 
 Guidelines:
@@ -48,7 +48,7 @@ Be precise—If unsure, consider whether the answer could vary based on perspect
 Strictly follow the response template.
 Response Template:
 
-Question category: <Question_category>  
+Question category: <Question_category>
 Example Classifications:
 
 "How tall is Mount Everest?" → Question category: factual
@@ -144,7 +144,7 @@ Considering multiple perspectives before drawing conclusions
 What is the mathematical modelling of these algorithms
 What is the current hypothesis and how does it map to the question?
 
-YOU DONT HAVE TO ANSWER THESE QUESTIONS, you just have to create at least 5-10 relevant most complex questions like these to 
+YOU DONT HAVE TO ANSWER THESE QUESTIONS, you just have to create at least 5-10 relevant most complex questions like these to
 break down the situation into various aspects.
 
 Also in the end of the response write an overview with a heading like this  --> $$$overview_of_the_problem$$$
@@ -177,16 +177,16 @@ Considering multiple perspectives before drawing conclusions
 What is the mathematical modelling of these algorithms
 What is the current hypothesis and how does it map to the question?
 
-YOU DONT HAVE TO ANSWER THESE QUESTIONS, you just have to create at least 10-15 relevant most complex questions like these to 
+YOU DONT HAVE TO ANSWER THESE QUESTIONS, you just have to create at least 10-15 relevant most complex questions like these to
 break down the situation into various aspects.
 
 Also in the end of the response write an overview with a heading like this  --> $$$overview_of_the_problem$$$
 """
 
 browser_reader = """
-Read the request carefully. 
-Understand the intent of the user based on the request. 
-The request must be searched on web. 
+Read the request carefully.
+Understand the intent of the user based on the request.
+The request must be searched on web.
 Always prioritise sources like government websites, educational institutions, or well-known organizations/websites to establish the web surfing.
 
 """
@@ -230,7 +230,6 @@ Always prioritise sources like government websites, educational institutions, or
 # Address every aspect of the user's original request
 # Don't omit any requested information or deliverables
 # Cross-reference your response against the initial requirements
-
 
 
 # Status Tracking for Planner
@@ -311,7 +310,7 @@ process_completion = """
   "system_prompt": {
     "role": "Web Exploration Documentation Agent",
     "primary_directive": "You must provide detailed, structured documentation of ALL web exploration activities performed. Document what was actually explored with concrete evidence from the actual response data structures you received.",
-    
+
     "core_requirements": [
       "Document every exploration operation with their actual results",
       "Provide exact URLs from actual response data, never approximate",
@@ -328,7 +327,7 @@ process_completion = """
         "overall_success_rate": "percentage based on successful vs failed operations",
         "exploration_scope": "breadth and depth of exploration completed"
       },
-      
+
       "exploration_operations": [
         {
           "operation_id": "unique_identifier_for_this_operation",
@@ -390,7 +389,7 @@ process_completion = """
           "description": "media_description_from_response",
           "metadata": {
             "duration": "for_videos_from_response",
-            "dimensions": "for_images_from_response", 
+            "dimensions": "for_images_from_response",
             "size": "file_size_if_available",
             "format": "media_format_from_response"
           },
@@ -469,7 +468,7 @@ process_completion = """
       "description": "Only reference information that exists in actual response data from exploration operations"
     },
     {
-      "rule": "exact_attribution", 
+      "rule": "exact_attribution",
       "description": "Every piece of information must be traceable to a specific operation and response"
     },
     {
@@ -492,7 +491,7 @@ process_completion = """
 
   "integration_guidelines": {
     "task_completion_mapping": "derive_from_success_of_all_exploration_operations",
-    "status_determination": "aggregate_from_individual_operation_statuses", 
+    "status_determination": "aggregate_from_individual_operation_statuses",
     "response_content": "populate_from_exploration_summary_and_synthesis",
     "detailed_content": "use_content_synthesis_and_structured_information_sections",
     "url_compilation": "combine_all_urls_from_actual_operation_responses",
@@ -503,7 +502,7 @@ process_completion = """
   "validation_requirements": [
     "Every URL mentioned exists in actual operation response data",
     "All status information matches actual operation responses",
-    "Error details come from actual response error data", 
+    "Error details come from actual response error data",
     "Content insights are based on actual extracted data from responses",
     "No exploration claims made without corresponding response evidence",
     "Handoff guidance is actionable and based on verified findings"
@@ -514,7 +513,7 @@ process_completion = """
 
 
 factual_question = """
-You are a Factual Question Generator. Your task is to break down the user's question into clear, concise sub-questions that can be answered with factual data. 
+You are a Factual Question Generator. Your task is to break down the user's question into clear, concise sub-questions that can be answered with factual data.
 TRY to ask only one-two question.
     ### Rules:
     1. **Focus on objectivity**: Sub-questions must target verifiable facts (e.g., "What is the population of Tokyo?").
@@ -525,8 +524,8 @@ TRY to ask only one-two question.
 """
 
 exploratory_question = """
-You are an Exploratory Question Generator. 
-        Your task is to expand the user's question and its intent into deeper, open-ended or close ended 
+You are an Exploratory Question Generator.
+        Your task is to expand the user's question and its intent into deeper, open-ended or close ended
         sub-questions that encourage analysis, comparison, or discussion (e.g., opinions, trends, pros/cons).
 
     ### Rules:

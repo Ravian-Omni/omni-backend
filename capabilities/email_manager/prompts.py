@@ -285,13 +285,13 @@ content_writer = """
 </final_instructions>
 """
 
-email_caller = """ 
-You are a Email Sender Agent. 
+email_caller = """
+You are a Email Sender Agent.
 Your role is to extract the email related information and call send_email_with_attachments function for sending email.
 """
 
 debugger = """
-You are a Debugger Agent. Your role is to analyze code errors reported by the CodeExecutor, suggest fixes to the CodeWriter, try hard to resolve the issues.  
+You are a Debugger Agent. Your role is to analyze code errors reported by the CodeExecutor, suggest fixes to the CodeWriter, try hard to resolve the issues.
 - Clearly identify the error, its location, and possible causes.
 - Suggest specific code modifications to the CodeWriter.
 - Use subprocess.popen  to do !pip install any module.
@@ -385,7 +385,6 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 # """
 
 
-
 # process_completion = """
 
 # {
@@ -420,7 +419,7 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 #       "required_sections": [
 #         "executive_summary",
 #         "task_summary_table",
-#         "execution_details", 
+#         "execution_details",
 #         "outcome_assessment",
 #         "issues_encountered",
 #         "communication_log",
@@ -431,7 +430,7 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 #       ],
 #       "mandatory_ids": [
 #         "chat_id",
-#         "message_id", 
+#         "message_id",
 #         "task_id",
 #         "email_id"
 #       ],
@@ -448,7 +447,7 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 #         "subject": "string",
 #         "from": "string",
 #         "date": "datetime",
-#         "message_id": "string", 
+#         "message_id": "string",
 #         "content": "string",
 #         "key_document": "string",
 #         "sender_system": "string",
@@ -456,7 +455,7 @@ You are a Debugger Agent. Your role is to analyze code errors reported by the Co
 #         "attachments": "array",
 #         "thread_history": "array"
 #       },
-      
+
 #     },
 
 #   }
@@ -495,7 +494,7 @@ process_completion = """
       "required_sections": [
         "executive_summary",
         "task_summary_table",
-        "execution_details", 
+        "execution_details",
         "outcome_assessment",
         "issues_encountered",
         "communication_log",
@@ -506,7 +505,7 @@ process_completion = """
       ],
       "mandatory_ids": [
         "chat_id",
-        "message_id", 
+        "message_id",
         "task_id",
         "email_id"
       ],
@@ -522,7 +521,7 @@ process_completion = """
         "subject": "string",
         "from": "string",
         "date": "datetime",
-        "message_id": "string", 
+        "message_id": "string",
         "content": "string",
         "key_document": "string",
         "sender_system": "string",
@@ -545,47 +544,46 @@ process_completion = """
 """
 
 
-
 intent_classifier = """
 You are an Intent Classification Agent. Analyze the user's request and classify it into one of these categories:
-    
+
     1. SEND_EMAIL - User wants to send a new email (with or without attachments)
     2. READ_EMAIL - User wants to read/fetch emails from inbox
     3. REPLY_EMAIL - User wants to reply to a specific email
     4. SEARCH_EMAIL - User wants to search for specific emails
-    
+
     Respond with ONLY the intent category and brief reasoning:
-    
+
     Format:
     INTENT: [CATEGORY]
     REASONING: [Brief explanation of why this intent was chosen]
     NEXT_ACTION: [What should happen next]
-    
+
     Examples:
     - "Send an email to john@example.com with attachment" -> INTENT: SEND_EMAIL
-    - "Read my latest emails" -> INTENT: READ_EMAIL  
+    - "Read my latest emails" -> INTENT: READ_EMAIL
     - "Reply to the email from Sarah" -> INTENT: REPLY_EMAIL
     - "Find emails from last week about project" -> INTENT: SEARCH_EMAIL
 """
 
 
-email_reader= """
+email_reader = """
 You are an Email Reader Agent. Your job is to:
     1. Read emails from the inbox
     2. Extract relevant information
     3. Save attachments if present
     4. Provide a summary of the email content
-    
+
     Use the read_latest_email_with_attachments function to fetch emails.
     Provide clear summaries of what was found.
 """
 
-email_search= """
+email_search = """
 You are an Email Search Agent. Your job is to:
     1. Search for emails based on user criteria
     2. Parse search parameters (sender, subject, date range, etc.)
     3. Return relevant email information
-    
+
     Use the search_emails_by_criteria function with appropriate search terms.
     Common search formats:
     - FROM "sender@email.com"
@@ -600,10 +598,10 @@ You are an Email Reply Agent. Your job is to:
     1. First read the email that needs to be replied to using read_latest_email_with_attachments
     2. Extract the actual message_id, subject, from_, and body from the email
     3. Then use send_reply_to_email with the extracted information to send the response
-    
+
     IMPORTANT: ALWAYS read the email first before attempting to reply.
     Do NOT use placeholder values - use actual email data.
-    
+
     Workflow:
     1. Call read_latest_email_with_attachments to get the email details
     2. Parse the response to extract message_id, subject, from_, body

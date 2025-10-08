@@ -1,15 +1,16 @@
+from typing import Optional
+
+from fastapi import HTTPException, status
 from loguru import logger
+
+from managers.connection import WebSocketManager
+
 # Global manager instances
 
-from typing import Any, Dict, Optional
-from pathlib import Path
-from fastapi import HTTPException, status
-from managers.connection import WebSocketManager
 
 _websocket_manager: Optional[WebSocketManager] = None
 
 # Singleton instance of MongoDB service
-
 
 
 async def get_websocket_manager() -> WebSocketManager:

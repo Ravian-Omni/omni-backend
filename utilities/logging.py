@@ -1,14 +1,16 @@
 # src/utils/logging.py
-from loguru import logger
 from pathlib import Path
+
+from loguru import logger
+
 
 def setup_logging(
     log_file="app.log",
     log_dir="logs",
     rotation="10 MB",  # rotate when file size exceeds 10 MB
-    retention=5,        # keep last 5 log files
+    retention=5,  # keep last 5 log files
     log_level="INFO",
-    console_output=True
+    console_output=True,
 ):
     """
     Set up loguru logger with rotating file and optional console output.
@@ -36,7 +38,7 @@ def setup_logging(
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}",
         enqueue=True,  # Safe for multiprocessing
         backtrace=True,
-        diagnose=True
+        diagnose=True,
     )
 
     # Console output
@@ -46,7 +48,7 @@ def setup_logging(
             level=log_level,
             format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}:{function}:{line}</cyan> - <level>{message}</level>",
             backtrace=True,
-            diagnose=True
+            diagnose=True,
         )
 
     logger.info("Logger initialized")

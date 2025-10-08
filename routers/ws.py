@@ -1,24 +1,25 @@
 # api/ws.py
 import asyncio
 import json
-from datetime import datetime, date
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+import os
+from datetime import date, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
-from dependencies import get_websocket_manager
-from managers.connection import WebSocketManager
-from configs.settings import settings, CapabilityType
-from omni.manager import Omni
-from capabilities.email_manager.manager import EmailManager
+
 from capabilities.browser_manager.manager import BrowserManager
-from capabilities.python_developer.manager import PythonDeveloper
+from capabilities.email_manager.manager import EmailManager
 from capabilities.file_finder.manager import FileFinder
 from capabilities.image_generator.manager import ImageGenerator
-from omni.memory import OmniMemory
-import os
-from fastapi import HTTPException, Depends, status
-from utilities.custom_manager import ChatContext
-from utilities.api_client import api_client
+from capabilities.python_developer.manager import PythonDeveloper
 from configs.llm_configs_manager import LLMConfigManager
+from configs.settings import CapabilityType, settings
+from dependencies import get_websocket_manager
+from managers.connection import WebSocketManager
+from omni.manager import Omni
+from omni.memory import OmniMemory
+from utilities.api_client import api_client
+from utilities.custom_manager import ChatContext
 
 
 def extract_user_summary(data: dict) -> dict:
@@ -31,22 +32,23 @@ def extract_user_summary(data: dict) -> dict:
     Returns:
         dict: A cleaned dictionary with selected fields.
     """
-    first_name = data.get('first_name', '').strip()
-    last_name = data.get('last_name', '').strip()
+    first_name = data.get("first_name", "").strip()
+    last_name = data.get("last_name", "").strip()
     full_name = f"{first_name} {last_name}".strip() if last_name else first_name
 
     return {
         "name": first_name,
         "email": data.get("email", ""),
         "full_name": full_name,
-        "dob": data.get("dob",""),
+        "dob": data.get("dob", ""),
         "gender": data.get("gender", ""),
         "country": data.get("country", ""),
-        "date": date.today().isoformat()
+        "date": date.today().isoformat(),
     }
 
 
 router = APIRouter()
+
 
 @router.websocket("/omni/{chat_id}")
 async def run_websocket(
@@ -57,31 +59,39 @@ async def run_websocket(
 ):
     """WebSocket endpoint for run communication"""
     # Verify run exists and is in valid state
-    chat_history = await api_client.post("/chats/history", params={"capability":"omni"}, data={"chat_id":chat_id, "user_id":user_id})
+    chat_history = await api_client.post(
+        "/chats/history",
+        params={"capability": "omni"},
+        data={"chat_id": chat_id, "user_id": user_id},
+    )
     chat_history = chat_history.standard_response()
     if not chat_history.get("success"):
         logger.error(chat_history)
-        await websocket.close(code=3001, reason=chat_history.get("message", "Run not found"))
+        await websocket.close(
+            code=3001, reason=chat_history.get("message", "Run not found")
+        )
         return
-    
+
     history = chat_history.get("data")
     # history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
     if not history:
         logger.warning(f"Run not found: {user_id} & {chat_id}")
         await websocket.close(code=4003, reason="Run not found")
         return
-    
+
     chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
-    
-    omni = Omni(chat_id=chat_id,user_id=user_id, chat_dir=chat_dir)
-    messages = history.get("messages",[])
+
+    omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+    messages = history.get("messages", [])
     user_details = await api_client.get("/auth/user")
     user_details = user_details.standard_response()
     if not user_details.get("success"):
-        raise Exception(f"Failed to update chat history: {user_details.get('message', 'Unknown error')}")
+        raise Exception(
+            f"Failed to update chat history: {user_details.get('message', 'Unknown error')}"
+        )
     user_context = extract_user_summary(user_details.get("data"))
     context = f"""
-    
+
     User Information:
     - User: {user_context['full_name']}
     - Birth Date: {user_context['dob']}
@@ -91,14 +101,15 @@ async def run_websocket(
     - Today's Date: {user_context['date']}
 
     Please take this context into account when responding.
-    
+
     """
-    omni.judge_question.update_system_message(omni.judge_question.system_message + context)
+    omni.judge_question.update_system_message(
+        omni.judge_question.system_message + context
+    )
     # messages.append({"role":"user", "name":"chat_manager", "content":context})
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
         omni.memory.load_main_messages(messages)
-
 
     input_func = ws_manager._create_input_func(chat_id)
     omni.user_input.set_input_function(input_func)
@@ -122,9 +133,15 @@ async def run_websocket(
                     # Handle start message
                     logger.info(f"Received start request for run {chat_id}")
                     if message.get("task"):
-                        asyncio.create_task(ws_manager.start_chat_stream(session_id=chat_id,initial_message=message,omni=omni))
+                        asyncio.create_task(
+                            ws_manager.start_chat_stream(
+                                session_id=chat_id, initial_message=message, omni=omni
+                            )
+                        )
                     else:
-                        logger.warning(f"Invalid start message format for run {chat_id}")
+                        logger.warning(
+                            f"Invalid start message format for run {chat_id}"
+                        )
                         await websocket.send_json(
                             {
                                 "type": "error",
@@ -144,17 +161,21 @@ async def run_websocket(
                     await websocket.send_json(
                         {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
                     )
-                
+
                 elif message.get("type") == "executor_input":
                     logger.info(f"Received input request for executor {chat_id}")
                     process_id = message.get("process_id")
                     input_text = message.get("response")
-                    await ws_manager.terminal_input(session_id=chat_id, process_id=process_id, input_text=input_text)
-                    
+                    await ws_manager.terminal_input(
+                        session_id=chat_id, process_id=process_id, input_text=input_text
+                    )
+
                 elif message.get("type") == "executor_stop":
                     logger.info(f"Received stop request for executor {chat_id}")
                     process_id = message.get("process_id")
-                    await ws_manager.terminal_kill(session_id=chat_id, process_id=process_id)
+                    await ws_manager.terminal_kill(
+                        session_id=chat_id, process_id=process_id
+                    )
 
                 elif message.get("type") == "input_response":
                     # Handle input response from client
@@ -192,6 +213,7 @@ async def run_websocket(
         LLMConfigManager.clear_cache()
         await ws_manager.disconnect(chat_id)
 
+
 CAPABILITY_CLASS_MAP = {
     "omni": Omni,
     "email_sender": EmailManager,
@@ -203,12 +225,12 @@ CAPABILITY_CLASS_MAP = {
 
 
 @router.websocket("/capability/{chat_id}")
-async def run_websocket(
+async def run_capability_websocket(
     websocket: WebSocket,
     chat_id: str,
     user_id: str = "default_user",
     capability_name: str = "email_sender",
-    ws_manager: WebSocketManager = Depends(get_websocket_manager)
+    ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """WebSocket endpoint for run communication"""
     # Verify run exists and is in valid state
@@ -218,39 +240,47 @@ async def run_websocket(
         class_instance = CAPABILITY_CLASS_MAP.get(capability_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    query = {"user_id": user_id, "chat_id": chat_id, "call_id": "Individual", "capability_id": chat_id}
-    
+    query = {
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "call_id": "Individual",
+        "capability_id": chat_id,
+    }
+
     # Verify run exists and is in valid state
-    chat_history = await api_client.post("/chats/history", params={"capability":collection_name}, data=query)
+    chat_history = await api_client.post(
+        "/chats/history", params={"capability": collection_name}, data=query
+    )
     chat_history = chat_history.standard_response()
     if not chat_history.get("success"):
         logger.error(chat_history)
-        await websocket.close(code=3001, reason=chat_history.get("message", "Run not found"))
+        await websocket.close(
+            code=3001, reason=chat_history.get("message", "Run not found")
+        )
         return
-    
+
     history = chat_history.get("data")
     # history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
     if not history:
         logger.warning(f"Run not found: {user_id} & {chat_id}")
         await websocket.close(code=4003, reason="Run not found")
         return
-    
-    
+
     chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
-    
+
     chat_context = ChatContext(
-        user_id = user_id,
-        chat_id = chat_id,
-        chat_dir = chat_dir,
-        call_id = "Individual",
-        capability_id = chat_id,
-        capability_name = capability_name,
-        collection_name = collection_name,
-        omni_memory = OmniMemory()
+        user_id=user_id,
+        chat_id=chat_id,
+        chat_dir=chat_dir,
+        call_id="Individual",
+        capability_id=chat_id,
+        capability_name=capability_name,
+        collection_name=collection_name,
+        omni_memory=OmniMemory(),
     )
-    
+
     omni = class_instance(chat_context)
-    messages = history.get("messages",[])
+    messages = history.get("messages", [])
     if messages:
         last_agent, last_message = omni.manager.resume(messages=messages)
         # omni.omni_memory.load_main_messages(messages)
@@ -259,7 +289,7 @@ async def run_websocket(
     #     await websocket.close(code=4003, reason="Run not in valid state")
     #     return
 
-    input_func = ws_manager._create_input_func(chat_id)
+    ws_manager._create_input_func(chat_id)
     # omni.user_input.set_input_function(input_func)
     # Connect websocket
     connected = await ws_manager.connect(websocket, chat_id)
@@ -279,9 +309,15 @@ async def run_websocket(
                     # Handle start message
                     logger.info(f"Received start request for run {chat_id}")
                     if message.get("task"):
-                        asyncio.create_task(ws_manager.start_chat_stream(session_id=chat_id,initial_message=message,omni=omni))
+                        asyncio.create_task(
+                            ws_manager.start_chat_stream(
+                                session_id=chat_id, initial_message=message, omni=omni
+                            )
+                        )
                     else:
-                        logger.warning(f"Invalid start message format for run {chat_id}")
+                        logger.warning(
+                            f"Invalid start message format for run {chat_id}"
+                        )
                         await websocket.send_json(
                             {
                                 "type": "error",

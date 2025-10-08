@@ -1,42 +1,42 @@
-import os
-import autogen
 import asyncio
-import datetime
-from typing import List, Dict, Any, Union, Tuple
-from capabilities.email_manager import prompts
-from configs.llm_configs_manager import LLMConfigManager
-from configs.settings import settings
-import os
-from typing import Annotated, List, Dict, Any, Union
-from datetime import datetime
-from email.utils import parseaddr
-today_date = datetime.now()
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
-import os
-import json
-from utilities.custom_manager import CustomGroupChatManager, ChatContext
-from configs.settings import settings
-from capabilities.email_manager import prompts
-from configs.llm_configs_manager import LLMConfigManager
-#new imports
-import imaplib
 import email
+
+# new imports
+import imaplib
+import json
+import os
+import smtplib
+from datetime import datetime
+from email import encoders
 from email.header import decode_header
 from email.message import EmailMessage
-from langchain_openai import AzureChatOpenAI
-from capabilities.email_manager.response_format import EmailProcessCompletion, IntentClassifier
-from loguru import logger
-from configs.system_ai_config import GroupchatConfigurationManager
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import parseaddr
+from typing import Any, Dict, List, Tuple, Union
 
+import autogen
+from loguru import logger
+
+from capabilities.email_manager import prompts
+from capabilities.email_manager.response_format import (
+    EmailProcessCompletion,
+    IntentClassifier,
+)
+from configs.llm_configs_manager import LLMConfigManager
+from configs.settings import settings
+from configs.system_ai_config import GroupchatConfigurationManager
+from utilities.custom_manager import ChatContext, CustomGroupChatManager
+from utilities.storage import ensure_path
+
+today_date = datetime.now()
 
 
 def validate_attachments(file_paths):
     """Validate if all attachment files exist before sending."""
     import os
+
     invalid_paths = []
     for path in file_paths:
         if not os.path.exists(path):
@@ -44,11 +44,14 @@ def validate_attachments(file_paths):
     return invalid_paths
 
 
-
 class EmailManager:
     def __init__(self, context: ChatContext):
         self.context = context
-        self.groupchat_config = GroupchatConfigurationManager.get_instance().get_groupchat_configuration("email_sender")
+        self.groupchat_config = (
+            GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
+                "email_sender"
+            )
+        )
         self.user_input_func = self.context.manager_kwargs["input_function"]
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.username = settings.USER_EMAIL
@@ -56,21 +59,33 @@ class EmailManager:
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
-    
+
     def _check_cancellation(self):
         """Check if the chat should be cancelled"""
-        if self.context.cancellation_token and self.context.cancellation_token.is_cancelled():
-            raise asyncio.CancelledError(f"Group chat cancelled for session {self.context.chat_id}")
-    
-    async def handle_email_confirmation(self, recipients: List[str], subject: str, msg_html: str, 
-                                  msg_plain: str, attachments: List[str], sender: str) -> Tuple[bool, Dict[str, Any]]:
+        if (
+            self.context.cancellation_token
+            and self.context.cancellation_token.is_cancelled()
+        ):
+            raise asyncio.CancelledError(
+                f"Group chat cancelled for session {self.context.chat_id}"
+            )
+
+    async def handle_email_confirmation(
+        self,
+        recipients: List[str],
+        subject: str,
+        msg_html: str,
+        msg_plain: str,
+        attachments: List[str],
+        sender: str,
+    ) -> Tuple[bool, Dict[str, Any]]:
         """
         Handle user confirmation and modifications for email sending.
-        
+
         Returns:
             Tuple[bool, Dict]: (should_send, email_data_or_response)
         """
-        
+
         # Store original data for comparison
         original_data = {
             "recipients": recipients.copy(),
@@ -78,9 +93,9 @@ class EmailManager:
             "msg_html": msg_html,
             "msg_plain": msg_plain,
             "attachments": attachments.copy() if attachments else [],
-            "sender": sender
+            "sender": sender,
         }
-        
+
         # Create confirmation request
         confirmation_request = {
             "action": "email_confirmation",
@@ -92,45 +107,55 @@ class EmailManager:
                 "msg_plain": msg_plain,
                 "sender": sender,
                 "attachments": attachments or [],
-                "attachment_names": [os.path.basename(path) for path in (attachments or [])],
+                "attachment_names": [
+                    os.path.basename(path) for path in (attachments or [])
+                ],
                 "recipient_count": len(recipients),
                 "has_html": bool(msg_html),
                 "has_plain": bool(msg_plain),
-                "has_attachments": bool(attachments)
+                "has_attachments": bool(attachments),
             },
             "options": {
                 "send": "Send email as is",
-                "modify": "Modify email before sending", 
-                "cancel": "Cancel email sending"
+                "modify": "Modify email before sending",
+                "cancel": "Cancel email sending",
             },
             "timestamp": datetime.now().isoformat(),
             "preview": {
-                "subject_preview": subject[:50] + "..." if len(subject) > 50 else subject,
-                "content_preview": (msg_plain or msg_html or "")[:100] + "..." if len(msg_plain or msg_html or "") > 100 else (msg_plain or msg_html or "")
-            }
+                "subject_preview": (
+                    subject[:50] + "..." if len(subject) > 50 else subject
+                ),
+                "content_preview": (
+                    (msg_plain or msg_html or "")[:100] + "..."
+                    if len(msg_plain or msg_html or "") > 100
+                    else (msg_plain or msg_html or "")
+                ),
+            },
         }
-        
+
         # Get user response
-        user_response = await self.user_input_func(json.dumps(confirmation_request, indent=2))
-        
+        user_response = await self.user_input_func(
+            json.dumps(confirmation_request, indent=2)
+        )
+
         # Parse user response
         try:
             response_data = json.loads(user_response)
         except json.JSONDecodeError:
             # Handle simple string responses
             response_data = {"action": user_response.lower().strip()}
-        
+
         action = response_data.get("action", "").lower()
-        
+
         # Handle cancel
         if action == "cancel":
             return False, {
                 "status": "cancelled",
                 "message": "Email sending cancelled by user",
                 "action_taken": "cancel",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
-        
+
         # Handle send as-is
         if action in ["send", "yes", "y", "ok", "proceed"]:
             return True, {
@@ -141,14 +166,14 @@ class EmailManager:
                 "attachments": attachments,
                 "sender": sender,
                 "was_modified": False,
-                "modifications": {}
+                "modifications": {},
             }
-        
+
         # Handle modifications
         if action == "modify":
             modifications = response_data.get("modifications", {})
             changes_made = []
-            
+
             # Update recipients
             if "recipients" in modifications:
                 new_recipients = modifications["recipients"]
@@ -156,41 +181,47 @@ class EmailManager:
                     added = list(set(new_recipients) - set(recipients))
                     removed = list(set(recipients) - set(new_recipients))
                     recipients = new_recipients
-                    
+
                     if added:
                         changes_made.append(f"Added recipients: {', '.join(added)}")
                     if removed:
                         changes_made.append(f"Removed recipients: {', '.join(removed)}")
-            
+
             # Update subject
             if "subject" in modifications and modifications["subject"] != subject:
-                changes_made.append(f"Subject changed from '{subject}' to '{modifications['subject']}'")
+                changes_made.append(
+                    f"Subject changed from '{subject}' to '{modifications['subject']}'"
+                )
                 subject = modifications["subject"]
-            
+
             # Update message content
             if "msg_html" in modifications and modifications["msg_html"] != msg_html:
                 changes_made.append("HTML message content modified")
                 msg_html = modifications["msg_html"]
-            
+
             if "msg_plain" in modifications and modifications["msg_plain"] != msg_plain:
                 changes_made.append("Plain text message content modified")
                 msg_plain = modifications["msg_plain"]
-            
+
             # Update attachments
             if "attachments" in modifications:
                 new_attachments = modifications["attachments"] or []
                 original_attachments = attachments or []
-                
+
                 if set(new_attachments) != set(original_attachments):
                     added = list(set(new_attachments) - set(original_attachments))
                     removed = list(set(original_attachments) - set(new_attachments))
                     attachments = new_attachments
-                    
+
                     if added:
-                        changes_made.append(f"Added attachments: {', '.join([os.path.basename(f) for f in added])}")
+                        changes_made.append(
+                            f"Added attachments: {', '.join([os.path.basename(f) for f in added])}"
+                        )
                     if removed:
-                        changes_made.append(f"Removed attachments: {', '.join([os.path.basename(f) for f in removed])}")
-            
+                        changes_made.append(
+                            f"Removed attachments: {', '.join([os.path.basename(f) for f in removed])}"
+                        )
+
             # Validate modified attachments
             if attachments:
                 invalid_paths = validate_attachments(attachments)
@@ -198,9 +229,9 @@ class EmailManager:
                     return False, {
                         "status": "error",
                         "message": f"Modified attachments have invalid paths: {invalid_paths}",
-                        "error_type": "invalid_modified_attachments"
+                        "error_type": "invalid_modified_attachments",
                     }
-            
+
             # Create comparison for modifications
             modifications_summary = {}
             current_data = {
@@ -209,16 +240,16 @@ class EmailManager:
                 "msg_html": msg_html,
                 "msg_plain": msg_plain,
                 "attachments": attachments or [],
-                "sender": sender
+                "sender": sender,
             }
-            
+
             for key in original_data:
                 if original_data[key] != current_data[key]:
                     modifications_summary[key] = {
                         "original": original_data[key],
-                        "current": current_data[key]
+                        "current": current_data[key],
                     }
-            
+
             return True, {
                 "recipients": recipients,
                 "subject": subject,
@@ -228,24 +259,31 @@ class EmailManager:
                 "sender": sender,
                 "was_modified": True,
                 "changes_made": changes_made,
-                "modifications_summary": modifications_summary
+                "modifications_summary": modifications_summary,
             }
-        
+
         # Invalid response - treat as cancel
         return False, {
             "status": "cancelled",
             "message": "Invalid response - email sending cancelled",
-            "action_taken": "cancel"
+            "action_taken": "cancel",
         }
-    
-    async def send_email_with_attachments(self, to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
-                                    attachments: List[str] = None, sender: str = None):
+
+    async def send_email_with_attachments(
+        self,
+        to: Union[List[str], str],
+        subject: str,
+        msg_html: str,
+        msg_plain: str,
+        attachments: List[str] = None,
+        sender: str = None,
+    ):
         """
         Clean email sending function with separate confirmation handling.
         """
         if sender is None:
             sender = self.username
-            
+
         # Validate attachments upfront
         if attachments:
             invalid_paths = validate_attachments(attachments)
@@ -253,22 +291,22 @@ class EmailManager:
                 return {
                     "status": "error",
                     "message": f"Invalid attachment paths: {invalid_paths}",
-                    "error_type": "invalid_attachments"
+                    "error_type": "invalid_attachments",
                 }
-        
+
         # Handle recipients
         recipients = to if isinstance(to, list) else [to]
-        
+
         try:
             # Handle user confirmation and modifications
             should_send, confirmation_result = await self.handle_email_confirmation(
                 recipients, subject, msg_html, msg_plain, attachments or [], sender
             )
-            
+
             # If not sending (cancelled or error), return the result
             if not should_send:
                 return confirmation_result
-            
+
             # Extract potentially modified email data
             final_recipients = confirmation_result["recipients"]
             final_subject = confirmation_result["subject"]
@@ -277,49 +315,52 @@ class EmailManager:
             final_attachments = confirmation_result["attachments"]
             final_sender = confirmation_result["sender"]
             was_modified = confirmation_result["was_modified"]
-            
+
             # Create email message
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = final_subject
-            msg['From'] = final_sender
-            msg['To'] = ", ".join(final_recipients)
-            
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = final_subject
+            msg["From"] = final_sender
+            msg["To"] = ", ".join(final_recipients)
+
             # Add body parts
             if final_msg_plain:
-                part1 = MIMEText(final_msg_plain, 'plain')
+                part1 = MIMEText(final_msg_plain, "plain")
                 msg.attach(part1)
-                
+
             if final_msg_html:
-                part2 = MIMEText(final_msg_html, 'html')
+                part2 = MIMEText(final_msg_html, "html")
                 msg.attach(part2)
-            
+
             # Add attachments and collect info
             attachment_info = []
             if final_attachments:
                 for file_path in final_attachments:
                     if os.path.exists(file_path):
                         with open(file_path, "rb") as attachment_file:
-                            part = MIMEBase('application', 'octet-stream')
+                            part = MIMEBase("application", "octet-stream")
                             part.set_payload(attachment_file.read())
-                        
+
                         encoders.encode_base64(part)
                         filename = os.path.basename(file_path)
                         part.add_header(
-                            'Content-Disposition',
-                            f'attachment; filename= {filename}'
+                            "Content-Disposition", f"attachment; filename= {filename}"
                         )
                         msg.attach(part)
-                        attachment_info.append({
-                            "filename": filename,
-                            "path": file_path,
-                            "size": os.path.getsize(file_path)
-                        })
-            
+                        attachment_info.append(
+                            {
+                                "filename": filename,
+                                "path": file_path,
+                                "size": os.path.getsize(file_path),
+                            }
+                        )
+
             # Send email
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
                 server.login(self.username, self.password)
-                server.send_message(msg, from_addr=self.username, to_addrs=final_recipients)
-            
+                server.send_message(
+                    msg, from_addr=self.username, to_addrs=final_recipients
+                )
+
             # Create success response
             success_response = {
                 "status": "sent",
@@ -331,33 +372,38 @@ class EmailManager:
                     "attachments": attachment_info,
                     "content_types": {
                         "html": bool(final_msg_html),
-                        "plain": bool(final_msg_plain)
-                    }
+                        "plain": bool(final_msg_plain),
+                    },
                 },
                 "was_modified": was_modified,
                 "timestamp": datetime.now().isoformat(),
-                "action_taken": "send"
+                "action_taken": "send",
             }
-            
+
             # Add modification details if email was changed
             if was_modified:
-                success_response.update({
-                    "changes_made": confirmation_result.get("changes_made", []),
-                    "modifications_summary": confirmation_result.get("modifications_summary", {})
-                })
-            
+                success_response.update(
+                    {
+                        "changes_made": confirmation_result.get("changes_made", []),
+                        "modifications_summary": confirmation_result.get(
+                            "modifications_summary", {}
+                        ),
+                    }
+                )
+
             return success_response
-            
+
         except Exception as e:
             return {
                 "status": "error",
                 "message": f"Error sending email: {str(e)}",
                 "error_type": "smtp_error",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
-        
 
-    async def read_latest_email_with_attachments(self, sender_details:str = None, attachment_dir:str = None):
+    async def read_latest_email_with_attachments(
+        self, sender_details: str = None, attachment_dir: str = None
+    ):
 
         try:
             # Connect and login
@@ -368,7 +414,7 @@ class EmailManager:
             return f"Error connecting to email: {e}"
 
         # Search for emails from a specific sender
-        filtered_sender = f'FROM "{sender_details}"' if sender_details else 'ALL'
+        filtered_sender = f'FROM "{sender_details}"' if sender_details else "ALL"
         status, messages = imap.search(None, filtered_sender)
         email_ids = messages[0].split()
 
@@ -382,7 +428,9 @@ class EmailManager:
 
         # Create folder to save attachments
         if attachment_dir is None:
-            attachment_dir = ensure_path(os.path.join(self.context.chat_dir, "attachments"))
+            attachment_dir = ensure_path(
+                os.path.join(self.context.chat_dir, "attachments")
+            )
         else:
             os.makedirs(attachment_dir, exist_ok=True)
 
@@ -404,7 +452,7 @@ class EmailManager:
                     subject, encoding = decode_header(subject_header)[0]
                     if isinstance(subject, bytes):
                         subject = subject.decode(encoding if encoding else "utf-8")
-                
+
                 from_ = msg.get("From")
                 message_id = msg.get("Message-ID")
 
@@ -414,13 +462,19 @@ class EmailManager:
                         content_disposition = str(part.get("Content-Disposition"))
 
                         # Extract plain text body
-                        if part.get_content_type() == "text/plain" and "attachment" not in content_disposition:
+                        if (
+                            part.get_content_type() == "text/plain"
+                            and "attachment" not in content_disposition
+                        ):
                             try:
-                                body = part.get_payload(decode=True).decode('utf-8')
+                                body = part.get_payload(decode=True).decode("utf-8")
                             except UnicodeDecodeError:
                                 try:
-                                    body = part.get_payload(decode=True).decode('latin-1')
-                                except:
+                                    body = part.get_payload(decode=True).decode(
+                                        "latin-1"
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error decoding email body: {e}")
                                     body = "Could not decode email body"
 
                         # Download attachment
@@ -429,29 +483,36 @@ class EmailManager:
                             if filename:
                                 decoded_filename, encoding = decode_header(filename)[0]
                                 if isinstance(decoded_filename, bytes):
-                                    decoded_filename = decoded_filename.decode(encoding if encoding else "utf-8")
+                                    decoded_filename = decoded_filename.decode(
+                                        encoding if encoding else "utf-8"
+                                    )
 
-                                filepath = os.path.join(attachment_dir, decoded_filename)
+                                filepath = os.path.join(
+                                    attachment_dir, decoded_filename
+                                )
                                 full_path = os.path.abspath(filepath)
-                                
+
                                 try:
                                     with open(full_path, "wb") as f:
                                         f.write(part.get_payload(decode=True))
                                     attachment_paths.append(full_path)
                                 except Exception as e:
-                                    print(f"Error saving attachment {decoded_filename}: {e}")
+                                    print(
+                                        f"Error saving attachment {decoded_filename}: {e}"
+                                    )
                 else:
                     # Single-part email
                     try:
-                        body = msg.get_payload(decode=True).decode('utf-8')
+                        body = msg.get_payload(decode=True).decode("utf-8")
                     except UnicodeDecodeError:
                         try:
-                            body = msg.get_payload(decode=True).decode('latin-1')
-                        except:
+                            body = msg.get_payload(decode=True).decode("latin-1")
+                        except Exception as e:
+                            logger.error(f"Error decoding email body: {e}")
                             body = "Could not decode email body"
 
         imap.logout()
-        
+
         # Return structured data that can be easily parsed by agents
         return f"""EMAIL_DETAILS:
                     message_id: {message_id}
@@ -463,15 +524,20 @@ class EmailManager:
                     STATUS: Email read successfully
                     """
 
-
-
-    async def send_reply_to_email(self, message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
+    async def send_reply_to_email(
+        self,
+        message_id: str,
+        subject: str,
+        from_: str,
+        body: str,
+        reply_content: str = None,
+    ):
         """
         Send a reply to a specific email.
         """
         if not all([message_id, subject, from_, body]):
             return "Error: Missing required email information"
-        
+
         try:
             original_message_id = message_id
             msg = EmailMessage()
@@ -480,7 +546,7 @@ class EmailManager:
             msg["To"] = from_
             msg["In-Reply-To"] = original_message_id
             msg["References"] = original_message_id
-            
+
             if reply_content:
                 msg.set_content(reply_content)
             else:
@@ -498,8 +564,6 @@ class EmailManager:
         except Exception as e:
             return f"Error sending reply: {e}"
 
-
-
     async def search_emails_by_criteria(self, search_criteria: str, limit: int = 5):
         """
         Search emails based on criteria (sender, subject, etc.)
@@ -508,91 +572,130 @@ class EmailManager:
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
             imap.login(self.username, self.password)
             imap.select("inbox")
-            
+
             status, messages = imap.search(None, search_criteria)
             email_ids = messages[0].split()
-            
+
             if not email_ids:
                 imap.logout()
                 return "No emails found matching the criteria."
-            
+
             # Limit results
             email_ids = email_ids[-limit:]
-            
+
             results = []
             for email_id in email_ids:
                 status, msg_data = imap.fetch(email_id, "(RFC822)")
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
-                        
+
                         subject_header = msg.get("Subject")
                         subject = ""
                         if subject_header:
                             subject, encoding = decode_header(subject_header)[0]
                             if isinstance(subject, bytes):
-                                subject = subject.decode(encoding if encoding else "utf-8")
-                        
+                                subject = subject.decode(
+                                    encoding if encoding else "utf-8"
+                                )
+
                         from_ = msg.get("From")
                         name, email_address = parseaddr(from_)
                         date = msg.get("Date")
 
-
                         body = ""
                         if msg.is_multipart():
                             for part in msg.walk():
-                                content_disposition = str(part.get("Content-Disposition"))
-                                if part.get_content_type() == "text/plain" and "attachment" not in content_disposition:
+                                content_disposition = str(
+                                    part.get("Content-Disposition")
+                                )
+                                if (
+                                    part.get_content_type() == "text/plain"
+                                    and "attachment" not in content_disposition
+                                ):
                                     try:
-                                        body = part.get_payload(decode=True).decode('utf-8')
+                                        body = part.get_payload(decode=True).decode(
+                                            "utf-8"
+                                        )
                                     except UnicodeDecodeError:
                                         try:
-                                            body = part.get_payload(decode=True).decode('latin-1')
-                                        except:
+                                            body = part.get_payload(decode=True).decode(
+                                                "latin-1"
+                                            )
+                                        except Exception as e:
+                                            logger.error(
+                                                f"Error decoding email body: {e}"
+                                            )
                                             body = "Could not decode email body"
                                     break  # only first plain-text part
                         else:
                             try:
-                                body = msg.get_payload(decode=True).decode('utf-8')
+                                body = msg.get_payload(decode=True).decode("utf-8")
                             except UnicodeDecodeError:
                                 try:
-                                    body = msg.get_payload(decode=True).decode('latin-1')
-                                except:
+                                    body = msg.get_payload(decode=True).decode(
+                                        "latin-1"
+                                    )
+                                except Exception:
                                     body = "Could not decode email body"
-                        
-                        results.append({
-                            "subject": subject,
-                            "from": from_,
-                            "date": date,
-                            "from_email": email_address,
-                            "body": body,
-                            "message_id": msg.get("Message-ID")
-                            #"headers": list(msg.items())
-                        })
-            
+
+                        results.append(
+                            {
+                                "subject": subject,
+                                "from": from_,
+                                "date": date,
+                                "from_email": email_address,
+                                "body": body,
+                                "message_id": msg.get("Message-ID"),
+                                # "headers": list(msg.items())
+                            }
+                        )
+
             imap.logout()
             return f"Found {len(results)} emails matching criteria: {results}"
-            
+
         except Exception as e:
-            return f"Error searching emails: {e}"  
-        
+            return f"Error searching emails: {e}"
+
     def _register_functions(self):
-        
-        #Wrapper functions before registring to agents
-        
-        async def send_email_with_attachments_wrapper(to: Union[List[str], str], subject: str, msg_html: str, msg_plain: str,
-                                    attachments: List[str] = None, sender: str = None):
-            return await self.send_email_with_attachments(to, subject, msg_html, msg_plain, attachments, sender)
-        
-        async def read_latest_email_with_attachments_wrapper(sender_details:str = None, attachment_dir:str = None):
-            return await self.read_latest_email_with_attachments(sender_details, attachment_dir)
-        
-        async def send_reply_to_email_wrapper(message_id: str, subject: str, from_: str, body: str, reply_content: str = None):
-            return await self.send_reply_to_email(message_id, subject, from_, body, reply_content)
-        
-        async def search_emails_by_criteria_wrapper(search_criteria: str, limit: int = 5):
+
+        # Wrapper functions before registring to agents
+
+        async def send_email_with_attachments_wrapper(
+            to: Union[List[str], str],
+            subject: str,
+            msg_html: str,
+            msg_plain: str,
+            attachments: List[str] = None,
+            sender: str = None,
+        ):
+            return await self.send_email_with_attachments(
+                to, subject, msg_html, msg_plain, attachments, sender
+            )
+
+        async def read_latest_email_with_attachments_wrapper(
+            sender_details: str = None, attachment_dir: str = None
+        ):
+            return await self.read_latest_email_with_attachments(
+                sender_details, attachment_dir
+            )
+
+        async def send_reply_to_email_wrapper(
+            message_id: str,
+            subject: str,
+            from_: str,
+            body: str,
+            reply_content: str = None,
+        ):
+            return await self.send_reply_to_email(
+                message_id, subject, from_, body, reply_content
+            )
+
+        async def search_emails_by_criteria_wrapper(
+            search_criteria: str, limit: int = 5
+        ):
             return await self.search_emails_by_criteria(search_criteria, limit)
-        
+
         autogen.register_function(
             send_email_with_attachments_wrapper,
             caller=self.email_caller,
@@ -605,14 +708,14 @@ class EmailManager:
             caller=self.email_reader_agent,
             executor=self.code_executor,
             name="read_latest_email_with_attachments",
-            description="Search emails by criteria,  read the email content  and save attachments to local if needed."
+            description="Search emails by criteria,  read the email content  and save attachments to local if needed.",
         )
         autogen.register_function(
             send_reply_to_email_wrapper,
             caller=self.email_reply_agent,
             executor=self.code_executor,
             name="send_reply_to_email",
-            description="Send reply to a specific email"
+            description="Send reply to a specific email",
         )
 
         autogen.register_function(
@@ -620,37 +723,40 @@ class EmailManager:
             caller=self.email_search_agent,
             executor=self.code_executor,
             name="search_emails_by_criteria",
-            description="Search emails by criteria"
+            description="Search emails by criteria",
         )
 
     def get_context_keeper(self):
-        return autogen.AssistantAgent(
-            name="context_keeper",
-            llm_config=self.llm_config
-        )
-        
+        return autogen.AssistantAgent(name="context_keeper", llm_config=self.llm_config)
+
     def get_intent_classifier(self):
-        llm_config_name = self.groupchat_config.get_agent_config("intent_classifier_agent").llm_config or "default"
+        llm_config_name = (
+            self.groupchat_config.get_agent_config("intent_classifier_agent").llm_config
+            or "default"
+        )
         llm_intent_classifier_agent = LLMConfigManager.get_config(llm_config_name)
         llm_intent_classifier_agent["response_format"] = IntentClassifier
         return autogen.AssistantAgent(
             name="intent_classifier_agent",
             # llm_config=self.llm_config,
-            llm_config=self.llm_config, #llm_config_ic , llm_config
+            llm_config=self.llm_config,  # llm_config_ic , llm_config
             system_message=prompts.intent_classifier,
         )
+
     def get_email_reader(self):
         return autogen.AssistantAgent(
             name="email_reader_agent",
             llm_config=self.llm_config,
             system_message=prompts.email_reader,
         )
+
     def get_email_search(self):
         return autogen.AssistantAgent(
             name="email_search_agent",
             llm_config=self.llm_config,
             system_message=prompts.email_search,
         )
+
     def get_email_reply(self):
         return autogen.AssistantAgent(
             name="email_reply_agent",
@@ -658,16 +764,18 @@ class EmailManager:
             system_message=prompts.email_reply,
         )
 
-
     def get_planner(self):
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=self.llm_config,
-            system_message=prompts.planner
+            system_message=prompts.planner,
         )
 
     def get_content_writer(self):
-        llm_config_name = self.groupchat_config.get_agent_config("content_writer_agent").llm_config or "default"
+        llm_config_name = (
+            self.groupchat_config.get_agent_config("content_writer_agent").llm_config
+            or "default"
+        )
         llm_content_writer_agent = LLMConfigManager.get_config(llm_config_name)
         llm_content_writer_agent["max_tokens"] = 50000
         return autogen.AssistantAgent(
@@ -699,21 +807,25 @@ class EmailManager:
         )
 
     def get_process_completion(self):
-        llm_config_name = self.groupchat_config.get_agent_config("process_completion_agent").llm_config or "default"
+        llm_config_name = (
+            self.groupchat_config.get_agent_config(
+                "process_completion_agent"
+            ).llm_config
+            or "default"
+        )
         llm_process_completion_agent = LLMConfigManager.get_config(llm_config_name)
         llm_process_completion_agent["response_format"] = EmailProcessCompletion
         return autogen.AssistantAgent(
             name="process_completion_agent",
             # llm_config=self.llm_config,
-            llm_config=llm_process_completion_agent,  #llm_config_pc , llm_config
+            llm_config=llm_process_completion_agent,  # llm_config_pc , llm_config
             system_message=prompts.process_completion,
         )
-        
 
-    def custom_speaker_selection_func(self,last_speaker: Any, groupchat: Any) -> Any:
+    def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         try:
             self._check_cancellation()
-            
+
             messages = groupchat.messages
             if len(messages) == 1 or last_speaker.name == "chat_manager":
                 print("Initial query received. Starting with intent_classifier.")
@@ -728,8 +840,8 @@ class EmailManager:
                     return groupchat.agent_by_name("email_search_agent")
                 elif "INTENT: REPLY_EMAIL" in last_message:
                     return groupchat.agent_by_name("email_reply_agent")
-                
-            #the basic flow of the email manager    
+
+            # the basic flow of the email manager
             if last_speaker.name == "planner_agent":
                 return groupchat.agent_by_name("content_writer_agent")
             if last_speaker.name == "content_writer_agent":
@@ -743,25 +855,25 @@ class EmailManager:
                     return groupchat.agent_by_name("process_completion_agent")
                 else:
                     return groupchat.agent_by_name("process_completion_agent")
-            #the additional flow for the email manager
+            # the additional flow for the email manager
             if last_speaker.name == "debugger_agent":
                 return groupchat.agent_by_name("code_executor_agent")
-            
+
             elif last_speaker.name == "email_reader_agent":
                 return groupchat.agent_by_name("code_executor_agent")
 
-            
             elif last_speaker.name in ["email_search_agent"]:
                 return groupchat.agent_by_name("code_executor_agent")
-            
+
             elif last_speaker.name in ["email_reply_agent"]:
                 return groupchat.agent_by_name("code_executor_agent")
-            
+
         except asyncio.CancelledError:
-            logger.info(f"Speaker selection cancelled for session {self.context.chat_id}")
+            logger.info(
+                f"Speaker selection cancelled for session {self.context.chat_id}"
+            )
             # Return process_completion to gracefully end the chat
             raise
-
 
     def get_agents(self):
         self.intent_classifier = self.get_intent_classifier()
@@ -786,7 +898,7 @@ class EmailManager:
             self.email_caller,
             self.code_executor,
             self.debugger,
-            self.process_completion
+            self.process_completion,
         ]
 
     def get_chat_manager(self):
@@ -800,7 +912,6 @@ class EmailManager:
             groupchat=self.groupchat,
             llm_config=self.llm_config,
             chat_context=self.context,
-            human_input_mode="ALWAYS"
+            human_input_mode="ALWAYS",
         )
         return
-

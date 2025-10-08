@@ -1,23 +1,26 @@
 import asyncio
 import logging
 import traceback
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Callable, Awaitable
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Dict, Optional
+
 from fastapi import WebSocket, WebSocketDisconnect
+
 from configs.llm_configs_manager import LLMConfigManager
 from managers.cancellation_token import CancellationToken
-logger = logging.getLogger(__name__)
-from managers.cancellation_token import CancellationToken
+
 # Type aliases for input handling
 InputFuncType = Callable[[str, str], Awaitable[str]]
 InputRequestType = str  # "text_input", "file_upload", etc.
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
     """
     Simplified WebSocket manager for AG2AI GroupChat workflows
-    
+
     Handles WebSocket connections, message streaming, and user input requests
     without any external dependencies.
     """
@@ -35,11 +38,11 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
         """
         Accept a new WebSocket connection
-        
+
         Args:
             websocket: FastAPI WebSocket instance
             session_id: Unique identifier for this session
-            
+
         Returns:
             bool: True if connection successful, False otherwise
         """
@@ -70,17 +73,20 @@ class WebSocketManager:
         session_id: str,
         # chat_handler: Callable[[str, InputFuncType], Awaitable[Any]],
         initial_message: str = "",
-        omni = None
+        omni=None,
     ) -> None:
         """
         Start a chat stream with the provided handler
-        
+
         Args:
             session_id: Session identifier
             chat_handler: Async function that handles the chat logic
             initial_message: Optional initial message to start the conversation
         """
-        if session_id not in self._connections or session_id in self._closed_connections:
+        if (
+            session_id not in self._connections
+            or session_id in self._closed_connections
+        ):
             raise ValueError(f"No active connection for session {session_id}")
 
         self._stop_flags[session_id] = False
@@ -102,15 +108,26 @@ class WebSocketManager:
                     },
                 )
 
-            omni._set_cancellation_token(self._cancellation_tokens.get(session_id, None))
+            omni._set_cancellation_token(
+                self._cancellation_tokens.get(session_id, None)
+            )
             omni.set_task_id(str(uuid.uuid4()))
-            task = asyncio.create_task(omni.manager.a_initiate_chat(omni.manager,message=initial_message.get("task"),clear_history=False))
+            task = asyncio.create_task(
+                omni.manager.a_initiate_chat(
+                    omni.manager,
+                    message=initial_message.get("task"),
+                    clear_history=False,
+                )
+            )
             self._active_tasks[session_id] = task
 
             # Wait for completion or cancellation
             await task
 
-            if not self._stop_flags.get(session_id, True) and session_id not in self._closed_connections:
+            if (
+                not self._stop_flags.get(session_id, True)
+                and session_id not in self._closed_connections
+            ):
                 await self._send_message(
                     session_id,
                     {
@@ -141,11 +158,11 @@ class WebSocketManager:
     def _create_input_func(self, session_id: str, timeout: int = 600) -> InputFuncType:
         """
         Create an input function for requesting user input during chat
-        
+
         Args:
             session_id: Session identifier
             timeout: Timeout in seconds for input response
-            
+
         Returns:
             Input function that can be used by chat handlers
         """
@@ -155,8 +172,10 @@ class WebSocketManager:
             input_type: InputRequestType = "text_input",
         ) -> str:
             try:
-                logger.info(f"Requesting input for session {session_id}: ({input_type}) {prompt}")
-                
+                logger.info(
+                    f"Requesting input for session {session_id}: ({input_type}) {prompt}"
+                )
+
                 # Send input request to client
                 await self._send_message(
                     session_id,
@@ -172,10 +191,14 @@ class WebSocketManager:
                 # Wait for response with timeout
                 if session_id in self._input_responses:
                     try:
+
                         async def poll_for_response():
                             while True:
                                 # Check if session was closed/stopped
-                                if session_id in self._closed_connections or self._stop_flags.get(session_id, False):
+                                if (
+                                    session_id in self._closed_connections
+                                    or self._stop_flags.get(session_id, False)
+                                ):
                                     raise ValueError("Session was closed or stopped")
 
                                 # Try to get response with short timeout
@@ -194,7 +217,9 @@ class WebSocketManager:
                         return response
 
                     except asyncio.TimeoutError:
-                        logger.warning(f"Input response timeout for session {session_id}")
+                        logger.warning(
+                            f"Input response timeout for session {session_id}"
+                        )
                         await self.stop_session(session_id, "Input timeout")
                         raise
                 else:
@@ -209,17 +234,19 @@ class WebSocketManager:
     async def send_message(self, session_id: str, message: Dict[str, Any]) -> None:
         """
         Send a message to the client
-        
+
         Args:
             session_id: Session identifier
             message: Message dictionary to send
         """
         await self._send_message(session_id, message)
 
-    async def send_chat_message(self, session_id: str, content: str, source: str = "assistant") -> None:
+    async def send_chat_message(
+        self, session_id: str, content: str, source: str = "assistant"
+    ) -> None:
         """
         Send a formatted chat message to the client
-        
+
         Args:
             session_id: Session identifier
             content: Message content
@@ -237,10 +264,12 @@ class WebSocketManager:
             },
         )
 
-    async def send_agent_message(self, session_id: str, agent_name: str, content: str) -> None:
+    async def send_agent_message(
+        self, session_id: str, agent_name: str, content: str
+    ) -> None:
         """
         Send a message from a specific agent
-        
+
         Args:
             session_id: Session identifier
             agent_name: Name of the agent sending the message
@@ -251,7 +280,7 @@ class WebSocketManager:
     async def handle_input_response(self, session_id: str, response: str) -> None:
         """
         Handle input response from client
-        
+
         Args:
             session_id: Session identifier
             response: User's input response
@@ -261,10 +290,12 @@ class WebSocketManager:
         else:
             logger.warning(f"Received input response for inactive session {session_id}")
 
-    async def stop_session(self, session_id: str, reason: str = "Session stopped") -> None:
+    async def stop_session(
+        self, session_id: str, reason: str = "Session stopped"
+    ) -> None:
         """
         Stop an active session
-        
+
         Args:
             session_id: Session identifier
             reason: Reason for stopping
@@ -283,12 +314,12 @@ class WebSocketManager:
                         task.cancel()
                 if session_id in self.active_executor:
                     executor = self.active_executor[session_id]
-                    if hasattr(executor, 'cleanup'):
+                    if hasattr(executor, "cleanup"):
                         await executor.cleanup()
                     self.active_executor.pop(session_id, None)
                 if session_id in self.active_browser:
                     agent, browser = self.active_browser[session_id]
-                    
+
                     if not agent.done():
                         agent.cancel()
                         try:
@@ -305,12 +336,14 @@ class WebSocketManager:
                 except Exception as e:
                     logger.error(f"Error cancelling task for {session_id}: {e}")
                     raise e
-                    
 
                 # Finally cancel the token
                 self._cancellation_tokens[session_id].cancel()
                 # Send completion message if connection is active
-                if session_id in self._connections and session_id not in self._closed_connections:
+                if (
+                    session_id in self._connections
+                    and session_id not in self._closed_connections
+                ):
                     await self._send_message(
                         session_id,
                         {
@@ -320,60 +353,64 @@ class WebSocketManager:
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
-                    
+
             except Exception as e:
                 logger.error(f"Error stopping session {session_id}: {e}")
-
 
     async def close_browser_session(self, browser_session) -> bool:
         """Attempt to close browser gracefully using the session's built-in methods."""
         if browser_session is None:
             return True
-            
+
         try:
-            if hasattr(browser_session, 'agent'):
+            if hasattr(browser_session, "agent"):
                 agent = browser_session.agent
-                if hasattr(agent, 'event_bus'):
+                if hasattr(agent, "event_bus"):
                     # Try to stop or clean up the event bus
-                    if hasattr(agent.event_bus, 'stop'):
+                    if hasattr(agent.event_bus, "stop"):
                         await agent.event_bus.stop()
-                    elif hasattr(agent.event_bus, 'close'):
+                    elif hasattr(agent.event_bus, "close"):
                         await agent.event_bus.close()
-                    elif hasattr(agent.event_bus, 'cleanup'):
+                    elif hasattr(agent.event_bus, "cleanup"):
                         await agent.event_bus.cleanup()
-            
+
             # Also check for global EventBus registry cleanup
-            if hasattr(browser_session, '_cleanup_event_system'):
+            if hasattr(browser_session, "_cleanup_event_system"):
                 await browser_session._cleanup_event_system()
-                
+
             # Try the standard close method first
-            if hasattr(browser_session, 'close'):
+            if hasattr(browser_session, "close"):
                 await browser_session.close()
-            
+
             # Then try kill method
-            if hasattr(browser_session, 'kill'):
+            if hasattr(browser_session, "kill"):
                 await browser_session.kill()
-            
+
             # Try to close the browser if it has a browser attribute
-            if hasattr(browser_session, 'browser') and browser_session.browser:
+            if hasattr(browser_session, "browser") and browser_session.browser:
                 await browser_session.browser.close()
             browser_session = None
             return True
-            
+
         except Exception as e:
             print(f"Error during graceful browser closure: {e}")
             return False
 
     async def terminal_input(self, session_id: str, process_id: str, input_text: str):
-        """ Handle terminal input request
+        """Handle terminal input request
         Args:
             session_id: Session identifier
             process_id: Identifier of the terminal process
             input_text: Text input to send to the terminal
         """
         if session_id in self.active_executor:
-            await self.active_executor[session_id].send_input_to_process(process_id, input_text)
-        elif session_id in self._connections and session_id not in self._closed_connections:
+            await self.active_executor[session_id].send_input_to_process(
+                process_id, input_text
+            )
+        elif (
+            session_id in self._connections
+            and session_id not in self._closed_connections
+        ):
             await self._send_message(
                 session_id,
                 {
@@ -385,18 +422,21 @@ class WebSocketManager:
             )
         else:
             logger.warning(f"Received input response for inactive session {session_id}")
-    
+
     async def terminal_kill(self, session_id: str, process_id: str):
         """
         Handle terminal process kill request
-        
+
         Args:
             session_id: Session identifier
             process_id: Identifier of the process to kill
         """
         if session_id in self.active_executor:
             await self.active_executor[session_id].terminate_process(process_id)
-        elif session_id in self._connections and session_id not in self._closed_connections:
+        elif (
+            session_id in self._connections
+            and session_id not in self._closed_connections
+        ):
             await self._send_message(
                 session_id,
                 {
@@ -408,11 +448,11 @@ class WebSocketManager:
             )
         else:
             logger.warning(f"Received kill request for inactive session {session_id}")
-    
+
     async def disconnect(self, session_id: str) -> None:
         """
         Clean up connection and associated resources
-        
+
         Args:
             session_id: Session identifier
         """
@@ -435,7 +475,7 @@ class WebSocketManager:
     async def _send_message(self, session_id: str, message: Dict[str, Any]) -> None:
         """
         Internal method to send a message through WebSocket
-        
+
         Args:
             session_id: Session identifier
             message: Message dictionary to send
@@ -458,7 +498,7 @@ class WebSocketManager:
     async def _handle_stream_error(self, session_id: str, error: Exception) -> None:
         """
         Handle stream errors
-        
+
         Args:
             session_id: Session identifier
             error: Exception that occurred
@@ -522,16 +562,19 @@ class WebSocketManager:
 
     def is_connected(self, session_id: str) -> bool:
         """Check if a session is actively connected"""
-        return session_id in self._connections and session_id not in self._closed_connections
+        return (
+            session_id in self._connections
+            and session_id not in self._closed_connections
+        )
 
     def is_session_stopped(self, session_id: str) -> bool:
         """Check if a session has been stopped"""
         return self._stop_flags.get(session_id, False)
-    
+
     def get_cancellation_token(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
         return self._cancellation_tokens.get(session_id)
-    
+
     def get_active_browser(self, session_id: str) -> Optional[CancellationToken]:
         """Get the cancellation token for a session"""
         return self.active_browser.get(session_id)
