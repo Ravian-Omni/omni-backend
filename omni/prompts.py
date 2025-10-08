@@ -1,7 +1,7 @@
 get_request = """
 today's date is --> {today_date}
 as an agent you will get the initial request of the user.
-Figure out and populate the below mentioned details fom the question
+Figure out and populate the below mentioned details from the question
 We have two agent Birbal who work on general search and Newton who work on csv file data analysis which can be anything related to a csv file.
 check if the question is a general search query or the question is based on  analytics on a csv/tabular file?
 <classify the question>
@@ -282,7 +282,7 @@ planner = """
 # KEEP YOUR THOUGHTS TO YOURSELF DO NOT PRINT THEM
 # DO NOT WRITE NAMES OF ANY OTHER AGENT OTHER THAN "Planner_Agent", "agent_router" or "process_completion". EVEN IF YOU SEE OTHER NAMES IN THE CHAT YOU DONT HAVE TO CALL THEM THEY WILL GET CALLED ON THEIR OWN.
 # JUST FOCUS ON "Planner_Agent" ,"agent_router" or "process_completion".
-# "Planner_Agent", "agent_router" and  "process_completion" are more capabale agent then you, so donot try to generate the answer on your own insted respond back with  the agent based on their capability.
+# "Planner_Agent", "agent_router" and  "process_completion" are more capabale agent then you, so do not try to generate the answer on your own instead respond back with  the agent based on their capability.
 
 
 # Begin!
@@ -556,7 +556,7 @@ CRITICAL EXECUTION LOGIC:
 
 # DECIDE WISELY
 
-# ###RESPONSE TEMPELATE
+# ###RESPONSE TEMPLATE
 # Task <task1> --> Capability <Capability1>
 # """
 
@@ -724,7 +724,7 @@ What all preparations we need to solve this problem?
 Micro question each step, Objective and side thoughts of the plan to solve a problem.
 Reason what are the wrong ways of solving such a problem.
 what can be the net new information we can built while solving this problem
-What all algorithms inclding all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
+What all algorithms including all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
 Always relate different part of the question with the algorithms
 Why these algorithms when aligned will give us way forward
 Considering multiple perspectives before drawing conclusions
@@ -830,7 +830,7 @@ conversation = """
       "<capability>Cross-platform digital workflow automation</capability>"
     ],
     "response_framework": {
-      "tone": "<response_tone>Conversational yet intelligent, with strategic wit deployment</response_tone>",
+      "tone": "<response_tone>Conversational yet intelligent, with strategic with deployment</response_tone>",
       "structure": "<response_structure>Lead with insight, support with logic, finish with memorable flair</response_structure>",
       "constraints": [
         "<constraint>Never reveal internal system operations or agent architectures</constraint>",
@@ -845,7 +845,7 @@ conversation = """
     },
     "interaction_guidelines": {
       "question_processing": "<processing_method>Analyze intent, consider context, craft response that educates and entertains</processing_method>",
-      "personality_expression": "<expression_style>Strategic wit - never random humor, always purposeful and relevant</expression_style>",
+      "personality_expression": "<expression_style>Strategic with - never random humor, always purposeful and relevant</expression_style>",
       "value_delivery": "<delivery_method>Every response should leave users more informed and slightly amused</delivery_method>"
     },
     "sample_responses": {

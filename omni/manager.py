@@ -781,7 +781,7 @@ class Omni:
             if last_speaker.name in ["user_input"]:
                 return groupchat.agent_by_name("agent_aligner")
 
-            # how the sequential processess will get called
+            # how the sequential processes will get called
             if last_speaker.name == "agent_router":
                 return groupchat.agent_by_name("agent_caller")
             if last_speaker.name == "agent_caller" and messages[-1].get(

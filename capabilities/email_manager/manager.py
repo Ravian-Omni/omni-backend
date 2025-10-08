@@ -659,7 +659,7 @@ class EmailManager:
 
     def _register_functions(self):
 
-        # Wrapper functions before registring to agents
+        # Wrapper functions before registering to agents
 
         async def send_email_with_attachments_wrapper(
             to: Union[List[str], str],

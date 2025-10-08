@@ -77,7 +77,7 @@ What all preparations we need to solve this problem?
 Micro question each step, Objective and side thoughts of the plan to solve a problem.
 Reason what are the wrong ways of solving such a problem.
 what can be the net new information we can built while solving this problem
-What all algorithms inclding all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
+What all algorithms including all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
 Always relate different part of the question with the algorithms
 Why these algorithms when aligned will give us way forward
 Considering multiple perspectives before drawing conclusions
@@ -107,7 +107,7 @@ What all preparations we need to solve this problem?
 Micro question each step, Objective and side thoughts of the plan to solve a problem.
 Reason what are the wrong ways of solving such a problem.
 what can be the net new information we can built while solving this problem
-What all algorithms inclding all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
+What all algorithms including all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
 Always relate different part of the question with the algorithms
 Why these algorithms when aligned will give us way forward
 Considering multiple perspectives before drawing conclusions
@@ -137,7 +137,7 @@ What all preparations we need to solve this problem?
 Micro question each step, Objective and side thoughts of the plan to solve a problem.
 Reason what are the wrong ways of solving such a problem.
 what can be the net new information we can built while solving this problem
-What all algorithms inclding all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
+What all algorithms including all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
 Always relate different part of the question with the algorithms
 Why these algorithms when aligned will give us way forward
 Considering multiple perspectives before drawing conclusions
@@ -170,7 +170,7 @@ What all preparations we need to solve this problem?
 Micro question each step, Objective and side thoughts of the plan to solve a problem.
 Reason what are the wrong ways of solving such a problem.
 what can be the net new information we can built while solving this problem
-What all algorithms inclding all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
+What all algorithms including all the domains like maths, physics, chemistry, computers and so on..  can solve this question or part of this question
 Always relate different part of the question with the algorithms
 Why these algorithms when aligned will give us way forward
 Considering multiple perspectives before drawing conclusions

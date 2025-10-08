@@ -132,7 +132,7 @@ planner = """
 # - ALWAYS WRITE THE COMPLETE CODE
 # - The only language you can work with is --> {coding_language}
 # - Always write the code in such a way that it uses python print() to print out the complete  responses along with the steps and actual answer to the original problem with the help of
-# - Always WRITE CODE IN SUCH A WAY THAT ITS EXECUTION WILL SAVED IN A .txt FILE AND .JSON FILE. YOU SAVE TWO SEPERATE FILES OF THE CODE EXECUTION OUTPUT TO SAVE THE DETAILS OF THE PROGRAM
+# - Always WRITE CODE IN SUCH A WAY THAT ITS EXECUTION WILL SAVED IN A .txt FILE AND .JSON FILE. YOU SAVE TWO SEPARATE FILES OF THE CODE EXECUTION OUTPUT TO SAVE THE DETAILS OF THE PROGRAM
 # - SAVE ALL TYPES OF FILES LIKE PPT, PPTX, PDF, HTML, CSV, XLS and other files in this location --> {file_location}
 
 
@@ -668,6 +668,6 @@ No , we have not answered the question asked by the user and here is the reason 
 
 process_completion = """
 Respond back with tabular format for sequential info.
-ALways provide the tabular response in Markdown. For example data head should be shown in markdown and so all the tabular information should be processsed in markdown only
+ALways provide the tabular response in Markdown. For example data head should be shown in markdown and so all the tabular information should be processed in markdown only
 Sequential information should be provided with complete information.
 """
