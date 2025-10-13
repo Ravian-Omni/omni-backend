@@ -23,6 +23,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install --no-deps git+https://github.com/Suryaaa-Rathore/ravian-browser-use.git@ravian_0.3.1
           pip install nuitka>=2.7.12
       
       - name: Build with Nuitka
