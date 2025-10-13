@@ -3,133 +3,275 @@
 # Complete signing and notarization script for main.dist
 set -e
 # Script to sign all components in main.dist folder
-DIST_PATH="./main.dist"
+DIST_FOLDER="main.dist"
+BINARY_NAME="ravian"                       # Name of your main executable
 SIGNING_IDENTITY="Developer ID Application: Lokesh Kumar (9ZV6HRFKX2)"
-ENTITLEMENTS="entitlements.plist"
+ENTITLEMENTS_FILE="entitlements.plist"
 BUNDLE_ID="com.ravianai.omni.backend"
 APPLE_ID="lokesh@ravian.ai"
 TEAM_ID="9ZV6HRFKX2"
-APP_SPECIFIC_PASSWORD="ceim-xorc-ufot-caiw"
+APP_PASSWORD="ceim-xorc-ufot-caiw"
 
-echo "Signing all components in $DIST_PATH..."
+# Archive name (auto-generated from folder name)
+ARCHIVE_NAME="${DIST_FOLDER}-signed.zip"
 
-echo "=== Step 1: Signing all components in $DIST_PATH ==="
+# ============================================================
+# CHECK EVERYTHING BEFORE STARTING
+# ============================================================
+echo "🔍 Checking configuration..."
 
-# Sign all .so files first (CRITICAL - these were missing timestamps)
-echo "Signing .so files..."
-find "$DIST_PATH" -name "*.so" -exec codesign \
-    --force \
-    --timestamp \
-    --verify \
-    --verbose \
-    --sign "$SIGNING_IDENTITY" \
-    --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    {} \;
+# Check if folder exists
+if [ ! -d "$DIST_FOLDER" ]; then
+    echo "❌ Error: Folder not found: $DIST_FOLDER"
+    exit 1
+fi
 
-# Sign all .dylib files (dependencies must be signed before main executable)
-echo "Signing dynamic libraries..."
-find "$DIST_PATH" -name "*.dylib" -exec codesign \
-    --force \
-    --timestamp \
-    --verify \
-    --verbose \
-    --sign "$SIGNING_IDENTITY" \
-    --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    {} \;
+# Check if binary exists
+if [ ! -f "$DIST_FOLDER/$BINARY_NAME" ]; then
+    echo "❌ Error: Binary not found: $DIST_FOLDER/$BINARY_NAME"
+    echo "   Make sure BINARY_NAME is set correctly"
+    exit 1
+fi
 
-# Sign any framework bundles
-echo "Signing frameworks..."
-find "$DIST_PATH" -name "*.framework" -exec codesign \
-    --force \
-    --timestamp \
-    --verify \
-    --verbose \
-    --sign "$SIGNING_IDENTITY" \
-    --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    {} \;
+# Check if entitlements file exists
+if [ ! -f "$ENTITLEMENTS_FILE" ]; then
+    echo "❌ Error: Entitlements file not found: $ENTITLEMENTS_FILE"
+    exit 1
+fi
 
-# 🔥 IMPROVED: Sign nested executables with better error handling
-echo "Signing nested executables..."
-find "$DIST_PATH" -type f -perm +111 ! -name "app" -print0 | while IFS= read -r -d '' file; do
-    echo "  → Signing executable: $file"
-    if codesign \
-        --force \
-        --timestamp \
-        --verify \
-        --verbose \
+# Check if you changed the default values
+if [[ "$SIGNING_IDENTITY" == *"Your Name"* ]]; then
+    echo "❌ Error: Please update SIGNING_IDENTITY in this script"
+    exit 1
+fi
+
+if [[ "$APPLE_ID" == *"example.com"* ]]; then
+    echo "❌ Error: Please update APPLE_ID in this script"
+    exit 1
+fi
+
+echo "✅ All checks passed!"
+echo "📁 Folder: $DIST_FOLDER"
+echo "🎯 Binary: $BINARY_NAME"
+echo "🔑 Identity: $SIGNING_IDENTITY"
+echo ""
+
+# ============================================================
+# STEP 1: SIGN EVERYTHING
+# ============================================================
+echo "================================================"
+echo "STEP 1: Signing all files"
+echo "================================================"
+echo ""
+
+# Sign .so files (Python extensions)
+echo "📦 Signing .so files..."
+SO_COUNT=$(find "$DIST_FOLDER" -name "*.so" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$SO_COUNT" -gt 0 ]; then
+    find "$DIST_FOLDER" -name "*.so" | while read file; do
+        echo "  → $(basename "$file")"
+        codesign --force --timestamp --options runtime \
+            --sign "$SIGNING_IDENTITY" \
+            --entitlements "$ENTITLEMENTS_FILE" \
+            "$file" 2>/dev/null || echo "    ⚠️  Failed (continuing...)"
+    done
+    echo "   Done: $SO_COUNT files"
+else
+    echo "   No .so files found"
+fi
+
+# Sign .dylib files (dynamic libraries)
+echo ""
+echo "📚 Signing .dylib files..."
+DYLIB_COUNT=$(find "$DIST_FOLDER" -name "*.dylib" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$DYLIB_COUNT" -gt 0 ]; then
+    find "$DIST_FOLDER" -name "*.dylib" | while read file; do
+        echo "  → $(basename "$file")"
+        codesign --force --timestamp --options runtime \
+            --sign "$SIGNING_IDENTITY" \
+            --entitlements "$ENTITLEMENTS_FILE" \
+            "$file" 2>/dev/null || echo "    ⚠️  Failed (continuing...)"
+    done
+    echo "   Done: $DYLIB_COUNT files"
+else
+    echo "   No .dylib files found"
+fi
+
+# Sign frameworks
+echo ""
+echo "🖼️  Signing frameworks..."
+FRAMEWORK_COUNT=$(find "$DIST_FOLDER" -name "*.framework" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$FRAMEWORK_COUNT" -gt 0 ]; then
+    find "$DIST_FOLDER" -name "*.framework" | while read file; do
+        echo "  → $(basename "$file")"
+        codesign --force --timestamp --options runtime \
+            --sign "$SIGNING_IDENTITY" \
+            --entitlements "$ENTITLEMENTS_FILE" \
+            "$file" 2>/dev/null || echo "    ⚠️  Failed (continuing...)"
+    done
+    echo "   Done: $FRAMEWORK_COUNT frameworks"
+else
+    echo "   No frameworks found"
+fi
+
+# Sign other executables (but not our main binary)
+echo ""
+echo "⚙️  Signing other executables..."
+EXEC_COUNT=0
+find "$DIST_FOLDER" -type f -perm +111 | while read file; do
+    # Skip our main binary (we sign it last)
+    if [ "$(basename "$file")" == "$BINARY_NAME" ]; then
+        continue
+    fi
+    
+    # Skip non-binary files
+    if file "$file" | grep -q "text"; then
+        continue
+    fi
+    
+    echo "  → $(basename "$file")"
+    if codesign --force --timestamp --options runtime \
         --sign "$SIGNING_IDENTITY" \
-        --options runtime \
-        --entitlements "$ENTITLEMENTS" \
+        --entitlements "$ENTITLEMENTS_FILE" \
         "$file" 2>/dev/null; then
-        echo "    ✅ Signed: $(basename "$file")"
+        EXEC_COUNT=$((EXEC_COUNT + 1))
     else
-        echo "    ⚠️  Failed to sign: $file"
+        echo "    ⚠️  Failed (continuing...)"
     fi
 done
+echo "   Done: $EXEC_COUNT executables"
 
-# 🔥 NEW: Explicitly sign Python executable if it exists
-echo "Checking for Python executable..."
-if [ -f "$DIST_PATH/Python" ]; then
-    echo "  → Signing Python executable..."
-    if codesign \
-        --force \
-        --timestamp \
-        --verify \
-        --verbose \
+# Sign Python executable if it exists
+echo ""
+if [ -f "$DIST_FOLDER/Python" ]; then
+    echo "🐍 Signing Python executable..."
+    if codesign --force --timestamp --options runtime \
         --sign "$SIGNING_IDENTITY" \
-        --options runtime \
-        --entitlements "$ENTITLEMENTS" \
-        "$DIST_PATH/Python"; then
-        echo "    ✅ Python executable signed successfully"
+        --entitlements "$ENTITLEMENTS_FILE" \
+        "$DIST_FOLDER/Python" 2>/dev/null; then
+        echo "   ✅ Success"
     else
-        echo "    ❌ Failed to sign Python executable"
+        echo "   ❌ FAILED - This is critical!"
         exit 1
     fi
 else
-    echo "  ℹ️  Python executable not found (may be normal)"
+    echo "ℹ️  No Python executable found (normal for some builds)"
 fi
 
-# Finally, sign the main executable
-echo "Signing main executable..."
-codesign \
-    --force \
-    --timestamp \
-    --verify \
-    --verbose \
+# Sign main binary (LAST - this is the most important!)
+echo ""
+echo "🎯 Signing main binary: $BINARY_NAME"
+if codesign --force --timestamp --options runtime \
     --sign "$SIGNING_IDENTITY" \
-    --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    "$DIST_PATH/app"
-
-echo "=== Step 2: Verifying signatures ==="
-codesign --verify --deep --strict --verbose=2 "$DIST_PATH/app"
-
-echo "=== Step 3: Creating archive for notarization ==="
-# 🔥 CHANGED: Using ditto instead of zip for better preservation of metadata
-echo "Creating archive with ditto (preserves extended attributes)..."
-if [ -f "omni-backend.zip" ]; then
-    rm "omni-backend.zip"
+    --entitlements "$ENTITLEMENTS_FILE" \
+    "$DIST_FOLDER/$BINARY_NAME"; then
+    echo "   ✅ Success"
+else
+    echo "   ❌ FAILED!"
+    exit 1
 fi
-ditto -c -k --keepParent "$DIST_PATH" "omni-backend.zip"
-echo "  ✅ Archive created: omni-backend.zip"
 
-echo "=== Step 4: Submitting for notarization ==="
-xcrun notarytool submit "omni-backend.zip" \
+# ============================================================
+# STEP 2: VERIFY EVERYTHING WORKED
+# ============================================================
+echo ""
+echo "================================================"
+echo "STEP 2: Verifying signatures"
+echo "================================================"
+
+if codesign --verify --deep --strict "$DIST_FOLDER/$BINARY_NAME" 2>/dev/null; then
+    echo "✅ All signatures are valid!"
+else
+    echo "❌ Signature verification failed!"
+    exit 1
+fi
+
+# ============================================================
+# STEP 3: CREATE ZIP FILE FOR NOTARIZATION
+# ============================================================
+echo ""
+echo "================================================"
+echo "STEP 3: Creating zip file"
+echo "================================================"
+
+# Remove old zip if it exists
+if [ -f "$ARCHIVE_NAME" ]; then
+    rm "$ARCHIVE_NAME"
+fi
+
+echo "📦 Creating $ARCHIVE_NAME..."
+if ditto -c -k --keepParent "$DIST_FOLDER" "$ARCHIVE_NAME"; then
+    FILE_SIZE=$(du -h "$ARCHIVE_NAME" | cut -f1)
+    echo "   ✅ Created: $FILE_SIZE"
+else
+    echo "   ❌ Failed to create zip!"
+    exit 1
+fi
+
+# ============================================================
+# STEP 4: SEND TO APPLE FOR NOTARIZATION
+# ============================================================
+echo ""
+echo "================================================"
+echo "STEP 4: Sending to Apple for notarization"
+echo "================================================"
+echo "⏳ This will take 5-60 minutes..."
+echo "   (You can close this and check status later)"
+echo ""
+
+if xcrun notarytool submit "$ARCHIVE_NAME" \
     --apple-id "$APPLE_ID" \
-    --password "$APP_SPECIFIC_PASSWORD" \
+    --password "$APP_PASSWORD" \
     --team-id "$TEAM_ID" \
-    --wait
+    --wait; then
+    echo ""
+    echo "✅ Notarization successful!"
+else
+    echo ""
+    echo "❌ Notarization failed!"
+    echo "   Run this to see why:"
+    echo "   xcrun notarytool log <submission-id> --apple-id $APPLE_ID --password $APP_PASSWORD --team-id $TEAM_ID"
+    exit 1
+fi
 
-echo "=== Step 5: Stapling notarization (optional for Electron resources) ==="
-# Note: Stapling may not work for individual executables, but try anyway
-xcrun stapler staple "$DIST_PATH/app" || echo "Stapling failed (expected for individual executables)"
+# ============================================================
+# STEP 5: ATTACH NOTARIZATION TO BINARY (Optional)
+# ============================================================
+echo ""
+echo "================================================"
+echo "STEP 5: Attaching notarization ticket"
+echo "================================================"
 
-echo "=== Notarization completed! ==="
-echo "Your main.dist folder is now signed and notarized."
-echo "You can now copy it to your Electron app resources."
+if xcrun stapler staple "$DIST_FOLDER/$BINARY_NAME" 2>/dev/null; then
+    echo "✅ Ticket attached successfully!"
+else
+    echo "⚠️  Stapling failed (this is normal for standalone binaries)"
+    echo "   Your app will work fine, but needs internet on first run"
+fi
 
-# Cleanup
-rm "omni-backend.zip"
+# ============================================================
+# ALL DONE!
+# ============================================================
+echo ""
+echo "================================================"
+echo "🎉 SUCCESS! Your app is ready to distribute"
+echo "================================================"
+echo ""
+echo "✅ Signed: $DIST_FOLDER/$BINARY_NAME"
+echo "✅ Notarized by Apple"
+echo "✅ Ready to ship to users"
+echo ""
+echo "📦 Archive saved: $ARCHIVE_NAME"
+echo ""
+
+# Ask if they want to delete the zip
+read -p "Delete the zip file? (y/N): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    rm "$ARCHIVE_NAME"
+    echo "✅ Deleted $ARCHIVE_NAME"
+fi
+
+echo ""
+echo "You can now distribute: $DIST_FOLDER/$BINARY_NAME"
+echo "Done!"

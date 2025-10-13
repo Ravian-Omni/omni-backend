@@ -2,8 +2,6 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-
-from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel
 
@@ -164,7 +162,7 @@ def serialize_document(doc: dict[Any, Any]) -> dict[str, Any]:
     for key, value in doc.items():
         if isinstance(value, datetime):
             doc[key] = value.isoformat()
-        elif isinstance(value, ObjectId):
+        else:
             doc[key] = str(value)
 
     return doc

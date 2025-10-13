@@ -57,12 +57,12 @@ def build_with_nuitka():
         "--include-package=anyio",
         "--include-package=sniffio",
         "--include-package=h11",
-        # Data processing
-        "--include-package=pandas",
-        "--include-package=numpy",
-        "--include-package=PIL",
+        # # Data processing
+        # "--include-package=pandas",
+        # "--include-package=numpy",
+        # "--include-package=PIL",
         # Database
-        "--include-package=pymongo",
+        # "--include-package=pymongo",
         # Security and utilities
         "--include-package=cryptography",
         "--include-package=loguru",
@@ -102,10 +102,10 @@ def build_with_nuitka():
         "--prefer-source-code",
         # Output configuration
         "--output-dir=dist",
-        "--output-filename=app",
+        "--output-filename=ravian",
         # Metadata
-        "--company-name=Ravian AI",
-        "--product-name=OMNI",
+        "--company-name=Ravian AI PVT LTD",
+        "--product-name=Ravian",
         "--file-version=1.0.0",
         "--product-version=1.0.0",
         "--file-description=Ravian AI",
