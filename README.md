@@ -179,13 +179,51 @@ python scripts/build_scripts/nuitka_optimized.py
 - [Architecture Guide](docs/architecture.md) - Detailed architecture and design patterns
 - [Build Guide](docs/build-guide.md) - How to build standalone executables
 - [Signing Guide](docs/signing-guide.md) - macOS code signing and notarization
+- [Testing Guide](docs/testing-guide.md) - Comprehensive testing documentation
 - [Pre-commit Guide](docs/pre-commit-guide.md) - Code quality tooling setup
 
 ## Testing
 
+The project includes a comprehensive test suite with unit tests, integration tests, and API tests.
+
+### Quick Start
+
 ```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Run all tests
 pytest
+
+# Run with coverage
+pytest --cov=src --cov-report=html
+
+# Run specific test categories
+pytest -m unit              # Unit tests only
+pytest -m integration       # Integration tests only
+pytest -m api              # API endpoint tests
+pytest -m smoke            # Quick smoke tests
 ```
+
+### Test Structure
+
+```
+tests/
+├── unit/              # Unit tests
+├── integration/       # Integration tests
+├── conftest.py       # Shared fixtures
+└── README.md         # Test documentation
+```
+
+### Coverage
+
+After running tests with coverage, view the HTML report:
+
+```bash
+open htmlcov/index.html  # macOS
+```
+
+See [Testing Guide](docs/testing-guide.md) for comprehensive testing documentation.
 
 ## Logging
 

@@ -1,0 +1,36 @@
+# Testing dependencies for Omni Backend
+# Note: httpx and anyio versions must match your main requirements
+
+# Core testing framework
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+pytest-timeout>=2.2.0
+pytest-xdist>=3.5.0  # For parallel test execution
+
+# HTTP testing
+# httpx and anyio are already in requirements.txt - don't specify version here
+requests-mock>=1.11.0
+
+# Mocking and fixtures
+faker>=20.1.0
+factory-boy>=3.3.0
+
+# Code quality and coverage
+coverage[toml]>=7.3.2
+
+# Test utilities
+freezegun>=1.4.0  # For mocking time
+respx>=0.20.2  # For mocking httpx
+
+# Async testing
+# anyio is already in requirements.txt
+trio>=0.23.2
+
+# WebSocket testing
+# websockets is likely already in requirements.txt
+websockets>=12.0
+
+# Load testing (optional)
+locust>=2.19.1
