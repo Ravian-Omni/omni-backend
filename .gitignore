@@ -195,7 +195,6 @@ images/*
 events/*
 logs/*
 omni_venv
-capabilities/.DS_Store
 ravian/
 test/
 
@@ -204,3 +203,6 @@ dist/
 build_resources/
 nuitka-crash-report.xml
 .secrets.baseline
+
+# Temporary/utility scripts
+update_imports.py
