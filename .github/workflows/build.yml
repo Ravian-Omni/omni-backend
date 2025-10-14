@@ -1,9 +1,7 @@
 name: Build macOS Binary
 
 on:
-  push:
-    branches:
-      - feature/cleanup_0.1
+  workflow_dispatch:  # Manual trigger only
 
 jobs:
   build-macos:
