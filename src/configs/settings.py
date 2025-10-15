@@ -1,3 +1,9 @@
+"""Application configuration settings and environment variable management.
+
+This module provides centralized configuration management for the OMNI application,
+including thread-safe runtime updates and capability type definitions. It loads
+settings from environment variables and provides a global settings instance.
+"""
 # src/config/settings.py
 import os
 import threading
@@ -11,12 +17,43 @@ load_dotenv()
 
 
 class Settings:
+    """Thread-safe application settings manager.
+
+    Manages application configuration loaded from environment variables with
+    support for thread-safe runtime updates. All settings are loaded from
+    environment variables at initialization.
+
+    Attributes:
+        PROJECT_NAME: Name of the project.
+        PORT: Application port number.
+        BACKEND_URL: Backend service URL.
+        USER_TOKEN: User authentication token.
+        ROOT_DIR: Root directory for application data.
+        USER_EMAIL: User's email address for notifications.
+        USER_EMAIL_PASSWORD: User's email password.
+        USER_FILES_PATH: Path to user files storage.
+        USER_NAME: User's display name.
+        AG2AI_PYTHON_PATH: Path to Python executable for AG2AI.
+        CHROME_EXECUTABLE_PATH: Path to Chrome browser executable.
+        OMNI_COLLECTION: MongoDB collection name for omni.
+        EMAIL_COLLECTION: MongoDB collection name for email manager.
+        BROWSER_COLLECTION: MongoDB collection name for browser manager.
+        PYTHON_DEV_COLLECTION: MongoDB collection name for Python developer.
+        FILE_FINDER_COLLECTION: MongoDB collection name for file finder.
+        IMAGE_GENERATOR_COLLECTION: MongoDB collection name for image generator.
+    """
+
     def __init__(self):
+        """Initialize settings and load from environment variables."""
         self._lock = threading.RLock()  # Thread safety
         self._load_settings()
 
     def _load_settings(self):
-        """Load settings from environment"""
+        """Load settings from environment variables.
+
+        Initialize all application settings from environment variables with
+        appropriate defaults for optional settings.
+        """
         self.PROJECT_NAME = "OMNI"
         self.PORT = os.getenv("PORT", "8000")
         self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
@@ -45,7 +82,18 @@ class Settings:
         )
 
     def update_setting(self, key: str, value: Any) -> bool:
-        """Update a single setting at runtime"""
+        """Update a single setting at runtime.
+
+        Thread-safe method to update an existing setting value. Only updates
+        settings that already exist as attributes.
+
+        Args:
+            key: Name of the setting to update.
+            value: New value for the setting.
+
+        Returns:
+            True if setting was updated successfully, False if key doesn't exist.
+        """
         with self._lock:
             if hasattr(self, key):
                 setattr(self, key, value)
@@ -53,7 +101,16 @@ class Settings:
             return False
 
     def update_settings(self, updates: dict[str, Any]) -> dict[str, bool]:
-        """Update multiple settings at once"""
+        """Update multiple settings at once.
+
+        Thread-safe method to update multiple settings in a single operation.
+
+        Args:
+            updates: Dictionary mapping setting names to new values.
+
+        Returns:
+            Dictionary mapping setting names to update success status (True/False).
+        """
         with self._lock:
             results = {}
             for key, value in updates.items():
@@ -61,11 +118,27 @@ class Settings:
             return results
 
     def get_setting(self, key: str, default=None):
-        """Get a setting value"""
+        """Get a setting value.
+
+        Retrieve the value of a setting by key with optional default fallback.
+
+        Args:
+            key: Name of the setting to retrieve.
+            default: Default value to return if setting doesn't exist. Defaults to None.
+
+        Returns:
+            Value of the setting, or default if setting doesn't exist.
+        """
         return getattr(self, key, default)
 
     def get_all_settings(self) -> dict[str, Any]:
-        """Get all settings as dictionary"""
+        """Get all settings as dictionary.
+
+        Retrieve all settings excluding internal attributes (those starting with _).
+
+        Returns:
+            Dictionary containing all public settings and their values.
+        """
         return {
             key: value
             for key, value in self.__dict__.items()
@@ -78,7 +151,20 @@ settings = Settings()
 
 
 class CapabilityType(Enum):
-    """Enumeration of all available capabilities"""
+    """Enumeration of all available system capabilities.
+
+    Defines all available capability types in the OMNI system and their
+    corresponding database collection names. Each capability represents a
+    distinct functional module.
+
+    Attributes:
+        OMNI: Main orchestration capability.
+        EMAIL_MANAGER: Email sending and management capability.
+        BROWSER_MANAGER: Web browser automation capability.
+        PYTHON_DEVELOPER: Python code development capability.
+        FILE_FINDER: File search and management capability.
+        IMAGE_GENERATOR: Image generation capability.
+    """
 
     OMNI = "omni"
     EMAIL_MANAGER = "email_sender"
@@ -89,7 +175,19 @@ class CapabilityType(Enum):
 
     @classmethod
     def from_string(cls, capability_name: str):
-        """Get CapabilityType instance from string, raises ValueError if invalid"""
+        """Get CapabilityType instance from string.
+
+        Convert a string capability name to its corresponding CapabilityType enum.
+
+        Args:
+            capability_name: String name of the capability.
+
+        Returns:
+            CapabilityType enum instance.
+
+        Raises:
+            ValueError: If capability_name is not a valid capability.
+        """
         try:
             return cls(capability_name)
         except ValueError:
@@ -100,7 +198,11 @@ class CapabilityType(Enum):
 
     @property
     def collection(self):
-        """Return the collection associated with each capability."""
+        """Return the MongoDB collection name for this capability.
+
+        Returns:
+            MongoDB collection name string for the capability.
+        """
         return {
             CapabilityType.OMNI: settings.OMNI_COLLECTION,
             CapabilityType.EMAIL_MANAGER: settings.EMAIL_COLLECTION,
@@ -112,7 +214,20 @@ class CapabilityType(Enum):
 
     @classmethod
     def from_collection(cls, collection_name: str):
-        """Get CapabilityType instance from collection name."""
+        """Get CapabilityType instance from MongoDB collection name.
+
+        Reverse lookup to find the capability type associated with a given
+        collection name.
+
+        Args:
+            collection_name: MongoDB collection name.
+
+        Returns:
+            CapabilityType enum instance.
+
+        Raises:
+            ValueError: If no capability is found for the collection name.
+        """
         for capability in cls:
             if capability.collection == collection_name:
                 return capability

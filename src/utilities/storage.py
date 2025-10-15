@@ -1,3 +1,9 @@
+"""Storage and utility functions for chat history, text-to-speech, and path management.
+
+This module provides utility functions for managing chat history persistence,
+macOS text-to-speech capabilities, and directory path management with validation.
+"""
+
 import asyncio
 import os
 import subprocess
@@ -85,13 +91,22 @@ async def update_chat_history(
 
 
 async def a_speak(text, voice="Samantha"):
-    """
-    Asynchronously speak text using macOS 'say' command with Samantha voice by default.
-    Falls back to system default if Samantha is not available.
+    """Asynchronously speak text using macOS 'say' command.
+
+    Use the macOS text-to-speech system to speak the provided text with
+    the specified voice. Falls back to system default if the specified
+    voice is not available.
 
     Args:
-        text (str): The text to be spoken
-        voice (str): Voice to use (default: 'Samantha')
+        text: The text to be spoken.
+        voice: Voice name to use. Defaults to "Samantha".
+
+    Note:
+        This function only works on macOS (Darwin platform). On other
+        platforms, it prints a message and returns without action.
+
+    Example:
+        >>> await a_speak("Hello, world!", voice="Samantha")
     """
     if sys.platform != "darwin":
         print("This function only works on macOS")
@@ -120,13 +135,24 @@ async def a_speak(text, voice="Samantha"):
 
 
 def speak(text, voice="Samantha"):
-    """
-    Speak text using macOS 'say' command with Samantha voice by default.
-    Falls back to system default if Samantha is not available.
+    """Speak text using macOS 'say' command (synchronous).
+
+    Synchronous version of text-to-speech using macOS system voice.
+    Falls back to system default if the specified voice is not available.
 
     Args:
-        text (str): The text to be spoken
-        voice (str): Voice to use (default: 'Samantha')
+        text: The text to be spoken.
+        voice: Voice name to use. Defaults to "Samantha".
+
+    Raises:
+        subprocess.CalledProcessError: If the 'say' command fails.
+
+    Note:
+        This function only works on macOS. On other platforms, it prints
+        a message and returns without action.
+
+    Example:
+        >>> speak("Hello, world!", voice="Alex")
     """
     if sys.platform != "darwin":
         print("This function only works on macOS")
@@ -146,7 +172,21 @@ def speak(text, voice="Samantha"):
 
 
 def list_available_voices():
-    """List all available voices on the system in a readable format."""
+    """List all available voices on the system in a readable format.
+
+    Query the macOS system for all installed text-to-speech voices and
+    display them with their descriptions.
+
+    Note:
+        This function only works on macOS. On other platforms, it prints
+        a message and returns without action.
+
+    Example:
+        >>> list_available_voices()
+        Available voices:
+        Alex              en_US    # Most people recognize me by my voice.
+        Samantha          en_US    # Hello, my name is Samantha...
+    """
     try:
         if sys.platform != "darwin":
             print("This function only works on macOS")
@@ -202,14 +242,21 @@ def ensure_path(path: str | Path, create_if_missing: bool = True) -> str:
 
 
 def simple_ensure_path(path: str | Path) -> str:
-    """
-    Simple version: create directory if it doesn't exist and return absolute path.
+    """Create directory if it doesn't exist and return absolute path.
+
+    Simplified version of ensure_path that always creates the directory
+    and returns its absolute path.
 
     Args:
-        path: Directory path
+        path: Directory path to ensure exists.
 
     Returns:
-        str: Absolute path
+        Absolute path string of the directory.
+
+    Example:
+        >>> path = simple_ensure_path("data/cache")
+        >>> print(path)
+        /Users/username/project/data/cache
     """
     abs_path = os.path.abspath(path)
     os.makedirs(abs_path, exist_ok=True)

@@ -1,3 +1,10 @@
+"""Custom AutoGen group chat manager with enhanced tracking and WebSocket support.
+
+This module provides a custom GroupChatManager implementation that extends AutoGen's
+standard manager with chat context tracking, usage monitoring, database persistence,
+and real-time WebSocket communication capabilities.
+"""
+
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
@@ -16,7 +23,25 @@ from src.utilities.async_helpers import async_to_sync
 
 @dataclass
 class ChatContext:
-    """Chat context containing all necessary identifiers"""
+    """Chat context containing all necessary identifiers and configuration.
+
+    This dataclass encapsulates all the context information needed for a chat
+    session, including user identification, chat routing, memory management,
+    and capability configuration.
+
+    Attributes:
+        user_id: Unique identifier for the user.
+        chat_id: Unique identifier for the chat session.
+        chat_dir: Directory path for storing chat-related files.
+        call_id: Unique identifier for the current API call.
+        capability_id: Unique identifier for the capability being used.
+        capability_name: Human-readable name of the capability.
+        collection_name: MongoDB collection name for storing chat data.
+        omni_memory: OmniMemory instance for managing conversation memory.
+        cancellation_token: Token for cancelling long-running operations.
+        task_id: Optional identifier for tracking specific tasks.
+        manager_kwargs: Additional keyword arguments for manager configuration.
+    """
 
     user_id: str
     chat_id: str
@@ -31,11 +56,36 @@ class ChatContext:
     manager_kwargs: dict[str, Any] | None = None
 
     def __post_init__(self):
+        """Initialize manager_kwargs to empty dict if not provided."""
         if self.manager_kwargs is None:
             self.manager_kwargs = {}
 
 
 async def create_capability_chat(context: ChatContext) -> dict[str, str]:
+    """Create a new capability chat session in the database.
+
+    Initialize a new chat document with all necessary metadata and store it
+    in the database using the capability's collection.
+
+    Args:
+        context: ChatContext containing all chat identifiers and configuration.
+
+    Returns:
+        Dictionary containing the created chat_id.
+
+    Raises:
+        Exception: If database chat creation fails.
+
+    Example:
+        >>> context = ChatContext(
+        ...     user_id="user123",
+        ...     chat_id="chat456",
+        ...     capability_name="search"
+        ... )
+        >>> result = await create_capability_chat(context)
+        >>> print(result["chat_id"])
+        chat456
+    """
     chat_document = {
         "user_id": context.user_id,
         "chat_id": context.chat_id,
@@ -142,7 +192,28 @@ async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> 
 
 
 class CustomGroupChatManager(autogen.GroupChatManager):
-    """Enhanced GroupChatManager with chat context and background processing"""
+    """Enhanced GroupChatManager with chat context and background processing.
+
+    Extends AutoGen's GroupChatManager to provide additional functionality including:
+    - Chat context tracking for database persistence
+    - Per-agent token usage monitoring and delta calculation
+    - WebSocket integration for real-time message streaming
+    - Memory management integration with OmniMemory
+    - Background task processing for non-blocking operations
+
+    Attributes:
+        context: ChatContext with all chat identifiers and configuration.
+        omni_memory: OmniMemory instance for managing conversation memory.
+        _agent_previous_usage: Tracks previous token usage for delta calculation.
+
+    Example:
+        >>> chat_context = ChatContext(user_id="user123", chat_id="chat456")
+        >>> manager = CustomGroupChatManager(
+        ...     groupchat=group_chat,
+        ...     chat_context=chat_context,
+        ...     llm_config=llm_config
+        ... )
+    """
 
     def __init__(
         self,
@@ -151,6 +222,14 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         llm_config=None,
         human_input_mode: str = "NEVER",
     ):
+        """Initialize CustomGroupChatManager with enhanced tracking.
+
+        Args:
+            groupchat: AutoGen GroupChat instance.
+            chat_context: ChatContext with all necessary identifiers.
+            llm_config: LLM configuration dictionary. Defaults to None.
+            human_input_mode: Human input mode setting. Defaults to "NEVER".
+        """
         super().__init__(
             groupchat=groupchat,
             llm_config=llm_config,
@@ -172,14 +251,33 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         self._initialize_agent_tracking()
 
     def _initialize_agent_tracking(self):
-        """Initialize usage tracking for all agents"""
+        """Initialize usage tracking for all agents.
+
+        Set up initial usage tracking state for each agent in the group chat
+        to enable accurate delta calculations.
+        """
         for agent in self.groupchat.agents:
             # Initialize with current usage if any
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
 
     def _get_agent_current_usage(self, agent) -> dict[str, Any]:
-        """Get current usage for a specific agent"""
+        """Get current usage for a specific agent.
+
+        Retrieve the current token usage statistics from an agent's client,
+        including model information, token counts, and cost.
+
+        Args:
+            agent: AutoGen agent instance.
+
+        Returns:
+            Dictionary containing:
+                - model (str): Model name or "unknown"
+                - prompt_tokens (int): Number of prompt tokens used
+                - completion_tokens (int): Number of completion tokens used
+                - total_tokens (int): Total tokens used
+                - cost (float): Estimated cost in dollars
+        """
         default_usage = {
             "model": "unknown",
             "prompt_tokens": 0,
@@ -213,7 +311,21 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         }
 
     def _calculate_agent_usage_delta(self, agent, agent_name: str) -> dict[str, Any]:
-        """Calculate usage delta for a specific agent since last check"""
+        """Calculate usage delta for a specific agent since last check.
+
+        Compute the difference in token usage between the current state and
+        the previously recorded state, then update the tracking.
+
+        Args:
+            agent: AutoGen agent instance.
+            agent_name: Name of the agent.
+
+        Returns:
+            Dictionary containing:
+                - current_total (dict): Current cumulative usage statistics
+                - message_delta (dict): Usage for just this message
+                - agent_name (str): Name of the agent
+        """
         current_usage = self._get_agent_current_usage(agent)
         previous_usage = self._agent_previous_usage[agent_name]
 
@@ -239,11 +351,28 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         }
 
     def _get_sender_agent_usage(self, sender) -> dict[str, Any]:
-        """Get usage details for the sender agent when message is received"""
+        """Get usage details for the sender agent when message is received.
+
+        Args:
+            sender: AutoGen agent that sent the message.
+
+        Returns:
+            Usage delta dictionary with current total and message delta.
+        """
         return self._calculate_agent_usage_delta(sender, sender.name)
 
     async def _send_websocket_message(self, message: dict[str, Any]) -> None:
-        """Send message to WebSocket clients"""
+        """Send message to WebSocket clients.
+
+        Broadcast a message to all connected WebSocket clients for the current
+        chat session in real-time.
+
+        Args:
+            message: Message data to send.
+
+        Raises:
+            Exception: If WebSocket send operation fails.
+        """
         try:
             websocket_manager = await get_websocket_manager()
             await websocket_manager.send_chat_message(
@@ -256,7 +385,14 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             raise e
 
     async def _process_message_background(self, message_data: dict[str, Any]) -> None:
-        """Process message in background (WebSocket + Database)"""
+        """Process message in background (WebSocket + Database).
+
+        Execute WebSocket broadcasting and database persistence concurrently
+        without blocking the main conversation flow.
+
+        Args:
+            message_data: Message data to process.
+        """
         await asyncio.gather(
             self._send_websocket_message(message_data),
             update_chat_history(self.context, message_data),
@@ -266,7 +402,22 @@ class CustomGroupChatManager(autogen.GroupChatManager):
     def _print_received_message(
         self, message: dict[str, Any], sender: "autogen.Agent"
     ) -> None:
-        """Override to handle received messages with enhanced processing"""
+        """Override to handle received messages with enhanced processing.
+
+        Process incoming messages from agents with additional features:
+        - Track token usage and calculate deltas
+        - Store messages in OmniMemory
+        - Persist to database
+        - Broadcast via WebSocket
+
+        Args:
+            message: Message dictionary or string content.
+            sender: AutoGen agent that sent the message.
+
+        Note:
+            This method overrides the parent class method to add custom
+            processing while maintaining the original behavior.
+        """
         logger.info(f"Received from {sender.name}: {message}")
         super()._print_received_message(message, sender)
 
@@ -306,14 +457,31 @@ class CustomGroupChatManager(autogen.GroupChatManager):
     # Additional utility methods for comprehensive usage tracking
 
     def get_all_agents_current_usage(self) -> dict[str, dict[str, Any]]:
-        """Get current usage for all agents in the group"""
+        """Get current usage for all agents in the group.
+
+        Returns:
+            Dictionary mapping agent names to their current usage statistics.
+        """
         all_usage = {}
         for agent in self.groupchat.agents:
             all_usage[agent.name] = self._get_agent_current_usage(agent)
         return all_usage
 
     def get_group_usage_summary(self) -> dict[str, Any]:
-        """Get aggregated usage summary for the entire group"""
+        """Get aggregated usage summary for the entire group.
+
+        Calculate total token usage and costs across all agents in the group.
+
+        Returns:
+            Dictionary containing:
+                - total_prompt_tokens (int): Total prompt tokens across all agents
+                - total_completion_tokens (int): Total completion tokens
+                - total_tokens (int): Total tokens used
+                - total_cost (float): Total estimated cost
+                - agents_count (int): Number of agents in the group
+                - models_used (list): List of unique models used
+                - per_agent (dict): Individual agent usage statistics
+        """
         all_usage = self.get_all_agents_current_usage()
 
         total_summary = {
@@ -338,7 +506,11 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         return total_summary
 
     def reset_usage_tracking(self):
-        """Reset usage tracking (useful for starting fresh tracking mid-conversation)"""
+        """Reset usage tracking.
+
+        Clear and reinitialize usage tracking for all agents, useful for
+        starting fresh tracking mid-conversation or after a checkpoint.
+        """
         for agent in self.groupchat.agents:
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()

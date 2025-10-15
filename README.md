@@ -141,14 +141,47 @@ Once the application is running, access the interactive API documentation at:
 
 ## Development
 
-### Pre-commit Hooks
+### Code Quality Standards
 
-This project uses pre-commit hooks for code quality. See [docs/pre-commit-guide.md](docs/pre-commit-guide.md) for setup instructions.
+This project maintains high code quality standards with automated checks:
+
+#### Pre-commit Hooks
+
+Pre-commit hooks automatically check code quality before each commit:
 
 ```bash
+# Install pre-commit
+pip install pre-commit
+
+# Set up hooks
 pre-commit install
+
+# Run manually on all files
 pre-commit run --all-files
 ```
+
+See [docs/pre-commit-guide.md](docs/pre-commit-guide.md) for detailed information.
+
+#### Docstring Standards
+
+All code must have Google-style docstrings:
+
+```bash
+# Check docstrings
+pydocstyle src/ --convention=google
+
+# Find missing docstrings
+python3 add_docstrings.py
+```
+
+See [docs/docstring-style-guide.md](docs/docstring-style-guide.md) for guidelines and examples.
+
+**Docstring Requirements:**
+- Every module must have a module docstring
+- Every class must have a docstring
+- Every public function/method must have a docstring
+- Use Google-style format (compatible with Sphinx)
+- Maximum 88 characters per line (black standard)
 
 ### Building Executables
 
@@ -180,6 +213,7 @@ python scripts/build_scripts/nuitka_optimized.py
 - [Build Guide](docs/build-guide.md) - How to build standalone executables
 - [Signing Guide](docs/signing-guide.md) - macOS code signing and notarization
 - [Testing Guide](docs/testing-guide.md) - Comprehensive testing documentation
+- [Docstring Style Guide](docs/docstring-style-guide.md) - Documentation standards
 - [Pre-commit Guide](docs/pre-commit-guide.md) - Code quality tooling setup
 
 ## Testing

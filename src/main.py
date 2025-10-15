@@ -1,3 +1,13 @@
+"""FastAPI application entry point for Omni Backend.
+
+This module initializes and configures the FastAPI application with:
+- WebSocket and REST API endpoints
+- CORS middleware
+- Logging configuration
+- Authentication via AWS Cognito
+- OpenAPI documentation
+"""
+
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -40,9 +50,18 @@ middleware = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for the FastAPI application
-    Handles startup and shutdown events
+    """Manage FastAPI application lifespan.
+
+    Handles startup and shutdown events including:
+    - Logging initialization
+    - WebSocket manager setup
+    - Resource cleanup on shutdown
+
+    Args:
+        app: FastAPI application instance.
+
+    Yields:
+        None: Control during application runtime.
     """
 
     nest_asyncio.apply()  # 🧠 Patch the loop here
@@ -115,10 +134,23 @@ app.include_router(
 
 @app.get(path=base, include_in_schema=False)
 async def docs_redirect():
+    """Redirect base path to API documentation.
+
+    Returns:
+        RedirectResponse: Redirect to the Swagger docs URL.
+    """
     return RedirectResponse(url=docs_url)
 
 
 def custom_openapi():
+    """Generate custom OpenAPI schema with Bearer authentication.
+
+    Customizes the OpenAPI schema by adding AWS Cognito JWT Bearer token
+    authentication to all endpoints.
+
+    Returns:
+        dict: The customized OpenAPI schema with security configurations.
+    """
     if app.openapi_schema:
         return app.openapi_schema
     openapi_schema = get_openapi(
@@ -151,20 +183,32 @@ app.openapi = custom_openapi
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_html():
+    """Serve the main HTML page.
+
+    Returns:
+        HTMLResponse: The main index.html page content.
+    """
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
 
 
 @app.get("/capability", response_class=HTMLResponse)
 async def serve_capability_html():
+    """Serve the capability demonstration HTML page.
+
+    Returns:
+        HTMLResponse: The capability.html page content.
+    """
     html_content = Path("templates/capability.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
 
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint
+    """Check application health status.
+
+    Returns:
+        dict: Health status containing 'status' (ok) and descriptive message.
     """
     return {"status": "ok", "message": "Service is running"}
 

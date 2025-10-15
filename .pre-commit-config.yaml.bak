@@ -1,0 +1,193 @@
+# .pre-commit-config.yaml
+# Minimal but comprehensive pre-commit hooks for FastAPI
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # ============================================================================
+  # CORE HOOKS - These are ESSENTIAL for every FastAPI project
+  # ============================================================================
+
+  # 1. autoflake - Removes unused imports and variables automatically
+  #    Why essential: Keeps codebase clean, prevents "unused import" errors
+  #    What it does: Deletes imports you don't use, removes unused variables
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        name: Remove unused imports and variables
+        args:
+          - --in-place
+          - --remove-all-unused-imports
+          - --remove-unused-variables
+          - --remove-duplicate-keys
+          - --ignore-init-module-imports
+
+  # 2. isort - Sorts and organizes imports
+  #    Why essential: Keeps imports organized, prevents merge conflicts
+  #    What it does: Sorts imports alphabetically and by type (stdlib, third-party, local)
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: Sort imports
+        args:
+          - --profile=black
+          - --line-length=88
+
+  # 3. black - The standard Python code formatter
+  #    Why essential: Ensures consistent code style across team
+  #    What it does: Auto-formats code to be PEP 8 compliant
+  - repo: https://github.com/psf/black
+    rev: 24.3.0
+    hooks:
+      - id: black
+        name: Format code with black
+        args:
+          - --line-length=88
+
+  # 4. flake8 - Linting tool that catches errors and style issues
+  #    Why essential: Finds bugs, style issues, and complexity problems
+  #    What it does: Checks for PEP 8 violations, syntax errors, complexity
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: Lint with flake8
+        args:
+          - --max-line-length=588
+          - --extend-ignore=E501,E203,W503,C901
+          - --max-complexity=20
+        exclude: |
+          (?x)^(
+              .*/prompts\.py|
+              prompts\.py|
+              .*/function_description\.py|
+              function_description\.py|
+              .*/capabilities_descriptions\.py|
+              .*/system_ai_config\.py
+          )$
+
+  # ============================================================================
+  # SECURITY HOOKS - Highly recommended for production apps
+  # ============================================================================
+
+  # 5. bandit - Security vulnerability scanner
+  #    Why needed: Finds common security issues in Python code
+  #    What it does: Detects SQL injection risks, hardcoded passwords, etc.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8
+    hooks:
+      - id: bandit
+        name: Security check with bandit
+        args:
+          - -ll
+          - --skip=B101,B601,B324,B104
+
+  # 6. detect-secrets - Prevents committing secrets/credentials
+  #    Why needed: Stops you from accidentally committing API keys, passwords
+  #    What it does: Scans for high-entropy strings, patterns like API keys
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: Detect secrets
+        exclude: |
+          (?x)^(
+              package-lock\.json|
+              poetry\.lock|
+              Pipfile\.lock|
+              tests/fixtures/.*|
+              build_scripts/.*|
+              scripts/.*|
+              .*\.sh|
+              .*\.md
+          )$
+
+  # ============================================================================
+  # UTILITY HOOKS - Basic file quality checks
+  # ============================================================================
+
+  # 7. pre-commit-hooks - Collection of useful basic checks
+  #    Why needed: Prevents common mistakes and keeps files clean
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+      - id: end-of-file-fixer
+        name: Fix end of files
+      - id: check-yaml
+        name: Check YAML syntax
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: debug-statements
+        name: Check for debugger imports
+      - id: detect-private-key
+        name: Detect private keys
+
+  # ============================================================================
+  # CODE QUALITY HOOKS - Recommended for maintaining clean code
+  # ============================================================================
+
+  # 8. pyupgrade - Automatically upgrades syntax for newer Python versions
+  #    Why useful: Uses modern Python features, cleaner syntax
+  #    What it does: Converts old-style formatting to f-strings, etc.
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.2
+    hooks:
+      - id: pyupgrade
+        name: Upgrade Python syntax
+        args: ['--py312-plus']
+
+  # 9. pygrep-hooks - Checks for common anti-patterns
+  #    Why useful: Catches deprecated patterns and bad practices
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: python-no-eval
+        name: Check for eval() usage
+      - id: python-check-blanket-noqa
+        name: Check for blanket noqa
+
+# ============================================================================
+# SETUP INSTRUCTIONS
+# ============================================================================
+# 1. Install: pip install pre-commit
+# 2. Run: pre-commit install
+# 3. For secrets detection, create baseline: detect-secrets scan > .secrets.baseline
+# 4. Test: pre-commit run --all-files
+
+# ============================================================================
+# OPTIONAL: Skip specific hooks during commit
+# ============================================================================
+# SKIP=bandit,detect-secrets git commit -m "message"
+
+  # 10. pydocstyle - Docstring convention checker
+  #    Why useful: Ensures consistent documentation style
+  #    What it does: Checks docstrings follow Google style
+  - repo: https://github.com/PyCQA/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        name: Check docstring style
+        args:
+          - --convention=google
+          - --add-ignore=D100,D104,D105,D107
+        exclude: |
+          (?x)^(
+              tests/.*|
+              .*/prompts\.py|
+              prompts\.py|
+              .*/function_description\.py|
+              function_description\.py|
+              .*/capabilities_descriptions\.py|
+              .*/system_ai_config\.py|
+              scripts/.*|
+              build_scripts/.*
+          )$

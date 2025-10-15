@@ -1,4 +1,12 @@
-# api/ws.py
+"""WebSocket endpoints for real-time AI chat communication.
+
+This module provides WebSocket endpoints for:
+- Omni multi-capability AI conversations
+- Individual capability-specific chats (browser, email, file finder, etc.)
+- Real-time streaming of AI responses
+- Chat history management and context preservation
+"""
+
 import asyncio
 import json
 import os
@@ -23,14 +31,13 @@ from src.utilities.custom_manager import ChatContext
 
 
 def extract_user_summary(data: dict) -> dict:
-    """
-    Extracts a summary from raw API user data.
+    """Extract and format user information summary.
 
     Args:
-        data (dict): The original API response containing user information.
+        data: Raw API response containing user information.
 
     Returns:
-        dict: A cleaned dictionary with selected fields.
+        dict: Cleaned dictionary with selected user fields including name, email, dob, etc.
     """
     first_name = data.get("first_name", "").strip()
     last_name = data.get("last_name", "").strip()
@@ -57,7 +64,20 @@ async def run_websocket(
     user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for run communication"""
+    """WebSocket endpoint for Omni multi-capability AI chat.
+
+    Handles real-time communication for Omni conversations with support for
+    multiple AI capabilities, context preservation, and streaming responses.
+
+    Args:
+        websocket: WebSocket connection instance.
+        chat_id: Unique identifier for the chat session.
+        user_id: User identifier. Defaults to test user ID.
+        ws_manager: WebSocket manager dependency for connection handling.
+
+    Raises:
+        WebSocketDisconnect: When connection is closed by client or server.
+    """
     # Verify run exists and is in valid state
     chat_history = await api_client.post(
         "/chats/history",
@@ -232,7 +252,22 @@ async def run_capability_websocket(
     capability_name: str = "email_sender",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for run communication"""
+    """WebSocket endpoint for single capability-specific chat.
+
+    Handles real-time communication for individual capabilities like email,
+    browser, file finder, image generator, and Python developer.
+
+    Args:
+        websocket: WebSocket connection instance.
+        chat_id: Unique identifier for the chat session.
+        user_id: User identifier. Defaults to "default_user".
+        capability_name: Name of the capability to use. Defaults to "email_sender".
+        ws_manager: WebSocket manager dependency for connection handling.
+
+    Raises:
+        HTTPException: If capability_name is invalid.
+        WebSocketDisconnect: When connection is closed by client or server.
+    """
     # Verify run exists and is in valid state
     try:
         capability = CapabilityType.from_string(capability_name)

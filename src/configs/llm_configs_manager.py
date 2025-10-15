@@ -1,3 +1,9 @@
+"""LLM configuration manager with date-based encryption.
+
+This module provides secure management of LLM configurations with automatic
+date-based AES-256-GCM encryption. Configurations are fetched from the API,
+decrypted using daily rotating keys, and cached for performance.
+"""
 # llm_config_manager.py - Pure date-based encryption (no settings dependency)
 import base64
 import copy
@@ -17,7 +23,18 @@ from src.utilities.async_helpers import async_to_sync
 
 
 class PureDateEncryption:
-    """Pure date-based AES-256-GCM encryption - no global settings"""
+    """Pure date-based AES-256-GCM encryption with automatic key rotation.
+
+    Provides encryption and decryption using keys derived from the current date.
+    Keys automatically rotate daily at midnight UTC, ensuring fresh encryption
+    without manual key management.
+
+    Attributes:
+        KEY_SIZE: AES key size in bytes (32 = 256 bits).
+        IV_SIZE: Initialization vector size in bytes (12 = 96 bits for GCM).
+        TAG_SIZE: Authentication tag size in bytes (16 = 128 bits).
+        SALT_SIZE: Salt size for key derivation (32 = 256 bits).
+    """
 
     KEY_SIZE = 32  # 256 bits
     IV_SIZE = 12  # 96 bits for GCM
@@ -26,7 +43,15 @@ class PureDateEncryption:
 
     @staticmethod
     def _get_date_based_key() -> bytes:
-        """Get encryption key based purely on current date"""
+        """Get encryption key based purely on current date.
+
+        Generate a deterministic encryption key using the current UTC date.
+        The key is derived using SHA-256 hash of the date combined with a
+        fixed salt.
+
+        Returns:
+            32-byte encryption key derived from current date.
+        """
         # Use current date as primary key (YYYY-MM-DD format)
         # current_date = date.today().isoformat()
         current_date = datetime.now(timezone.utc).date().isoformat()
@@ -41,7 +66,21 @@ class PureDateEncryption:
 
     @staticmethod
     def decrypt_data(encrypted_data: str) -> dict[str, Any]:
-        """Decrypt data using current date as key"""
+        """Decrypt data using current date as key.
+
+        Decrypt AES-256-GCM encrypted data using a key derived from today's date.
+        The encrypted data must include salt, IV, authentication tag, and ciphertext.
+
+        Args:
+            encrypted_data: Base64-encoded encrypted data blob.
+
+        Returns:
+            Decrypted data as dictionary.
+
+        Raises:
+            Exception: If decryption fails due to invalid key, corrupted data,
+                or authentication failure.
+        """
         try:
             current_date = date.today().isoformat()
             print(f"🔓 Client decrypting with date key: {current_date}")
@@ -98,7 +137,14 @@ class PureDateEncryption:
 
     @staticmethod
     def get_current_date_info() -> dict[str, Any]:
-        """Get information about current date-based encryption"""
+        """Get information about current date-based encryption.
+
+        Provide detailed information about the encryption configuration,
+        including algorithm, key rotation schedule, and security parameters.
+
+        Returns:
+            Dictionary containing encryption metadata and configuration details.
+        """
         current_date = date.today().isoformat()
 
         return {
@@ -119,7 +165,17 @@ class PureDateEncryption:
 
 
 class LLMConfigManager:
-    """LLM Configuration Manager with pure date-based encryption"""
+    """LLM Configuration Manager with pure date-based encryption.
+
+    Manages LLM configurations with automatic fetching, decryption, and caching.
+    Configurations are cached per date and automatically invalidated when the
+    date changes.
+
+    Attributes:
+        _cache: Dictionary storing decrypted configurations.
+        _cache_time: Timestamp of when cache was last updated.
+        _cache_date: ISO date string for which cache is valid.
+    """
 
     _cache: dict[str, Any] = {}
     _cache_time: float = 0
@@ -127,7 +183,20 @@ class LLMConfigManager:
 
     @classmethod
     def get_config(cls, config_name: str) -> dict[str, Any]:
-        """Get LLM configuration by name - Main method to use"""
+        """Get LLM configuration by name.
+
+        Retrieve a specific LLM configuration with automatic fetching and
+        decryption if not cached.
+
+        Args:
+            config_name: Name of the configuration to retrieve.
+
+        Returns:
+            Dictionary containing config_list with the requested configuration.
+
+        Raises:
+            ValueError: If config_name is not found in available configurations.
+        """
         configs = cls._get_all_configs()
 
         if config_name not in configs:
@@ -142,13 +211,27 @@ class LLMConfigManager:
 
     @classmethod
     def get_available_configs(cls) -> list:
-        """Get list of available configuration names"""
+        """Get list of available configuration names.
+
+        Returns:
+            List of configuration name strings.
+        """
         configs = cls._get_all_configs()
         return list(configs.keys())
 
     @classmethod
     def _get_all_configs(cls) -> dict[str, Any]:
-        """Get all configs - decrypt if needed, check date-based cache validity"""
+        """Get all configs with automatic decryption and caching.
+
+        Fetch and decrypt all configurations from the API. Uses date-based cache
+        validation to ensure cached data is current for today's date.
+
+        Returns:
+            Dictionary mapping configuration names to their settings.
+
+        Raises:
+            Exception: If fetching or decrypting configurations fails.
+        """
         current_date = date.today().isoformat()
 
         # Check if cache is valid for current date
@@ -198,7 +281,10 @@ class LLMConfigManager:
 
     @classmethod
     def clear_cache(cls):
-        """Clear the configuration cache securely"""
+        """Clear the configuration cache securely.
+
+        Remove all cached configuration data and reset cache metadata.
+        """
         if cls._cache:
             cls._cache.clear()
         cls._cache = {}
@@ -208,7 +294,14 @@ class LLMConfigManager:
 
     @classmethod
     def refresh_configs(cls) -> bool:
-        """Force refresh configurations from server"""
+        """Force refresh configurations from server.
+
+        Clear cache and fetch fresh configurations from the API regardless
+        of current cache state.
+
+        Returns:
+            True if refresh was successful, False otherwise.
+        """
         try:
             current_date = date.today().isoformat()
             print(f"🔄 Force refreshing configs for date: {current_date}")
@@ -241,7 +334,13 @@ class LLMConfigManager:
 
     @classmethod
     def is_server_available(cls) -> bool:
-        """Check if server is available"""
+        """Check if server is available.
+
+        Test connectivity to the configuration API server.
+
+        Returns:
+            True if server is reachable and responding, False otherwise.
+        """
         try:
             response = async_to_sync(api_client.get("/"))
             return response["success"]
@@ -250,7 +349,14 @@ class LLMConfigManager:
 
     @classmethod
     def get_cache_info(cls) -> dict[str, Any]:
-        """Get cache information with date-based encryption details"""
+        """Get cache information with date-based encryption details.
+
+        Provide comprehensive information about cache state, validity, and
+        encryption configuration.
+
+        Returns:
+            Dictionary containing cache metadata and encryption details.
+        """
         current_date = date.today().isoformat()
         encryption_info = PureDateEncryption.get_current_date_info()
 
@@ -269,70 +375,151 @@ class LLMConfigManager:
 
     @classmethod
     def get_encryption_info(cls) -> dict[str, Any]:
-        """Get detailed encryption information"""
+        """Get detailed encryption information.
+
+        Returns:
+            Dictionary with encryption algorithm, key sizes, and security details.
+        """
         return PureDateEncryption.get_current_date_info()
 
 
 # Simple convenience functions - Use these for easy access
 def get_llm_config(config_name: str) -> dict[str, Any]:
-    """Get LLM config - Simple function"""
+    """Get LLM configuration by name.
+
+    Convenience function for retrieving LLM configurations.
+
+    Args:
+        config_name: Name of the configuration to retrieve.
+
+    Returns:
+        Dictionary containing config_list with the configuration.
+    """
     return LLMConfigManager.get_config(config_name)
 
 
 def list_configs() -> list:
-    """List available configs - Simple function"""
+    """List available configuration names.
+
+    Returns:
+        List of available configuration name strings.
+    """
     return LLMConfigManager.get_available_configs()
 
 
 def clear_llm_cache():
-    """Clear LLM config cache securely"""
+    """Clear LLM configuration cache securely.
+
+    Remove all cached configurations and reset cache metadata.
+    """
     LLMConfigManager.clear_cache()
 
 
 def refresh_llm_configs() -> bool:
-    """Refresh configs from server"""
+    """Refresh configurations from server.
+
+    Force fetch fresh configurations from the API.
+
+    Returns:
+        True if refresh was successful, False otherwise.
+    """
     return LLMConfigManager.refresh_configs()
 
 
 def get_cache_info() -> dict[str, Any]:
-    """Get cache information"""
+    """Get cache information and status.
+
+    Returns:
+        Dictionary containing cache metadata and encryption details.
+    """
     return LLMConfigManager.get_cache_info()
 
 
 def get_encryption_info() -> dict[str, Any]:
-    """Get encryption strength information"""
+    """Get encryption configuration details.
+
+    Returns:
+        Dictionary with encryption algorithm, key sizes, and security details.
+    """
     return LLMConfigManager.get_encryption_info()
 
 
 def is_server_available() -> bool:
-    """Check if server is available"""
+    """Check if configuration server is available.
+
+    Returns:
+        True if server is reachable, False otherwise.
+    """
     return LLMConfigManager.is_server_available()
 
 
 def get_current_date_key() -> str:
-    """Get current date being used for encryption"""
+    """Get current date being used for encryption.
+
+    Returns:
+        ISO format date string (YYYY-MM-DD).
+    """
     return date.today().isoformat()
 
 
 # Context manager for auto-cleanup
 class LLMConfigContext:
-    """Context manager that auto-clears cache after use"""
+    """Context manager that auto-clears cache after use.
+
+    Automatically clears the configuration cache when exiting the context,
+    ensuring sensitive configuration data is not kept in memory longer than needed.
+
+    Attributes:
+        config_name: Name of the configuration to retrieve.
+        config: Retrieved configuration dictionary.
+
+    Example:
+        >>> with LLMConfigContext("gpt4_mini") as config:
+        ...     print(config)
+    """
 
     def __init__(self, config_name: str):
+        """Initialize context manager.
+
+        Args:
+            config_name: Name of the configuration to retrieve.
+        """
         self.config_name = config_name
         self.config = None
 
     def __enter__(self):
+        """Enter context and retrieve configuration.
+
+        Returns:
+            Configuration dictionary.
+        """
         self.config = get_llm_config(self.config_name)
         return self.config
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context and clear cache.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_val: Exception value if an exception occurred.
+            exc_tb: Exception traceback if an exception occurred.
+        """
         clear_llm_cache()
 
 
 # Easy-to-use function with auto-cleanup
 def get_llm_config_clean(config_name: str) -> dict[str, Any]:
-    """Get LLM config and automatically clear cache after"""
+    """Get LLM config and automatically clear cache after.
+
+    Convenience function that retrieves a configuration and immediately clears
+    the cache to avoid keeping sensitive data in memory.
+
+    Args:
+        config_name: Name of the configuration to retrieve.
+
+    Returns:
+        Dictionary containing config_list with the configuration.
+    """
     try:
         config = get_llm_config(config_name)
         return config

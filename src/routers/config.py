@@ -1,4 +1,12 @@
-# In your main FastAPI file (main.py)
+"""Settings and configuration management REST API endpoints.
+
+This module provides endpoints for:
+- Retrieving all application settings
+- Managing user authentication tokens (JWT)
+- Managing email credentials with validation
+- Secure handling of sensitive configuration data
+"""
+
 import base64
 import json
 import re
@@ -12,10 +20,13 @@ from src.configs.settings import settings
 router = APIRouter()
 
 
-# Get all settings
 @router.get("/api/settings")
 async def get_all_settings():
-    """Get all current settings"""
+    """Get all current application settings.
+
+    Returns:
+        dict: All settings with current timestamp.
+    """
     return {"settings": settings.get_all_settings(), "timestamp": time.time()}
 
 
@@ -68,8 +79,19 @@ async def get_all_settings():
 
 @router.put("/api/settings/user-token")
 async def update_user_token(token: str):
-    """Update USER_TOKEN setting with basic JWT validation"""
+    """Update USER_TOKEN setting with JWT validation.
 
+    Validates JWT format and expiration before updating the token.
+
+    Args:
+        token: JWT token string to set as USER_TOKEN.
+
+    Returns:
+        dict: Success message with token preview and expiration info.
+
+    Raises:
+        HTTPException: 400 if token format invalid or expired.
+    """
     # Basic JWT format validation
     try:
         # Check if token has 3 parts separated by dots
@@ -125,7 +147,14 @@ async def update_user_token(token: str):
 
 @router.get("/api/settings/user-token")
 async def get_user_token():
-    """Get current USER_TOKEN (masked for security)"""
+    """Get current USER_TOKEN with secure masking.
+
+    Returns:
+        dict: Token preview (masked), status, and timestamp.
+
+    Raises:
+        HTTPException: 404 if USER_TOKEN not set.
+    """
     token = getattr(settings, "USER_TOKEN", None)
 
     if not token:
@@ -144,7 +173,14 @@ async def get_user_token():
 
 @router.delete("/api/settings/user-token")
 async def clear_user_token():
-    """Clear/remove USER_TOKEN"""
+    """Clear/remove USER_TOKEN from settings.
+
+    Returns:
+        dict: Success message with timestamp.
+
+    Raises:
+        HTTPException: 404 if USER_TOKEN not found.
+    """
     if hasattr(settings, "USER_TOKEN"):
         settings.USER_TOKEN = None
         return {"message": "USER_TOKEN cleared successfully", "timestamp": time.time()}
@@ -152,15 +188,30 @@ async def clear_user_token():
         raise HTTPException(status_code=404, detail="USER_TOKEN not found")
 
 
-# Email and Password Settings
 def validate_email(email: str) -> bool:
-    """Validate email format"""
+    """Validate email address format.
+
+    Args:
+        email: Email address to validate.
+
+    Returns:
+        bool: True if email format is valid, False otherwise.
+    """
     email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return re.match(email_pattern, email) is not None
 
 
 def validate_app_password(app_password: str) -> bool:
-    """Validate Google App Password format"""
+    """Validate Google App Password format.
+
+    Expected format: "xxxx xxxx xxxx xxxx" (16 alphanumeric + 3 spaces = 19 chars).
+
+    Args:
+        app_password: App password string to validate.
+
+    Returns:
+        bool: True if password format is valid, False otherwise.
+    """
     # Should match pattern: "xxxx xxxx xxxx xxxx" (16 chars + 3 spaces)
     if len(app_password) != 19:
         return False
@@ -177,8 +228,18 @@ def validate_app_password(app_password: str) -> bool:
 
 @router.put("/api/settings/user-email")
 async def update_user_email(email: str, email_password: str):
-    """Update USER_EMAIL and USER_EMAIL_PASSWORD settings with validation"""
+    """Update USER_EMAIL and USER_EMAIL_PASSWORD with validation.
 
+    Args:
+        email: Email address in valid format.
+        email_password: Google App Password in format "xxxx xxxx xxxx xxxx".
+
+    Returns:
+        dict: Success message with email and password length.
+
+    Raises:
+        HTTPException: 400 if email or password format is invalid.
+    """
     # Validate email format
     if not validate_email(email):
         raise HTTPException(status_code=400, detail="Invalid email format")
@@ -214,7 +275,14 @@ async def update_user_email(email: str, email_password: str):
 
 @router.get("/api/settings/user-email")
 async def get_user_email():
-    """Get current USER_EMAIL and USER_EMAIL_PASSWORD status"""
+    """Get current USER_EMAIL and USER_EMAIL_PASSWORD status.
+
+    Returns:
+        dict: Email address, password status, and timestamp.
+
+    Raises:
+        HTTPException: 404 if email credentials not set.
+    """
     email = getattr(settings, "USER_EMAIL", None)
     password = getattr(settings, "USER_EMAIL_PASSWORD", None)
 
@@ -238,7 +306,14 @@ async def get_user_email():
 
 @router.delete("/api/settings/user-email")
 async def clear_user_email():
-    """Clear/remove USER_EMAIL and USER_EMAIL_PASSWORD"""
+    """Clear/remove USER_EMAIL and USER_EMAIL_PASSWORD from settings.
+
+    Returns:
+        dict: Success message with list of cleared items and timestamp.
+
+    Raises:
+        HTTPException: 404 if email credentials not found.
+    """
     email_exists = hasattr(settings, "USER_EMAIL") and getattr(
         settings, "USER_EMAIL", None
     )

@@ -69,6 +69,22 @@ lint:
 	@echo "Running linters..."
 	ruff check src/ tests/
 	mypy src/
+	@echo "Checking docstrings..."
+	pydocstyle src/ --convention=google || true
+
+lint-strict:
+	@echo "Running strict linters..."
+	ruff check src/ tests/
+	mypy src/ --strict
+	pydocstyle src/ --convention=google
+
+docstring-check:
+	@echo "Checking for missing docstrings..."
+	python3 add_docstrings.py
+
+docstring-lint:
+	@echo "Linting docstring style..."
+	pydocstyle src/ --convention=google
 
 format:
 	@echo "Formatting code..."
