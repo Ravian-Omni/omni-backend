@@ -221,6 +221,35 @@ async def get_specific_chat(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+class ChatHistoryByTaskId(BaseModel):
+    task_id: str
+    user_id: str
+    chat_id: str
+    capability: str = "omni"  # Default to "omni" if not provided
+    
+@router.post("/chat-history/task_id")
+async def get_specific_chat(
+    filter_criteria: ChatHistoryByTaskId
+):
+    """Get a specific chat by user_id and chat_id - returns only chat_id and raw_messages"""
+    try:
+        chat_history = await api_client.post("/chats/history/task_id", data=filter_criteria.model_dump())
+        chat_history = chat_history.standard_response()
+        if not chat_history.get("success"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chat not found for chat_id: {filter_criteria.chat_id} and task_id: {filter_criteria.task_id}"
+            )
+        
+        # document = chat_history.get("data")
+        
+        # Return only chat_id and raw_messages
+        return chat_history
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
 
 
 class EnhancedChatHistory(BaseModel):
