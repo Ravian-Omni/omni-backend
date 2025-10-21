@@ -17,169 +17,514 @@ from src.capabilities.file_finder.response_format import (
     FileFinderResponse,
     ProblemStatusResponse,
 )
+from src.capabilities.file_finder.function_description import file_search_function_description
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
-
+from src.configs.settings import settings
+import concurrent.futures
+from typing import Optional
 
 class FileSearchAgent:
-    def __init__(self, root_dir: str = str(Path.home())):
+    # Directories to skip on macOS to avoid permission issues and improve speed
+    SKIP_DIRS = {
+        '.Trash', 'Library/Caches', 'Library/Logs', '.cache',
+        'node_modules', '.git', '.venv', '__pycache__',
+        'Library/Application Support/Google/Chrome',
+        'Library/Application Support/Firefox',
+        'Library/Mail', 'Library/Messages',
+        '/System', '/private', '/dev', '/cores',
+        '.npm', '.gradle', '.m2'
+    }
+    
+    # Common user-accessible directories on macOS
+    PRIORITY_DIRS = [
+        'Documents', 'Desktop', 'Downloads', 'Pictures',
+        'Movies', 'Music', 'Development', 'Projects'
+    ]
+
+    def __init__(self, root_dir: Optional[str] = None, max_depth: int = 6):
         """
         Initialize the search engine with a root directory to index.
 
         Args:
             root_dir (str): The root directory path to index, defaults to user's home directory
+            max_depth (int): Maximum directory depth to search (prevents deep recursion)
         """
-        self.root_dir = root_dir
+        self.root_dir = root_dir or str(Path.home())
+        self.max_depth = max_depth
         self.file_index: dict[str, dict] = {}
         self.inverted_index: dict[str, set[str]] = defaultdict(set)
-        self._build_index()
+        self.user_home = str(Path.home())
 
-    def _build_index(self) -> None:
-        """Build the search index from the root directory."""
-        for path in Path(self.root_dir).rglob("*"):
-            if path.is_file():
-                file_path = str(path)
-                file_name = path.name.lower()
+    def _resolve_directory_path(self, directory: Optional[str]) -> str:
+        """
+        Resolve directory path, handling common shortcuts and relative paths.
+        
+        Args:
+            directory: Directory path (can be None, absolute, relative, or shortcut)
+            
+        Returns:
+            Absolute directory path
+        """
+        if not directory:
+            return self.root_dir
+        
+        # Handle common shortcuts
+        shortcuts = {
+            'documents': 'Documents',
+            'desktop': 'Desktop', 
+            'downloads': 'Downloads',
+            'pictures': 'Pictures',
+            'photos': 'Pictures',
+            'movies': 'Movies',
+            'videos': 'Movies',
+            'music': 'Music',
+            'home': '',
+            '~': ''
+        }
+        
+        directory_lower = directory.lower().strip()
+        if directory_lower in shortcuts:
+            return os.path.join(self.user_home, shortcuts[directory_lower])
+        
+        # Expand ~ to home directory
+        if directory.startswith('~'):
+            directory = os.path.expanduser(directory)
+        
+        # Convert to absolute path if relative
+        if not os.path.isabs(directory):
+            directory = os.path.join(self.user_home, directory)
+        
+        # Verify directory exists
+        if not os.path.exists(directory):
+            raise ValueError(f"Directory not found: {directory}")
+        
+        if not os.path.isdir(directory):
+            raise ValueError(f"Path is not a directory: {directory}")
+        
+        return directory
+        """Check if directory should be skipped to avoid permission issues."""
+        if current_depth > self.max_depth:
+            return True
+            
+        path_str = str(path)
+        
+        # Skip if any parent directory matches skip patterns
+        for skip_dir in self.SKIP_DIRS:
+            if skip_dir in path_str:
+                return True
+        
+        # Skip hidden directories except in priority locations
+        if path.name.startswith('.') and not any(p in path_str for p in self.PRIORITY_DIRS):
+            return True
+            
+        return False
 
-                # Store file metadata
-                stats = path.stat()
-                self.file_index[file_path] = {
-                    "path": file_path,
-                    "size": self._format_size(stats.st_size),
-                    "modified": datetime.fromtimestamp(stats.st_mtime).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                }
-
-                # Create tokens from filename
-                tokens = self._tokenize(file_name)
-
-                # Build inverted index
-                for token in tokens:
-                    self.inverted_index[token].add(file_path)
-
-                    # Add character trigrams for fuzzy matching
-                    trigrams = self._get_trigrams(token)
-                    for trigram in trigrams:
-                        self.inverted_index[trigram].add(file_path)
+    def _build_index_fast(
+        self, 
+        search_term: str, 
+        file_type: Optional[str] = None,
+        modified_after: Optional[datetime] = None,
+        modified_before: Optional[datetime] = None,
+        created_after: Optional[datetime] = None,
+        size_min: Optional[int] = None,
+        size_max: Optional[int] = None,
+        search_directory: Optional[str] = None
+    ) -> None:
+        """Build index on-the-fly for search term with parallel processing and filters."""
+        query_tokens = self._tokenize(search_term)
+        
+        # Calculate minimum match threshold based on search term length
+        min_match_length = max(3, len(search_term) // 2) if search_term else 0
+        
+        # Determine search root - specific directory or priority directories
+        if search_directory:
+            # Search only in specified directory
+            search_roots = [Path(search_directory)]
+        else:
+            # Use priority directories as before
+            root = Path(self.root_dir)
+            search_roots = [root / d for d in self.PRIORITY_DIRS if (root / d).exists()]
+            if not search_roots:
+                search_roots = [root]
+        
+        def index_directory(dir_path: Path, depth: int = 0):
+            """Index a single directory."""
+            local_files = []
+            
+            try:
+                # Skip directory checks only if not explicitly searching this directory
+                if not search_directory and self._should_skip_directory(dir_path, depth):
+                    return local_files
+                
+                # For explicit directory search, only respect depth limit
+                if search_directory and depth > self.max_depth:
+                    return local_files
+                
+                # Use scandir for faster iteration
+                with os.scandir(dir_path) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_file(follow_symlinks=False):
+                                entry_lower = entry.name.lower()
+                                
+                                # Skip if file_type specified and doesn't match
+                                if file_type:
+                                    ext = file_type.lower()
+                                    if not ext.startswith('.'):
+                                        ext = f'.{ext}'
+                                    if not entry_lower.endswith(ext):
+                                        continue
+                                
+                                # Get file stats for filtering
+                                stat_info = entry.stat(follow_symlinks=False)
+                                
+                                # Apply date filters
+                                if modified_after and stat_info.st_mtime < modified_after.timestamp():
+                                    continue
+                                if modified_before and stat_info.st_mtime > modified_before.timestamp():
+                                    continue
+                                if created_after and stat_info.st_ctime < created_after.timestamp():
+                                    continue
+                                
+                                # Apply size filters
+                                if size_min and stat_info.st_size < size_min:
+                                    continue
+                                if size_max and stat_info.st_size > size_max:
+                                    continue
+                                
+                                # Stricter matching: require substantial overlap
+                                has_exact_match = any(token in entry_lower for token in query_tokens) if query_tokens else True
+                                has_strong_fuzzy = False
+                                
+                                # Only use fuzzy matching if no exact token match
+                                if not has_exact_match and query_tokens:
+                                    # Check if enough characters match (minimum threshold)
+                                    for token in query_tokens:
+                                        if len(token) >= min_match_length:
+                                            # Check for significant substring matches
+                                            if any(token[i:i+min_match_length] in entry_lower 
+                                                   for i in range(len(token) - min_match_length + 1)):
+                                                has_strong_fuzzy = True
+                                                break
+                                
+                                if has_exact_match or has_strong_fuzzy:
+                                    file_path = entry.path
+                                    
+                                    local_files.append({
+                                        'path': file_path,
+                                        'name_lower': entry_lower,
+                                        'size': stat_info.st_size,
+                                        'mtime': stat_info.st_mtime,
+                                        'ctime': stat_info.st_ctime
+                                    })
+                                    
+                            elif entry.is_dir(follow_symlinks=False):
+                                # Recursively index subdirectories
+                                local_files.extend(index_directory(Path(entry.path), depth + 1))
+                                
+                        except (PermissionError, OSError):
+                            continue  # Skip files/dirs we can't access
+                            
+            except (PermissionError, OSError):
+                pass  # Skip directories we can't access
+                
+            return local_files
+        
+        # Start with determined search roots
+        root = Path(self.root_dir)
+        
+        # Use thread pool for parallel directory scanning
+        all_files = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_path = {executor.submit(index_directory, path): path 
+                            for path in search_roots}
+            
+            for future in concurrent.futures.as_completed(future_to_path):
+                try:
+                    files = future.result()
+                    all_files.extend(files)
+                except Exception:
+                    continue
+        
+        # Build index from collected files
+        for file_info in all_files:
+            file_path = file_info['path']
+            
+            self.file_index[file_path] = {
+                'path': file_path,
+                'size': self._format_size(file_info['size']),
+                'modified': datetime.fromtimestamp(file_info['mtime']).strftime('%Y-%m-%d %H:%M:%S'),
+                'created': datetime.fromtimestamp(file_info['ctime']).strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Tokenize and build inverted index
+            tokens = self._tokenize(file_info['name_lower'])
+            for token in tokens:
+                self.inverted_index[token].add(file_path)
+                
+                # Add trigrams
+                for trigram in self._get_trigrams(token):
+                    self.inverted_index[trigram].add(file_path)
 
     def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into searchable terms."""
-        return re.findall(r"\w+", text.lower())
+        return re.findall(r'\w+', text.lower())
 
     def _get_trigrams(self, text: str) -> set[str]:
         """Generate character trigrams for fuzzy matching."""
         if len(text) < 3:
             return {text}
-        return {text[i : i + 3] for i in range(len(text) - 2)}
+        return {text[i:i+3] for i in range(len(text) - 2)}
 
     def _format_size(self, size_bytes: int) -> str:
         """Format file size in human-readable format."""
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
             if size_bytes < 1024:
-                return f"{size_bytes:.1f} {unit}"
+                return f'{size_bytes:.1f} {unit}'
             size_bytes /= 1024
-        return f"{size_bytes:.1f} PB"
+        return f'{size_bytes:.1f} PB'
 
     def _calculate_relevance(self, query_tokens: list[str], file_path: str) -> float:
         """Calculate relevance score for a file based on the query."""
         file_name = os.path.basename(file_path).lower()
-
-        # Base score from exact matches
+        
+        # If no query tokens (filter-only search), return base score
+        if not query_tokens:
+            return 1.0
+        
+        # Exact match bonus
         exact_match_score = sum(1 for token in query_tokens if token in file_name)
-
-        # Fuzzy matching score
+        
+        # Only calculate fuzzy score if there's some exact match
+        if exact_match_score == 0:
+            # No exact token matches - very low score
+            query_str = ''.join(query_tokens)
+            name_without_ext = os.path.splitext(file_name)[0]
+            
+            # Require high similarity (>0.6) for fuzzy-only matches
+            fuzzy_score = max(
+                SequenceMatcher(None, query_str, file_name).ratio(),
+                SequenceMatcher(None, query_str, name_without_ext).ratio()
+            )
+            
+            # Reject weak fuzzy matches
+            if fuzzy_score < 0.6:
+                return 0.0
+            
+            return 0.3 * fuzzy_score  # Lower weight for fuzzy-only
+        
+        # Has exact matches - calculate normally
+        query_str = ' '.join(query_tokens)
+        name_without_ext = os.path.splitext(file_name)[0]
+        
         fuzzy_score = max(
-            SequenceMatcher(None, " ".join(query_tokens), part).ratio()
-            for part in [file_name, os.path.splitext(file_name)[0]]
+            SequenceMatcher(None, query_str, file_name).ratio(),
+            SequenceMatcher(None, query_str, name_without_ext).ratio()
         )
-
-        # Combine scores
-        return 0.6 * exact_match_score / len(query_tokens) + 0.4 * fuzzy_score
+        
+        # Bonus for matches at start of filename
+        starts_with_bonus = 0.3 if file_name.startswith(query_tokens[0]) else 0
+        
+        # Combine scores - higher weight on exact matches
+        return (0.6 * exact_match_score / len(query_tokens) + 
+                0.3 * fuzzy_score + 
+                starts_with_bonus)
 
     def search_files(
-        self, search_term: str, file_type: str | None = None, max_results: int = 20
+        self, 
+        search_term: str, 
+        file_type: Optional[str] = None,
+        modified_after: Optional[datetime] = None,
+        modified_before: Optional[datetime] = None,
+        created_after: Optional[datetime] = None,
+        size_min: Optional[int] = None,
+        size_max: Optional[int] = None,
+        directory: Optional[str] = None,
+        max_results: int = 5
     ) -> list[dict[str, str]]:
         """
-        Search for files matching the term and optional file type.
+        Search for files matching the term and optional filters.
 
         Args:
-            search_term (str): Search query
+            search_term (str): Search query (can be empty for filter-only search)
             file_type (Optional[str]): File extension to filter by (without dot)
-            max_results (int): Maximum number of results to return, defaults to 20
+            modified_after (Optional[datetime]): Only files modified after this date
+            modified_before (Optional[datetime]): Only files modified before this date
+            created_after (Optional[datetime]): Only files created after this date
+            size_min (Optional[int]): Minimum file size in bytes
+            size_max (Optional[int]): Maximum file size in bytes
+            directory (Optional[str]): Specific directory to search in (can use shortcuts like 'Documents', 'Desktop')
+            max_results (int): Maximum number of results to return, defaults to 5
 
         Returns:
             List[Dict[str, str]]: List of top matching files with metadata
         """
         query_tokens = self._tokenize(search_term)
-        if not query_tokens:
-            return []
-
-        # Get candidate files from inverted index
+        
+        # Resolve directory path if provided
+        search_directory = None
+        if directory:
+            try:
+                search_directory = self._resolve_directory_path(directory)
+            except ValueError as e:
+                print(f"Warning: {e}")
+                return []
+        
+        # Build index on-the-fly with search-term and filter constraints
+        self._build_index_fast(
+            search_term, 
+            file_type,
+            modified_after,
+            modified_before,
+            created_after,
+            size_min,
+            size_max,
+            search_directory
+        )
+        
+        # Get candidate files - now with stricter filtering
         candidate_files = set()
-        for token in query_tokens:
-            # Look for exact matches
-            candidate_files.update(self.inverted_index.get(token, set()))
-
-            # Look for trigram matches
-            query_trigrams = self._get_trigrams(token)
-            for trigram in query_trigrams:
-                candidate_files.update(self.inverted_index.get(trigram, set()))
-
-        # Filter by file type if specified
-        if file_type:
-            file_type = file_type.lower()
-            if not file_type.startswith("."):
-                file_type = f".{file_type}"
-            candidate_files = {
-                f for f in candidate_files if f.lower().endswith(file_type)
-            }
-
-        # Score candidates
+        
+        if query_tokens:
+            for token in query_tokens:
+                # Direct token matches only (removed trigram matching here)
+                candidate_files.update(self.inverted_index.get(token, set()))
+        else:
+            # If no search term, return all indexed files (filter-only search)
+            candidate_files = set(self.file_index.keys())
+        
+        if not candidate_files:
+            return []
+        
+        # Score and sort results
         scored_results = []
         for file_path in candidate_files:
             score = self._calculate_relevance(query_tokens, file_path)
-            if score > 0:
+            # Higher threshold - only include good matches
+            if score > 0.3:
                 result = self.file_index[file_path].copy()
-                result["score"] = score  # Include the score for sorting
+                result['score'] = score
                 scored_results.append(result)
-
-        # Sort by relevance score (descending)
-        scored_results.sort(key=lambda x: x["score"], reverse=True)
-
-        # Return only the top max_results
+        
+        # Sort by relevance
+        scored_results.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Return top results without score
         top_results = scored_results[:max_results]
-
-        # Remove the score from the results if not needed in the output
         for result in top_results:
-            result.pop("score", None)
-
+            result.pop('score', None)
+        
         return top_results
 
 
-def search_files_with_agent(
-    search_term: str, file_type: str | None = None
+def file_search_function(
+    search_term: str, 
+    file_type: Optional[str] = None,
+    modified_after: Optional[str] = None,
+    modified_before: Optional[str] = None,
+    created_after: Optional[str] = None,
+    size_min: Optional[int] = None,
+    size_max: Optional[int] = None,
+    directory: Optional[str] = None,
+    max_results: int = 20
 ) -> list[dict[str, str]]:
+    """
+    Search for files on macOS system by name, filters, and optionally within a specific directory.
+    
+    This function searches for files matching the search term and/or filter criteria. By default,
+    it searches common user directories (Documents, Desktop, Downloads, etc.), but you can specify
+    a particular directory to search in using the 'directory' parameter.
+    
+    Use this function when the user wants to:
+    - Find a file by name or partial name (e.g., "find my report", "search for budget.xlsx")
+    - List all files in a specific directory (e.g., "show all files in Documents", "list files in Desktop")
+    - Find files in a specific location (e.g., "find PDFs in Downloads", "search for images in Pictures")
+    - Locate files of a specific type (e.g., "find all PDFs named invoice")
+    - Find files modified within a date range (e.g., "files modified last week")
+    - Find files by size (e.g., "large files over 100MB", "small images under 1MB")
+    - Combine multiple criteria (e.g., "PDFs in Documents modified yesterday larger than 5MB")
+    
+    Args:
+        search_term (str): The filename or partial filename to search for (can be empty for filter-only or list all)
+        file_type (Optional[str]): File extension without dot (e.g., "pdf", "docx", "txt")
+        modified_after (Optional[str]): ISO format datetime string (e.g., "2024-01-01T00:00:00")
+        modified_before (Optional[str]): ISO format datetime string
+        created_after (Optional[str]): ISO format datetime string
+        size_min (Optional[int]): Minimum file size in bytes (e.g., 1048576 for 1MB)
+        size_max (Optional[int]): Maximum file size in bytes
+        directory (Optional[str]): Specific directory to search in. Can be:
+            - Absolute path: "/Users/username/Projects"
+            - Relative path: "Projects/Python"
+            - Home-relative: "~/Documents"
+            - Shortcuts: "Documents", "Desktop", "Downloads", "Pictures", "Movies", "Music", "Home"
+        max_results (int): Maximum number of results to return (default: 20)
+    
+    Returns:
+        list[dict[str, str]]: List of matching files with 'path', 'size', 'modified', and 'created' date
+    
+    Examples:
+        - search_files_with_agent("invoice") - finds all files with "invoice" in the name
+        - search_files_with_agent("", directory="Documents") - lists all files in Documents
+        - search_files_with_agent("", file_type="pdf", directory="Downloads") - all PDFs in Downloads
+        - search_files_with_agent("budget", directory="Desktop") - budget files on Desktop
+        - search_files_with_agent("", directory="Pictures", file_type="jpg", size_max=1048576) - small JPGs in Pictures
+        - search_files_with_agent("report", modified_after="2024-10-01T00:00:00", directory="Documents") - recent reports in Documents
+    """
     file_agent = FileSearchAgent()
-
-    # Perform the search
-    print(
-        f"\nSearching for files containing '{search_term}'{f' with type .{file_type}' if file_type else ''}..."
+    
+    # Convert string dates to datetime objects if provided
+    modified_after_dt = datetime.fromisoformat(modified_after) if modified_after else None
+    modified_before_dt = datetime.fromisoformat(modified_before) if modified_before else None
+    created_after_dt = datetime.fromisoformat(created_after) if created_after else None
+    
+    # Build search description
+    filters = []
+    if file_type:
+        filters.append(f"type: .{file_type}")
+    if directory:
+        filters.append(f"in: {directory}")
+    if modified_after:
+        filters.append(f"modified after: {modified_after}")
+    if modified_before:
+        filters.append(f"modified before: {modified_before}")
+    if created_after:
+        filters.append(f"created after: {created_after}")
+    if size_min:
+        filters.append(f"size >= {file_agent._format_size(size_min)}")
+    if size_max:
+        filters.append(f"size <= {file_agent._format_size(size_max)}")
+    
+    search_desc = f"'{search_term}'" if search_term else "all files"
+    if filters:
+        search_desc += f" [{', '.join(filters)}]"
+    
+    print(f"\nSearching for files containing {search_desc}...")
+    
+    results = file_agent.search_files(
+        search_term, 
+        file_type,
+        modified_after_dt,
+        modified_before_dt,
+        created_after_dt,
+        size_min,
+        size_max,
+        directory,
+        max_results
     )
-    results = file_agent.search_files(search_term, file_type)
-
-    # Format results for display
+    
     if results:
         print(f"\nFound {len(results)} matching files:")
         for idx, result in enumerate(results, 1):
-            print(f"\n{idx}. File Details:")
+            print(f"\n{idx}. {os.path.basename(result['path'])}")
             print(f"   Path: {result['path']}")
             print(f"   Size: {result['size']}")
-            print(f"   Last Modified: {result['modified']}")
+            print(f"   Modified: {result['modified']}")
+            print(f"   Created: {result['created']}")
     else:
         print("\nNo files found matching the search criteria.")
-
+    
     return results
 
 
@@ -194,11 +539,11 @@ class FileFinder:
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.agents = self.get_agents()
         autogen.register_function(
-            search_files_with_agent,
+            file_search_function,
             caller=self.file_finder,
             executor=self.user_proxy,
             name="file_search_function",
-            description="This tool will be used to search for any files in the system",
+            description=file_search_function_description,
         )
         self.get_chat_manager()
 
@@ -221,7 +566,7 @@ class FileFinder:
         return autogen.AssistantAgent(
             name="file_finder_planner",
             llm_config=llm_file_finder_planner,
-            system_message=prompts.planner,
+            system_message=prompts.planner.format(CURRENT_DATE=settings.get_date_time_now().date(), CURRENT_DATETIME=settings.get_date_time_now()),
         )
 
     def file_finder(self):
@@ -294,10 +639,11 @@ class FileFinder:
             elif last_speaker.name == "user_proxy":
                 return groupchat.agent_by_name("prob_status_checker")
             elif last_speaker.name == "prob_status_checker":
-                if "yes" in messages[-1]["content"].lower():
-                    return groupchat.agent_by_name("process_completion")
-                else:
-                    return groupchat.agent_by_name("file_finder_planner")
+                # if "yes" in messages[-1]["content"].lower():
+                #     return groupchat.agent_by_name("process_completion")
+                # else:
+                #     return groupchat.agent_by_name("file_finder_planner")
+                return groupchat.agent_by_name("process_completion")
             return None
 
         except asyncio.CancelledError:

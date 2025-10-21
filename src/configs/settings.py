@@ -10,7 +10,7 @@ import threading
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -80,6 +80,14 @@ class Settings:
         self.IMAGE_GENERATOR_COLLECTION = os.getenv(
             "IMAGE_GENERATOR_COLLECTION", "image_generator"
         )
+    
+    def get_date_time_now(self) -> str:
+        """Get the current date and time in ISO 8601 format.
+
+        Returns:
+            Current date and time as an ISO 8601 formatted string.
+        """
+        return datetime.now()
 
     def update_setting(self, key: str, value: Any) -> bool:
         """Update a single setting at runtime.
