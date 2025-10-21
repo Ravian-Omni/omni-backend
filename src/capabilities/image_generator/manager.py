@@ -54,11 +54,12 @@ class ImageGenerator:
             response = client.images.generate(
                 prompt=prompt,
                 model=self.image_llm_config.get("model"),
-                n=1,
-                width=768,
-                height=432,
-                steps=30,
+                width=1792, #1792
+                height=1792, #1792
+                steps=40, #40 max 
+                guidance_scale=18 #20 max , guidance is how closely the model should adhere to the prompt guidelines
             )
+
 
             # Download and save the image with the generated filename
             image_url = response.data[0].url
