@@ -104,6 +104,8 @@ class FileSearchAgent:
             raise ValueError(f"Path is not a directory: {directory}")
         
         return directory
+    
+    def _should_skip_directory(self, path: Path, current_depth: int) -> bool:
         """Check if directory should be skipped to avoid permission issues."""
         if current_depth > self.max_depth:
             return True

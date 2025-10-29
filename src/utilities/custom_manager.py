@@ -442,6 +442,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "content": content,
             "raw_message": message,
             "call_id": self.context.call_id,
+            "capability_id": self.context.capability_id,
             "task_id": self.context.task_id,
         }
         # Store in memory (synchronous)

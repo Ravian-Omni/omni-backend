@@ -865,6 +865,7 @@ class BrowserManager:
                 llm=self.vision_llm,
                 controller=self.controller,
                 session_id=self.context.chat_id,
+                user_id=self.context.user_id,
                 ws_manager=ws_manager,
                 # save_conversation_path=None if not self.save_results else self.results_dir,
             )

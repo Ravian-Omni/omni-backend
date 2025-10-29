@@ -98,6 +98,7 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
+    estimated_time: str = Field(..., description="The estimated time for completing this task, in hours (or minutes, depending on your preference). e.g., '2 hours', '30 minutes'")
     # complete_response: str = Field(
     #     ...,
     #     description="The **full, exact** response returned by the agent that executed this task."
@@ -112,6 +113,7 @@ class PlannerResponse(BaseModel):
     breakdown: list[Task]
     overall_strategy: str
     overall_status: OverallStatus
+    overall_estimated_time: str = Field(..., description="The total estimated time for completing all tasks combined, in hours (or minutes). e.g., '5 hours', '90 minutes')")
 
 
 # omni_agent_aligner_rf={
@@ -489,16 +491,16 @@ class QuestionClassification(BaseModel):
         None,
         description="Optional suggestion for how to respond to this type of question",
     )
-    eta_minutes: str | None = Field(
-        None,
-        description=(
-            "Estimated time to complete the task. MUST correspond to complexity_score: "
-            "1='1-5 minutes', 2='5-12 minutes', 3='15-20 minutes', 4='15-25 minutes', "
-            "5='20-30 minutes', 6='30-40 minutes', 7='40-60 minutes', 8='50-80 minutes', "
-            "9='60-120 minutes', 10='120-150 minutes'"
-        ),
-        example="15-20 minutes",
-    )
+    # eta_minutes: str | None = Field(
+    #     None,
+    #     description=(
+    #         "Estimated time to complete the task. MUST correspond to complexity_score: "
+    #         "1='1-5 minutes', 2='5-12 minutes', 3='15-20 minutes', 4='15-25 minutes', "
+    #         "5='20-30 minutes', 6='30-40 minutes', 7='40-60 minutes', 8='50-80 minutes', "
+    #         "9='60-120 minutes', 10='120-150 minutes'"
+    #     ),
+    #     example="15-20 minutes",
+    # )
 
     user_details: UserDetails = Field(..., description="User information for context")
 
