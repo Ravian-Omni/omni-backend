@@ -209,3 +209,9 @@ nuitka-crash-report.xml
 
 # Temporary/utility scripts
 update_imports.py
+
+
+resources/*
+omniEnv/*
+base_venv/*
+bundled_python/*

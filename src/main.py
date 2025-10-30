@@ -27,6 +27,8 @@ from src.dependencies import init_managers
 
 # from src.routers import apis
 from src.routers import chat, config, ws
+from src.routers.chat_mode import ws as chat_mode_ws_router
+
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -121,6 +123,12 @@ app.include_router(
     prefix="/settings",
     tags=["Settings Management"],
     responses={404: {"description": "Not found"}},
+)
+# chat mode router defined
+app.include_router(
+    chat_mode_ws_router.router,
+    prefix="/chat_mode",
+    tags=["Chat Mode Websocket"]
 )
 
 
