@@ -200,7 +200,7 @@ async def create_new_capability_chat(
         )
 
 
-def serialize_document(doc: dict[Any, Any]) -> dict[str, Any]:
+def serialize_document(doc: dict) -> dict:
     """Convert MongoDB document to JSON serializable format.
 
     Handles conversion of MongoDB-specific types (ObjectId, datetime) to
@@ -215,18 +215,22 @@ def serialize_document(doc: dict[Any, Any]) -> dict[str, Any]:
     if doc is None:
         return None
 
-    # Convert ObjectId to string
-    if "_id" in doc:
-        doc["_id"] = str(doc["_id"])
-
-    # Convert datetime objects to ISO format
+    serialized = {}
     for key, value in doc.items():
-        if isinstance(value, datetime):
-            doc[key] = value.isoformat()
+        # Detect ObjectId by its class name
+        if type(value).__name__ == "ObjectId":
+            serialized[key] = str(value)
+        elif isinstance(value, datetime):
+            serialized[key] = value.isoformat()
+        elif isinstance(value, dict):
+            serialized[key] = serialize_document(value)
+        elif isinstance(value, list):
+            serialized[key] = [
+                serialize_document(v) if isinstance(v, dict) else v for v in value
+            ]
         else:
-            doc[key] = str(value)
-
-    return doc
+            serialized[key] = value
+    return serialized
 
 
 class RawMessage(BaseModel):
