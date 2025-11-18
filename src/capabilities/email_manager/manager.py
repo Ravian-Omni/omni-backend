@@ -140,7 +140,8 @@ class EmailManager:
 
         # Parse user response
         try:
-            response_data = json.loads(user_response)
+            # response_data = json.loads(user_response)
+            response_data = user_response
         except json.JSONDecodeError:
             # Handle simple string responses
             response_data = {"action": user_response.lower().strip()}
