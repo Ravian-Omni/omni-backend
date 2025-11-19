@@ -90,6 +90,97 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Connection error for session {session_id}: {e}")
             return False
+        
+    async def chat_mode_initiate(
+        self,
+        session_id: str,
+        # chat_handler: Callable[[str, InputFuncType], Awaitable[Any]],
+        initial_message: str = "",
+        omni=None,
+    ) -> None:
+        """Start a chat stream with the provided omni manager.
+
+        Initiates an async chat session, manages the conversation lifecycle,
+        handles cancellation, and sends completion/cancellation notifications.
+
+        Args:
+            session_id: Session identifier.
+            initial_message: Optional initial message to start the conversation.
+            omni: Omni manager instance for handling the chat logic.
+
+        Raises:
+            ValueError: If no active connection exists for the session.
+        """
+        if (
+            session_id not in self._connections
+            or session_id in self._closed_connections
+        ):
+            raise ValueError(f"No active connection for session {session_id}")
+
+        self._stop_flags[session_id] = False
+        cancellation_token = CancellationToken()
+        self._cancellation_tokens[session_id] = cancellation_token
+
+        try:
+            # Send initial message if provided
+            if initial_message:
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "message",
+                        "data": {
+                            "source": "user",
+                            "content": initial_message,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    },
+                )
+
+            omni._set_cancellation_token(
+                self._cancellation_tokens.get(session_id, None)
+            )
+            task = asyncio.create_task(
+                omni.manager.a_initiate_chat(
+                    omni.manager,
+                    message=initial_message.get("task"),
+                    clear_history=False,
+                )
+            )
+            self._active_tasks[session_id] = task
+
+            # Wait for completion or cancellation
+            await task
+
+            if (
+                not self._stop_flags.get(session_id, True)
+                and session_id not in self._closed_connections
+            ):
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "completion",
+                        "status": "complete",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            else:
+                await self._send_message(
+                    session_id,
+                    {
+                        "type": "completion",
+                        "status": "cancelled",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+        except Exception as e:
+            logger.error(f"Chat stream error for session {session_id}: {e}")
+            traceback.print_exc()
+            await self._handle_stream_error(session_id, e)
+        finally:
+            self._cancellation_tokens.pop(session_id, None)
+            self._active_tasks.pop(session_id, None)
+            self._stop_flags.pop(session_id, None)
 
     async def start_chat_stream(
         self,

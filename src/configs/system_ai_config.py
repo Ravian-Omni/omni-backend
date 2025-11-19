@@ -400,6 +400,13 @@ class GroupchatConfigurationManager:
                     "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
                 },
             },
+            "chat": {
+                "groupchat_settings": {"max_round": 500},
+                "agents": {
+                    "chat_agent": {"llm_config": "claude-sonnet-4-20250514"},
+                    "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
+                },
+            },
         }
 
     def _parse_and_store_configurations(self, api_data: dict[str, Any]) -> None:

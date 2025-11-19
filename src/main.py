@@ -190,6 +190,16 @@ async def serve_html():
     html_content = Path("templates/index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
 
+@app.get("/chatbot", response_class=HTMLResponse)
+async def serve_html():
+    """Serve the main HTML page.
+
+    Returns:
+        HTMLResponse: The main index.html page content.
+    """
+    html_content = Path("templates/chat.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html_content)
+
 
 @app.get("/capability", response_class=HTMLResponse)
 async def serve_capability_html():
