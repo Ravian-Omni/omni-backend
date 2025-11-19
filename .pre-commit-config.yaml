@@ -21,6 +21,10 @@ repos:
           - --remove-unused-variables
           - --remove-duplicate-keys
           - --ignore-init-module-imports
+        exclude: |
+          (?x)^(
+              tests/.*
+          )$
 
   # 2. isort - Sorts and organizes imports
   - repo: https://github.com/PyCQA/isort
@@ -31,6 +35,10 @@ repos:
         args:
           - --profile=black
           - --line-length=88
+        exclude: |
+          (?x)^(
+              tests/.*
+          )$
 
   # 3. black - The standard Python code formatter
   - repo: https://github.com/psf/black
@@ -53,6 +61,7 @@ repos:
           - --max-complexity=20
         exclude: |
           (?x)^(
+              tests/.*|
               .*/prompts\.py|
               prompts\.py|
               .*/function_description\.py|
@@ -74,6 +83,10 @@ repos:
         args:
           - -ll
           - --skip=B101,B601,B324,B104
+        exclude: |
+          (?x)^(
+              tests/.*
+          )$
 
   # 6. detect-secrets - Prevents committing secrets/credentials
   - repo: https://github.com/Yelp/detect-secrets

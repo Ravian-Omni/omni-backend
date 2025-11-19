@@ -1,11 +1,11 @@
 """
 Pytest configuration and shared fixtures.
 """
+
 import asyncio
-import os
 import sys
 from pathlib import Path
-from typing import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -18,10 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.main import app
 from src.managers.connection import WebSocketManager
 
-
 # ============================================================
 # Session-scoped fixtures
 # ============================================================
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -40,6 +40,7 @@ def test_app():
 # ============================================================
 # Function-scoped fixtures
 # ============================================================
+
 
 @pytest.fixture
 def client(test_app) -> Generator[TestClient, None, None]:
@@ -77,8 +78,8 @@ def mock_env_vars(monkeypatch):
     test_env = {
         "PORT": "8001",
         "PROJECT_NAME": "Test Omni Backend",
-        "ROOT_DIR": "/tmp/test",
-        "OPENAI_API_KEY": "test-key",
+        "ROOT_DIR": "/tmp/test", # nosec B108
+        "OPENAI_API_KEY": "test-key", # pragma: allowlist secret
         "TESTING": "true",
     }
     for key, value in test_env.items():
@@ -102,7 +103,7 @@ def sample_chat_data():
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
         ],
-        "chat_dir": "/tmp/test/chat",
+        "chat_dir": "/tmp/test/chat", # nosec B108
     }
 
 
@@ -134,7 +135,7 @@ def mock_api_client():
             return {
                 "success": self._success,
                 "data": self._data,
-                "message": "Success" if self._success else "Error"
+                "message": "Success" if self._success else "Error",
             }
 
     client.get = AsyncMock(return_value=MockResponse({}))
@@ -148,6 +149,7 @@ def mock_api_client():
 # ============================================================
 # WebSocket testing fixtures
 # ============================================================
+
 
 @pytest.fixture
 def mock_websocket():
@@ -197,6 +199,7 @@ def websocket_messages():
 # Capability testing fixtures
 # ============================================================
 
+
 @pytest.fixture
 def mock_llm_response():
     """Create a mock LLM response."""
@@ -220,6 +223,7 @@ def mock_capability_manager():
 # Database/Storage fixtures
 # ============================================================
 
+
 @pytest.fixture
 def mock_storage():
     """Create a mock storage service."""
@@ -235,6 +239,7 @@ def mock_storage():
 # Cleanup fixtures
 # ============================================================
 
+
 @pytest.fixture(autouse=True)
 def cleanup_test_files(tmp_path):
     """Clean up test files after each test."""
@@ -246,14 +251,9 @@ def cleanup_test_files(tmp_path):
 # Markers
 # ============================================================
 
+
 def pytest_configure(config):
     """Configure custom markers."""
-    config.addinivalue_line(
-        "markers", "unit: mark test as a unit test"
-    )
-    config.addinivalue_line(
-        "markers", "integration: mark test as an integration test"
-    )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
+    config.addinivalue_line("markers", "unit: mark test as a unit test")
+    config.addinivalue_line("markers", "integration: mark test as an integration test")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
