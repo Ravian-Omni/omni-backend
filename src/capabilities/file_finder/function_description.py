@@ -1,11 +1,11 @@
-file_search_function_description="""
+file_search_function_description = """
 {
   "function_description": {
     "type": "function",
     "function": {
       "name": "file_search_function",
       "description": "Search for files on macOS system by name, type, date, size, and optionally within a specific directory. This function can search the entire user home directory or be limited to a specific folder. Use this when the user wants to find files, list directory contents, or search within a particular location.\n\nCommon use cases:\n- Find files by name: 'find my report', 'where is budget.xlsx'\n- List directory contents: 'show all files in Documents', 'list files in Desktop', 'what's in Downloads'\n- Search in specific location: 'find PDFs in Documents', 'search for images in Pictures'\n- Find by type: 'show all PDFs', 'find Excel files in Desktop'\n- Find by date: 'files modified yesterday', 'documents from last week in Documents'\n- Find by size: 'large files in Downloads', 'PDFs over 10MB in Documents'\n- Combined criteria: 'large PDFs from last week in Documents', 'recent budget spreadsheets in Desktop'\n\nThe 'directory' parameter accepts:\n- Shortcuts: 'Documents', 'Desktop', 'Downloads', 'Pictures', 'Movies', 'Music', 'Home'\n- Absolute paths: '/Users/username/Projects'\n- Home-relative: '~/Documents/Work'\n- Relative paths: 'Documents/Projects'\n\nReturns file paths, sizes, modification dates, and creation dates.",
-      
+
       "parameters": {
         "type": "object",
         "properties": {
@@ -57,7 +57,7 @@ file_search_function_description="""
         },
         "required": ["search_term"]
       },
-      
+
       "examples": [
         {
           "description": "Find files with 'invoice' in the name",

@@ -4,13 +4,15 @@ This module provides centralized configuration management for the OMNI applicati
 including thread-safe runtime updates and capability type definitions. It loads
 settings from environment variables and provides a global settings instance.
 """
+
 # src/config/settings.py
 import os
 import threading
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from datetime import datetime
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -80,7 +82,7 @@ class Settings:
         self.IMAGE_GENERATOR_COLLECTION = os.getenv(
             "IMAGE_GENERATOR_COLLECTION", "image_generator"
         )
-    
+
     def get_date_time_now(self) -> str:
         """Get the current date and time in ISO 8601 format.
 

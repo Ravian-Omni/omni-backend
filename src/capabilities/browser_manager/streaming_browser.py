@@ -14,8 +14,8 @@ from browser_use.exceptions import LLMException
 from browser_use.utils import time_execution_async
 from langchain_core.messages import BaseMessage
 from pydantic import ValidationError
-from src.utilities.api_client import api_client
 
+from src.utilities.api_client import api_client
 
 
 class StreamingAgent(Agent):
@@ -60,7 +60,9 @@ class StreamingAgent(Agent):
         self.websocket_manager = ws_manager
         self.llm_calls_metadata = []  # Store all LLM call metadata
 
-    async def _deduct_tokens(self, model:str, input_tokens: int, output_tokens: int, total_tokens: int):
+    async def _deduct_tokens(
+        self, model: str, input_tokens: int, output_tokens: int, total_tokens: int
+    ):
         """Call API to deduct tokens from user's balance"""
         try:
             # Your API call here
@@ -75,8 +77,14 @@ class StreamingAgent(Agent):
             # )
             update_result = await api_client.post(
                 "/credits/deduct",
-                params={"user_id": self.user_id,"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens, "capability": "browser_manager"},
-                data={}
+                params={
+                    "user_id": self.user_id,
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "capability": "browser_manager",
+                },
+                data={},
             )
             update_result = update_result.standard_response()
             if not update_result.get("success"):
@@ -85,13 +93,14 @@ class StreamingAgent(Agent):
                 )
 
             result = update_result.get("data")
-            
+
             self.logger.info(
                 f"💰 Tokens deducted - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens} having status {result}"
             )
         except Exception as e:
             self.logger.error(f"Failed to deduct tokens: {str(e)}")
             # Decide whether to raise or continue
+
     def _extract_llm_metadata(self, response) -> dict[str, Any]:
         """Extract metadata from LLM response with proper token extraction"""
         if not response:
@@ -420,10 +429,10 @@ class StreamingAgent(Agent):
                 f"🔢 LLM Call Tokens - Input: {llm_metadata['input_tokens']}, Output: {llm_metadata['output_tokens']}, Total: {llm_metadata['total_tokens']}"
             )
             await self._deduct_tokens(
-                model= llm_metadata['model'],
-                input_tokens=llm_metadata['input_tokens'],
-                output_tokens=llm_metadata['output_tokens'],
-                total_tokens=llm_metadata['total_tokens']
+                model=llm_metadata["model"],
+                input_tokens=llm_metadata["input_tokens"],
+                output_tokens=llm_metadata["output_tokens"],
+                total_tokens=llm_metadata["total_tokens"],
             )
 
         # Handle tool call responses

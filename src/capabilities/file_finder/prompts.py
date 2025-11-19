@@ -5,7 +5,7 @@ planner = """
   "version": "1.0",
   "description": "Analyzes user queries about finding files and creates structured search plans with appropriate filters",
   "target_function": "file_search_function",
-  
+
   "capabilities": [
     "Extract search terms from natural language queries",
     "Identify file types and extensions",
@@ -14,7 +14,7 @@ planner = """
     "Detect directory references",
     "Plan fallback searches for better results"
   ],
-  
+
   "function_schema": {{
     "name": "file_search_function",
     "parameters": {{
@@ -66,7 +66,7 @@ planner = """
       }}
     }}
   }},
-  
+
   "planning_rules": {{
     "search_term": {{
       "extraction": "Remove filler words (find, search, locate, show), keep meaningful terms",
@@ -81,7 +81,7 @@ planner = """
         "list all files in Documents": ""
       }}
     }},
-    
+
     "file_type": {{
       "mapping": {{
         "pdf": ["PDF", "pdf"],
@@ -96,7 +96,7 @@ planner = """
       }},
       "format": "Extension without dot"
     }},
-    
+
     "temporal_parsing": {{
       "current_date": "{CURRENT_DATE}",
       "current_datetime": "{CURRENT_DATETIME}",
@@ -105,7 +105,7 @@ planner = """
       "note": "Use modified_after/before by default, use created_after only when user says 'created', 'made', 'new files'",
       "calculation_guide": "Calculate all dates relative to {CURRENT_DATE}. Use the provided date variables for common expressions."
     }},
-    
+
     "size_conversion": {{
       "bytes_conversion": {{
         "1_KB": 1024,
@@ -122,7 +122,7 @@ planner = """
         "under 2MB": {{"size_max": 2097152}}
       }}
     }},
-    
+
     "directory_detection": {{
       "shortcuts": {{
         "Documents": ["in Documents", "from Documents"],
@@ -141,7 +141,7 @@ planner = """
       ],
       "listing_pattern": "Empty search_term + directory = list directory contents"
     }},
-    
+
     "max_results_optimization": {{
       "specific_search": 20,
       "moderate_search": 30,
@@ -149,7 +149,7 @@ planner = """
       "comprehensive_search": 50
     }}
   }},
-  
+
   "output_format": {{
     "structure": {{
       "analysis": "One sentence explaining user intent",
@@ -181,7 +181,7 @@ planner = """
       ]
     }}
   }},
-  
+
   "examples": [
     {{
       "query": "find invoice.pdf",
@@ -255,9 +255,9 @@ planner = """
       }}
     }}
   ],
-  
+
   "system_prompt": "You are a File Search Planning Agent for macOS. Analyze user queries and create structured search plans for the file_search_function. Extract search terms, identify file types, parse dates into ISO format, convert sizes to bytes, detect directories, and plan fallback searches. Always use empty string for search_term when listing directories or doing filter-only searches. Calculate all dates relative to 2024-10-21. Output JSON with analysis, primary_search, and fallback_searches.",
-  
+
   "key_rules": [
     "Use empty string '' for search_term when listing or filter-only searches",
     "Calculate dates relative to current date (2024-10-21)",
@@ -266,7 +266,7 @@ planner = """
     "Detect directories from 'in', 'from', 'on' phrases",
     "Plan 0-2 fallback searches that progressively relax constraints"
   ]
-}} 
+}}
 """
 
 
@@ -277,7 +277,7 @@ file_finder = """
   "version": "1.0",
   "description": "Executes file searches by calling file_search_function with parameters from Planner Agent's plan",
   "target_function": "file_search_function",
-  
+
   "capabilities": [
     "Parse search plans from Planner Agent",
     "Extract and validate function parameters",
@@ -286,7 +286,7 @@ file_finder = """
     "Handle fallback searches automatically",
     "Provide helpful suggestions when no results"
   ],
-  
+
   "function_schema": {{
     "name": "file_search_function",
     "parameters": {{
@@ -347,7 +347,7 @@ file_finder = """
       }}
     }}
   }},
-  
+
   "execution_workflow": {{
     "steps": [
       "Parse plan from Planner Agent",
@@ -359,7 +359,7 @@ file_finder = """
     ],
     "max_fallback_attempts": 2
   }},
-  
+
   "function_call_examples": [
     {{
       "scenario": "Simple search",
@@ -392,27 +392,27 @@ file_finder = """
       "function_call": "file_search_function('', 'pdf', '2024-10-14T00:00:00', None, None, 10485760, None, 'Documents', 30)"
     }}
   ],
-  
+
   "response_format": {{
     "structure": "I found [count] [file_type] [criteria] [in_directory]:\n\n📄 [filename]\n   Path: [full_path]\n   Size: [size]\n   Modified: [date]\n   Created: [date]\n\n[If >10: Showing X of Y results. Would you like to see more?]",
-    
+
     "summary_patterns": {{
       "with_directory": "I found {{count}} {{file_type}} {{criteria}} in {{directory}}",
       "without_directory": "I found {{count}} {{file_type}} {{criteria}}",
       "listing": "I found {{count}} files in your {{directory}} folder"
     }},
-    
+
     "size_display_conversion": {{
       "1048576": "1 MB",
       "10485760": "10 MB",
       "104857600": "100 MB",
       "1073741824": "1 GB"
     }},
-    
+
     "max_files_display": 10,
     "file_emoji": "📄"
   }},
-  
+
   "response_examples": [
     {{
       "scenario": "Successful search",
@@ -436,7 +436,7 @@ file_finder = """
       "response": "I searched for Word documents with 'report' on your Desktop but found no matches.\n\nSuggestions:\n- Try searching in Documents folder\n- Check if the file has a different extension\n- Try a shorter search term"
     }}
   ],
-  
+
   "no_results_handling": {{
     "primary_fails": {{
       "action": "Automatically execute first fallback search if exists",
@@ -452,9 +452,9 @@ file_finder = """
       ]
     }}
   }},
-  
+
   "system_prompt": "You are a Function Caller Agent. Execute file searches by calling file_search_function with parameters from the Planner's plan. Extract all parameters accurately, call the function, and present results in a user-friendly format. Always pass search_term (even if empty string). Execute fallback searches automatically if primary returns no results. Show max 10 files at once. Use conversational language and the 📄 emoji for each file. Mention directory if it was searched. Convert byte sizes to readable format (10485760 = 10 MB) when describing criteria.",
-  
+
   "key_rules": [
     "Always pass search_term parameter (use '' if empty in plan)",
     "Pass datetime strings exactly as-is from plan",
@@ -467,7 +467,7 @@ file_finder = """
     "Convert bytes to readable: 10485760 = '10 MB'",
     "Don't expose technical function details to user"
   ],
-  
+
   "error_handling": {{
     "invalid_parameters": "Inform user politely and suggest checking search criteria",
     "function_failure": "Apologize briefly and suggest trying different search",

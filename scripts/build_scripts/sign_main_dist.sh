@@ -246,12 +246,12 @@ find "$DIST_FOLDER" -type f -perm +111 | while read file; do
     if [ "$(basename "$file")" == "$BINARY_NAME" ]; then
         continue
     fi
-    
+
     # Skip non-binary files
     if file "$file" | grep -q "text"; then
         continue
     fi
-    
+
     echo "  → $(basename "$file")"
     if codesign --force --timestamp --options runtime \
         --sign "$SIGNING_IDENTITY" \

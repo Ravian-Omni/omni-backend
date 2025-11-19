@@ -26,37 +26,32 @@ def build_with_nuitka():
         # ============================================================
         # SIZE & SPEED OPTIMIZATIONS (Major impact: -40-50% size)
         # ============================================================
-        "--lto=yes",              # Link-Time Optimization: -20% size, +15% speed
-        "--remove-output",        # Strip debug info: -15% size
-        "--python-flag=-OO",      # Remove docstrings: -8% size
-        "--no-pyi-file",          # Skip type stubs: -2% size
-        
+        "--lto=yes",  # Link-Time Optimization: -20% size, +15% speed
+        "--remove-output",  # Strip debug info: -15% size
+        "--python-flag=-OO",  # Remove docstrings: -8% size
+        "--no-pyi-file",  # Skip type stubs: -2% size
         # ============================================================
         # COMPILATION SETTINGS
         # ============================================================
         "--jobs=8",  # Use multiple cores for compilation
-        
         # ============================================================
         # EXCLUDE UNUSED STANDARD LIBRARY (20-50MB savings)
         # ============================================================
-        "--nofollow-import-to=tkinter",      # GUI: ~15MB
-        "--nofollow-import-to=test",         # Tests: ~10MB
-        "--nofollow-import-to=distutils",    # Old packaging: ~5MB
-        "--nofollow-import-to=setuptools",   # Packaging: ~8MB
-        "--nofollow-import-to=pip",          # Installer: ~12MB
-        "--nofollow-import-to=unittest",     # Testing: ~4MB
-        
+        "--nofollow-import-to=tkinter",  # GUI: ~15MB
+        "--nofollow-import-to=test",  # Tests: ~10MB
+        "--nofollow-import-to=distutils",  # Old packaging: ~5MB
+        "--nofollow-import-to=setuptools",  # Packaging: ~8MB
+        "--nofollow-import-to=pip",  # Installer: ~12MB
+        "--nofollow-import-to=unittest",  # Testing: ~4MB
         # macOS specific exclusions
         "--nofollow-import-to=Foundation",
         "--nofollow-import-to=Cocoa",
         "--nofollow-import-to=AppKit",
-        
         # ============================================================
         # PYTHON FLAGS
         # ============================================================
         "--python-flag=no_site",
         "--python-flag=isolated",
-        
         # ============================================================
         # APPLICATION PACKAGES (from src/)
         # ============================================================
@@ -72,7 +67,6 @@ def build_with_nuitka():
         "--include-package=src.routers",
         "--include-package=src.utilities",
         "--include-package=src.omni",
-
         # ============================================================
         # CORE PACKAGES (from requirements.txt)
         # ============================================================
@@ -141,20 +135,17 @@ def build_with_nuitka():
         "--include-module=encodings",
         "--include-module=certifi",
         "--include-module=src.main",
-
         # ============================================================
         # OPTIMIZATION PLUGINS
         # ============================================================
         "--follow-imports",
         "--prefer-source-code",
         "--enable-plugin=anti-bloat",
-
         # ============================================================
         # OUTPUT CONFIGURATION
         # ============================================================
         "--output-dir=dist",
         "--output-filename=ravian",
-
         # ============================================================
         # METADATA
         # ============================================================
@@ -163,7 +154,6 @@ def build_with_nuitka():
         "--file-version=1.0.0",
         "--product-version=1.0.0",
         "--file-description=Ravian AI - Browser Automation & AI Assistant",
-
         # ============================================================
         # PLATFORM SPECIFIC
         # ============================================================

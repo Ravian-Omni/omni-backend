@@ -104,11 +104,15 @@ def main():
 
     # Step 4: Create Python environment
     print("\n4. Creating Python execution environment...")
-    subprocess.run([sys.executable, "scripts/build_scripts/create_python_env.py"], check=True)
+    subprocess.run(
+        [sys.executable, "scripts/build_scripts/create_python_env.py"], check=True
+    )
 
     # Step 5: Build with Nuitka
     print("\n5. Building application with Nuitka...")
-    subprocess.run([sys.executable, "scripts/build_scripts/nuitka_build.py"], check=True)
+    subprocess.run(
+        [sys.executable, "scripts/build_scripts/nuitka_build.py"], check=True
+    )
 
     # Step 6: Copy any additional files needed
     print("\n7. Copying additional files...")

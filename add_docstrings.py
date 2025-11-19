@@ -6,9 +6,7 @@ for functions and classes that are missing docstrings.
 """
 
 import ast
-import sys
 from pathlib import Path
-from typing import List
 
 
 class DocstringChecker(ast.NodeVisitor):
@@ -25,7 +23,7 @@ class DocstringChecker(ast.NodeVisitor):
         Args:
             filename: Path to the file being checked.
         """
-        self.missing: List[tuple] = []
+        self.missing: list[tuple] = []
         self.filename = filename
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -59,7 +57,7 @@ class DocstringChecker(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def check_file(filepath: Path) -> List[tuple]:
+def check_file(filepath: Path) -> list[tuple]:
     """Check a single Python file for missing docstrings.
 
     Args:
@@ -69,7 +67,7 @@ def check_file(filepath: Path) -> List[tuple]:
         List of tuples (type, name, lineno) for missing docstrings.
     """
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             tree = ast.parse(f.read(), filename=str(filepath))
 
         # Check module docstring

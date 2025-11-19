@@ -4,6 +4,7 @@ This module provides comprehensive configuration management for AI agent systems
 including groupchat settings, individual agent configurations, and LLM settings.
 Uses singleton pattern to ensure consistent configuration across the application.
 """
+
 import asyncio
 import os
 from dataclasses import dataclass, field

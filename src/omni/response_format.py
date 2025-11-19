@@ -98,7 +98,10 @@ class Task(BaseModel):
     capability: Capability
     status: Status
     details: str
-    estimated_time: str = Field(..., description="The estimated time for completing this task, in hours (or minutes, depending on your preference). e.g., '2 hours', '30 minutes'")
+    estimated_time: str = Field(
+        ...,
+        description="The estimated time for completing this task, in hours (or minutes, depending on your preference). e.g., '2 hours', '30 minutes'",
+    )
     # complete_response: str = Field(
     #     ...,
     #     description="The **full, exact** response returned by the agent that executed this task."
@@ -113,7 +116,10 @@ class PlannerResponse(BaseModel):
     breakdown: list[Task]
     overall_strategy: str
     overall_status: OverallStatus
-    overall_estimated_time: str = Field(..., description="The total estimated time for completing all tasks combined, in hours (or minutes). e.g., '5 hours', '90 minutes')")
+    overall_estimated_time: str = Field(
+        ...,
+        description="The total estimated time for completing all tasks combined, in hours (or minutes). e.g., '5 hours', '90 minutes')",
+    )
 
 
 # omni_agent_aligner_rf={
@@ -399,9 +405,7 @@ class ConfidenceLevel(str, Enum):
 
 
 class UserCountry(BaseModel):
-    """
-    Pydantic model for user country information.
-    """
+    """Pydantic model for user country information."""
 
     country_code: str | None = Field(
         None, description="ISO country code (e.g., 'US', 'GB', 'IN')", example="US"
@@ -579,9 +583,7 @@ class FileOutput(BaseModel):
 
 
 class process_completion_response(BaseModel):
-    """
-    Pydantic model for process_completion agent responses.
-    """
+    """Pydantic model for process_completion agent responses."""
 
     # Core task information
     task_id: int = Field(..., description="Unique identifier for the task")
