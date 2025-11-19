@@ -1,6 +1,7 @@
 """
 Unit tests for main application.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,8 +31,7 @@ class TestMainApp:
     def test_cors_headers(self, client):
         """Test that CORS headers are present."""
         response = client.options(
-            "/health",
-            headers={"Origin": "http://localhost:3000"}
+            "/health", headers={"Origin": "http://localhost:3000"}
         )
         # OPTIONS may return 200 or 405 depending on implementation
         assert response.status_code in [200, 405]

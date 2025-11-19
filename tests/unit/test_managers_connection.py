@@ -1,6 +1,7 @@
 """
 Unit tests for WebSocket connection manager.
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.managers.connection import WebSocketManager
@@ -19,7 +20,7 @@ class TestWebSocketManager:
     async def test_manager_initialization(self, manager):
         """Test that manager initializes correctly."""
         assert manager is not None
-        assert hasattr(manager, 'active_connections')
+        assert hasattr(manager, "active_connections")
 
     @pytest.mark.asyncio
     async def test_connect(self, manager, mock_websocket):

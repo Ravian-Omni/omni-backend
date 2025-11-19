@@ -1,6 +1,7 @@
 """
 Unit tests for config router.
 """
+
 import pytest
 from unittest.mock import patch
 

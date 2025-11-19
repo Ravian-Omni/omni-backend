@@ -1,6 +1,7 @@
 """
 Unit tests for logging utilities.
 """
+
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -37,6 +38,7 @@ class TestLogging:
 
         # Give it a moment to write
         import time
+
         time.sleep(0.1)
 
         if log_file.exists():

@@ -1,6 +1,7 @@
 """
 Integration tests for API endpoints.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -64,15 +65,12 @@ class TestAPIIntegration:
             headers={
                 "Origin": origin,
                 "Access-Control-Request-Method": "GET",
-            }
+            },
         )
         assert preflight.status_code == 200
 
         # Actual request
-        actual = client.get(
-            "/health",
-            headers={"Origin": origin}
-        )
+        actual = client.get("/health", headers={"Origin": origin})
         assert actual.status_code == 200
 
 
@@ -96,7 +94,7 @@ class TestErrorHandling:
         response = client.post(
             "/settings",
             data="invalid json",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
         # Should return 422, 400, or 404 (if endpoint doesn't exist)
         assert response.status_code in [400, 404, 422]

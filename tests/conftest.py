@@ -78,8 +78,8 @@ def mock_env_vars(monkeypatch):
     test_env = {
         "PORT": "8001",
         "PROJECT_NAME": "Test Omni Backend",
-        "ROOT_DIR": "/tmp/test", # nosec B108
-        "OPENAI_API_KEY": "test-key", # pragma: allowlist secret
+        "ROOT_DIR": "/tmp/test",  # nosec B108
+        "OPENAI_API_KEY": "test-key",  # pragma: allowlist secret
         "TESTING": "true",
     }
     for key, value in test_env.items():
@@ -103,7 +103,7 @@ def sample_chat_data():
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
         ],
-        "chat_dir": "/tmp/test/chat", # nosec B108
+        "chat_dir": "/tmp/test/chat",  # nosec B108
     }
 
 

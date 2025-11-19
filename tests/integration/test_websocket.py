@@ -1,6 +1,7 @@
 """
 Integration tests for WebSocket functionality.
 """
+
 import pytest
 import json
 from fastapi.testclient import TestClient

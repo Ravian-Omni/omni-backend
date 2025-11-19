@@ -1,6 +1,7 @@
 """
 Unit tests for API client utilities.
 """
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
