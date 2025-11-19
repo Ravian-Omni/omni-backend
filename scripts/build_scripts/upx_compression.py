@@ -60,7 +60,7 @@ def find_executable(dist_dir):
             return exe_path
 
     print(f"ERROR: Could not find executable '{exe_name}' in {dist_dir}")
-    print(f"Searched in:")
+    print("Searched in:")
     for path in possible_paths:
         print(f"  - {path}")
     return None
@@ -113,13 +113,13 @@ def compress_with_upx(exe_path, compression_level=9, backup=True):
     upx_cmd.append(str(exe_path))
 
     try:
-        result = subprocess.run(upx_cmd, check=True, capture_output=True, text=True)
+        subprocess.run(upx_cmd, check=True, capture_output=True, text=True)
 
         # Get compressed size
         compressed_size = get_file_size(exe_path)
         reduction = ((original_size - compressed_size) / original_size) * 100
 
-        print(f"\n✓ Compression successful!")
+        print("\n✓ Compression successful!")
         print(f"  Original size:   {original_size:.2f} MB")
         print(f"  Compressed size: {compressed_size:.2f} MB")
         print(f"  Reduction:       {reduction:.1f}%")
@@ -130,7 +130,7 @@ def compress_with_upx(exe_path, compression_level=9, backup=True):
         return True
 
     except subprocess.CalledProcessError as e:
-        print(f"\n✗ Compression failed!")
+        print("\n✗ Compression failed!")
         print(f"Error: {e.stderr}")
 
         # Restore backup if compression failed
