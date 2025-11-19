@@ -73,6 +73,8 @@ country = _get_user_country(country_codes)
 
 
 class Capability(str, Enum):
+    """Enum for available agent capabilities."""
+
     WEB_BROWSER = "web_browser"
     PYTHON_CODER = "python_coder"
     EMAIL_SENDER = "email_sender"
@@ -82,17 +84,23 @@ class Capability(str, Enum):
 
 
 class Status(str, Enum):
+    """Enum for task execution status."""
+
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
 
 
 class OverallStatus(str, Enum):
+    """Enum for overall execution status."""
+
     PENDING = "pending"
     COMPLETED = "completed"
 
 
 class Task(BaseModel):
+    """Model for individual task representation."""
+
     task_id: int
     task: str
     capability: Capability
@@ -112,6 +120,8 @@ class Task(BaseModel):
 
 
 class PlannerResponse(BaseModel):
+    """Model for planner agent response with task breakdown."""
+
     user_request: str
     breakdown: list[Task]
     overall_strategy: str
@@ -196,18 +206,23 @@ AllowedAgents = Literal[
 
 
 class Step(BaseModel):
+    """Model for individual reasoning step in agent selection."""
+
     question: str = Field(..., title="Question", min_length=1)
     thought: str = Field(..., title="Thought", min_length=1)
     action: AllowedAgents = Field(..., title="Action", min_length=1)
 
 
 class AgentSelectionResponse(BaseModel):
+    """Model for agent selection response with reasoning steps."""
+
     steps: list[Step] = Field(..., title="Steps")
     final_answer: AllowedAgents = Field(..., title="Final Answer")
 
     @field_validator("final_answer")
     @classmethod
     def validate_single_agent_final(cls, value):
+        """Validate that final_answer is one of the allowed agents."""
         if value not in (
             "Planner_Agent",
             "agent_router",
@@ -222,6 +237,7 @@ class AgentSelectionResponse(BaseModel):
     @field_validator("steps")
     @classmethod
     def validate_single_agent_in_steps(cls, steps):
+        """Validate that each step's action is one of the allowed agents."""
         for step in steps:
             if step.action not in (
                 "Planner_Agent",
@@ -263,6 +279,8 @@ class AgentSelectionResponse(BaseModel):
 
 
 class Capability(str, Enum):
+    """Enum for routing agent capabilities."""
+
     PYTHON_CODER = "python_coder"
     EMAIL_SENDER = "email_sender"
     FILE_FINDER = "file_finder"
@@ -271,6 +289,8 @@ class Capability(str, Enum):
 
 
 class TaskCapabilityMapping(BaseModel):
+    """Model for mapping tasks to capabilities."""
+
     task: str = Field(
         ...,
         title="Task",
@@ -289,7 +309,7 @@ class TaskCapabilityMapping(BaseModel):
     @field_validator("capability")
     @classmethod
     def validate_capability(cls, value):
-        """Ensure only valid capabilities are assigned"""
+        """Ensure only valid capabilities are assigned."""
         valid_capabilities = [
             Capability.PYTHON_CODER,
             Capability.EMAIL_SENDER,
@@ -305,6 +325,8 @@ class TaskCapabilityMapping(BaseModel):
 
 
 class CapabilityRoutingResponse(BaseModel):
+    """Model for capability routing response with task assignments."""
+
     task_assignments: list[TaskCapabilityMapping] = Field(
         ..., title="Task Assignments", description="List of task to capability mappings"
     )
@@ -322,7 +344,7 @@ class CapabilityRoutingResponse(BaseModel):
     @field_validator("task_assignments")
     @classmethod
     def validate_non_empty_assignments(cls, value):
-        """Ensure at least one task assignment is provided"""
+        """Ensure at least one task assignment is provided."""
         if not value:
             raise ValueError("At least one task assignment must be provided")
         return value
@@ -432,7 +454,7 @@ class UserCountry(BaseModel):
 
 
 class UserDetails(BaseModel):
-    """User information model"""
+    """User information model."""
 
     full_name: str = Field(..., description="User's full name")
     email: str = Field(..., description="User's email address")
@@ -445,8 +467,7 @@ class UserDetails(BaseModel):
 
 
 class QuestionClassification(BaseModel):
-    """
-    Pydantic model for question classification results.
+    """Pydantic model for question classification results.
 
     IMPORTANT FOR LLM: When setting eta_minutes, use this mapping based on complexity_score:
     - complexity_score 1: "1-5 minutes"
@@ -536,6 +557,8 @@ COMPLEXITY_TO_ETA = {
 # Agent Caller Response format
 # Define the exact structure you want
 class FunctionCall(BaseModel):
+    """Model for function call representation."""
+
     name: str
     arguments: str
 
@@ -545,6 +568,8 @@ class FunctionCall(BaseModel):
 
 
 class AgentCallerResponse(BaseModel):
+    """Model for agent caller response with function calls."""
+
     function_calls: list[FunctionCall]
 
     # class Config:
@@ -553,6 +578,8 @@ class AgentCallerResponse(BaseModel):
 
 
 class Status(str, Enum):
+    """Enum for process completion status."""
+
     COMPLETED = "COMPLETED"
     IN_PROGRESS = "IN_PROGRESS"
     FAILED = "FAILED"
@@ -583,7 +610,7 @@ class FileOutput(BaseModel):
 
 
 class process_completion_response(BaseModel):
-    """Pydantic model for process_completion agent responses."""
+    """Pydantic model for process completion agent responses."""
 
     # Core task information
     task_id: int = Field(..., description="Unique identifier for the task")

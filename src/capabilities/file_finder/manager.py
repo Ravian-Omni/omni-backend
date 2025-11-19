@@ -28,6 +28,8 @@ from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
 
 
 class FileSearchAgent:
+    """File search agent for indexing and searching files on the filesystem."""
+
     # Directories to skip on macOS to avoid permission issues and improve speed
     SKIP_DIRS = {
         ".Trash",
@@ -64,8 +66,7 @@ class FileSearchAgent:
     ]
 
     def __init__(self, root_dir: str | None = None, max_depth: int = 6):
-        """
-        Initialize the search engine with a root directory to index.
+        """Initialize the search engine with a root directory to index.
 
         Args:
             root_dir (str): The root directory path to index, defaults to user's home directory
@@ -78,8 +79,7 @@ class FileSearchAgent:
         self.user_home = str(Path.home())
 
     def _resolve_directory_path(self, directory: str | None) -> str:
-        """
-        Resolve directory path, handling common shortcuts and relative paths.
+        """Resolve directory path, handling common shortcuts and relative paths.
 
         Args:
             directory: Directory path (can be None, absolute, relative, or shortcut)
@@ -399,8 +399,7 @@ class FileSearchAgent:
         directory: str | None = None,
         max_results: int = 5,
     ) -> list[dict[str, str]]:
-        """
-        Search for files matching the term and optional filters.
+        """Search for files matching the term and optional filters.
 
         Args:
             search_term (str): Search query (can be empty for filter-only search)
@@ -485,8 +484,7 @@ def file_search_function(
     directory: str | None = None,
     max_results: int = 20,
 ) -> list[dict[str, str]]:
-    """
-    Search for files on macOS system by name, filters, and optionally within a specific directory.
+    """Search for files on macOS system by name, filters, and optionally within a specific directory.
 
     This function searches for files matching the search term and/or filter criteria. By default,
     it searches common user directories (Documents, Desktop, Downloads, etc.), but you can specify
@@ -588,6 +586,8 @@ def file_search_function(
 
 
 class FileFinder:
+    """File finder capability manager for multi-agent file search workflows."""
+
     def __init__(self, context: ChatContext):
         self.context = context
         self.groupchat_config = (
@@ -607,7 +607,7 @@ class FileFinder:
         self.get_chat_manager()
 
     def _check_cancellation(self):
-        """Check if the chat should be cancelled"""
+        """Check if the chat should be cancelled."""
         if (
             self.context.cancellation_token
             and self.context.cancellation_token.is_cancelled()
@@ -617,6 +617,7 @@ class FileFinder:
             )
 
     def file_finder_planner(self):
+        """Create and configure the file finder planner agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("file_finder_planner").llm_config
             or "default"
@@ -632,6 +633,7 @@ class FileFinder:
         )
 
     def file_finder(self):
+        """Create and configure the file finder agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("file_finder").llm_config
             or "default"
@@ -644,6 +646,7 @@ class FileFinder:
         )
 
     def user_proxy(self):
+        """Create and configure the user proxy agent for code execution."""
         return autogen.UserProxyAgent(
             name="user_proxy",
             llm_config=self.llm_config,
@@ -658,6 +661,7 @@ class FileFinder:
         )
 
     def prob_status_checker(self):
+        """Create and configure the problem status checker agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("prob_status_checker").llm_config
             or "default"
@@ -672,6 +676,7 @@ class FileFinder:
         )
 
     def process_completion(self):
+        """Create and configure the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("process_completion").llm_config
             or "default"
@@ -687,6 +692,7 @@ class FileFinder:
 
     # static custom speaker selection, no dynamic agent selection or condition chat routing
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
+        """Select the next speaker based on conversation flow logic."""
         try:
             self._check_cancellation()
 
@@ -716,6 +722,7 @@ class FileFinder:
             raise
 
     def get_agents(self) -> list[Agent]:
+        """Initialize and return all agents for the file finder workflow."""
         self.file_finder_planner = self.file_finder_planner()
         self.file_finder = self.file_finder()
         self.user_proxy = self.user_proxy()
@@ -731,6 +738,7 @@ class FileFinder:
         ]
 
     def get_chat_manager(self):
+        """Create and configure the group chat manager."""
         self.groupchat = autogen.GroupChat(
             agents=self.agents,
             messages=[],

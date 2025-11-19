@@ -45,6 +45,8 @@ def validate_attachments(file_paths):
 
 
 class EmailManager:
+    """Manager for email sending, reading, and searching capabilities."""
+
     def __init__(self, context: ChatContext):
         self.context = context
         self.groupchat_config = (
@@ -61,7 +63,7 @@ class EmailManager:
         self.get_chat_manager()
 
     def _check_cancellation(self):
-        """Check if the chat should be cancelled"""
+        """Check if the chat should be cancelled."""
         if (
             self.context.cancellation_token
             and self.context.cancellation_token.is_cancelled()
@@ -79,13 +81,11 @@ class EmailManager:
         attachments: list[str],
         sender: str,
     ) -> tuple[bool, dict[str, Any]]:
-        """
-        Handle user confirmation and modifications for email sending.
+        """Handle user confirmation and modifications for email sending.
 
         Returns:
             Tuple[bool, Dict]: (should_send, email_data_or_response)
         """
-
         # Store original data for comparison
         original_data = {
             "recipients": recipients.copy(),
@@ -279,9 +279,7 @@ class EmailManager:
         attachments: list[str] = None,
         sender: str = None,
     ):
-        """
-        Clean email sending function with separate confirmation handling.
-        """
+        """Clean email sending function with separate confirmation handling."""
         if sender is None:
             sender = self.username
 
@@ -405,7 +403,7 @@ class EmailManager:
     async def read_latest_email_with_attachments(
         self, sender_details: str = None, attachment_dir: str = None
     ):
-
+        """Read the latest email with optional attachment download."""
         try:
             # Connect and login
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -533,9 +531,7 @@ class EmailManager:
         body: str,
         reply_content: str = None,
     ):
-        """
-        Send a reply to a specific email.
-        """
+        """Send a reply to a specific email."""
         if not all([message_id, subject, from_, body]):
             return "Error: Missing required email information"
 
@@ -566,9 +562,7 @@ class EmailManager:
             return f"Error sending reply: {e}"
 
     async def search_emails_by_criteria(self, search_criteria: str, limit: int = 5):
-        """
-        Search emails based on criteria (sender, subject, etc.)
-        """
+        """Search emails based on criteria (sender, subject, etc.)."""
         try:
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
             imap.login(self.username, self.password)
@@ -659,7 +653,7 @@ class EmailManager:
             return f"Error searching emails: {e}"
 
     def _register_functions(self):
-
+        """Register email management functions with the agents."""
         # Wrapper functions before registering to agents
 
         async def send_email_with_attachments_wrapper(
@@ -728,9 +722,11 @@ class EmailManager:
         )
 
     def get_context_keeper(self):
+        """Get the context keeper agent."""
         return autogen.AssistantAgent(name="context_keeper", llm_config=self.llm_config)
 
     def get_intent_classifier(self):
+        """Get the intent classifier agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("intent_classifier_agent").llm_config
             or "default"
@@ -745,6 +741,7 @@ class EmailManager:
         )
 
     def get_email_reader(self):
+        """Get the email reader agent."""
         return autogen.AssistantAgent(
             name="email_reader_agent",
             llm_config=self.llm_config,
@@ -752,6 +749,7 @@ class EmailManager:
         )
 
     def get_email_search(self):
+        """Get the email search agent."""
         return autogen.AssistantAgent(
             name="email_search_agent",
             llm_config=self.llm_config,
@@ -759,6 +757,7 @@ class EmailManager:
         )
 
     def get_email_reply(self):
+        """Get the email reply agent."""
         return autogen.AssistantAgent(
             name="email_reply_agent",
             llm_config=self.llm_config,
@@ -766,6 +765,7 @@ class EmailManager:
         )
 
     def get_planner(self):
+        """Get the planner agent."""
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=self.llm_config,
@@ -773,6 +773,7 @@ class EmailManager:
         )
 
     def get_content_writer(self):
+        """Get the content writer agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("content_writer_agent").llm_config
             or "default"
@@ -786,6 +787,7 @@ class EmailManager:
         )
 
     def get_email_caller(self):
+        """Get the email caller agent."""
         return autogen.AssistantAgent(
             name="email_caller_agent",
             llm_config=self.llm_config,
@@ -793,6 +795,7 @@ class EmailManager:
         )
 
     def get_code_executor(self):
+        """Get the code executor agent."""
         return autogen.UserProxyAgent(
             name="code_executor_agent",
             human_input_mode="NEVER",
@@ -800,6 +803,7 @@ class EmailManager:
         )
 
     def get_debugger(self):
+        """Get the debugger agent."""
         return autogen.AssistantAgent(
             name="debugger_agent",
             max_consecutive_auto_reply=5,
@@ -808,6 +812,7 @@ class EmailManager:
         )
 
     def get_process_completion(self):
+        """Get the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config(
                 "process_completion_agent"
@@ -824,6 +829,7 @@ class EmailManager:
         )
 
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
+        """Select the next speaker in the group chat based on conversation flow."""
         try:
             self._check_cancellation()
 
@@ -877,6 +883,7 @@ class EmailManager:
             raise
 
     def get_agents(self):
+        """Initialize and return all agents for the email management workflow."""
         self.intent_classifier = self.get_intent_classifier()
         self.context_keeper = self.get_context_keeper()
         self.email_reader_agent = self.get_email_reader()
@@ -903,6 +910,7 @@ class EmailManager:
         ]
 
     def get_chat_manager(self):
+        """Initialize and return the group chat manager."""
         self.groupchat = autogen.GroupChat(
             agents=self.agents,
             messages=[],

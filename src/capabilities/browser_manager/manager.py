@@ -43,6 +43,8 @@ from .country_data import country_codes
 
 
 class BraveSearchClient:
+    """Client for interacting with Brave Search API."""
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.search.brave.com/res/v1"
@@ -69,8 +71,7 @@ class BraveSearchClient:
         units: str = "metric",
         extra_snippets: bool = False,
     ) -> dict[str, Any]:
-        """
-        Perform a web search using Brave Search API
+        """Perform a web search using Brave Search API.
 
         Args:
             query: Search query string
@@ -88,7 +89,6 @@ class BraveSearchClient:
             units: Unit system - "metric" or "imperial"
             extra_snippets: Include extra snippets in results
         """
-
         params = {
             "q": query,
             # "country": country,
@@ -132,6 +132,8 @@ class BraveSearchClient:
 
 
 class BrowserManager:
+    """Manager for browser automation and web search capabilities."""
+
     def __init__(
         self,
         context: ChatContext,
@@ -140,10 +142,10 @@ class BrowserManager:
         save_results: bool = True,
         browser_data_dir: str | None = None,
     ):
-        """
-        Initialize BrowserManager with simplified configuration.
+        """Initialize BrowserManager with simplified configuration.
 
         Args:
+            context: Chat context for the browser manager
             headless: Whether to run browser in headless mode
             window_size: Window size configuration {'width': int, 'height': int}
             save_results: Whether to save search results to files
@@ -213,7 +215,7 @@ class BrowserManager:
         self.groupchat, self.manager = self._initialize_chat_manager()
 
     def _check_cancellation(self):
-        """Check if the chat should be cancelled"""
+        """Check if the chat should be cancelled."""
         if (
             self.context.cancellation_token
             and self.context.cancellation_token.is_cancelled()
@@ -361,8 +363,7 @@ class BrowserManager:
         country: str = "US",
         safesearch: str = "moderate",
     ) -> dict[str, Any]:
-        """
-        Brave Search API tool with comprehensive result formatting
+        """Brave Search API tool with comprehensive result formatting.
 
         Args:
             query: Search query
@@ -819,7 +820,7 @@ class BrowserManager:
             }
 
     def _generate_answer_summary(self, results: list[dict]) -> str:
-        """Generate a brief answer summary from top results"""
+        """Generate a brief answer summary from top results."""
         if not results:
             return ""
 
@@ -954,8 +955,7 @@ class BrowserManager:
                 "Search mode: 'comprehensive' (detailed results with extra snippets), 'quick' (fast basic results), 'recent' (time-filtered results)",
             ] = "comprehensive",
         ):
-            """
-            Brave Search API tool with comprehensive result formatting
+            """Brave Search API tool with comprehensive result formatting.
 
             Args:
                 query: Search query
@@ -988,6 +988,7 @@ class BrowserManager:
         )
 
     def get_browser_planner(self):
+        """Get the browser planner agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("browser_planner").llm_config
             or "default"
@@ -1002,6 +1003,7 @@ class BrowserManager:
         )
 
     def get_browser_reader(self):
+        """Get the browser reader agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("browser_reader").llm_config
             or "default"
@@ -1014,6 +1016,7 @@ class BrowserManager:
         )
 
     def get_browser_searcher(self):
+        """Get the browser searcher executor agent."""
         # llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         return UserProxyAgent(
             name="browser_searcher",
@@ -1023,6 +1026,7 @@ class BrowserManager:
         )
 
     def get_process_completion(self):
+        """Get the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("process_completion").llm_config
             or "default"

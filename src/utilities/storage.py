@@ -19,8 +19,7 @@ from src.utilities.api_client import api_client
 async def update_chat_history(
     chat_id: str, message: dict, collection_name: str
 ) -> bool:
-    """
-    Update chat history in MongoDB with message data.
+    """Update chat history in MongoDB with message data.
 
     Args:
         chat_id: Unique identifier for the chat session
@@ -203,8 +202,7 @@ def list_available_voices():
 
 
 def ensure_path(path: str | Path, create_if_missing: bool = True) -> str:
-    """
-    Ensure a directory path exists and return the absolute path.
+    """Ensure a directory path exists and return the absolute path.
 
     Args:
         path: The directory path to check/create
@@ -264,8 +262,7 @@ def simple_ensure_path(path: str | Path) -> str:
 
 
 def ensure_paths(*paths: str | Path, create_if_missing: bool = True) -> list[str]:
-    """
-    Ensure multiple directory paths exist and return their absolute paths.
+    """Ensure multiple directory paths exist and return their absolute paths.
 
     Args:
         *paths: Variable number of directory paths to check/create

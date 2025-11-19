@@ -19,6 +19,8 @@ from src.utilities.storage import ensure_path
 
 
 class ImageGenerator:
+    """Manager for image generation capabilities using AI models."""
+
     def __init__(self, context: ChatContext):
         self.context = context
         self.groupchat_config = (
@@ -35,7 +37,7 @@ class ImageGenerator:
         self.get_chat_manager()
 
     def _check_cancellation(self):
-        """Check if the chat should be cancelled"""
+        """Check if the chat should be cancelled."""
         if (
             self.context.cancellation_token
             and self.context.cancellation_token.is_cancelled()
@@ -49,6 +51,7 @@ class ImageGenerator:
         prompt: Annotated[str, "The image generation prompt"],
         filename: Annotated[str, "The filename to save the image as"],
     ):
+        """Generate an image using the Flux model."""
         try:
             client = Together(api_key=self.image_llm_config.get("api_key"))
             response = client.images.generate(
@@ -83,7 +86,7 @@ class ImageGenerator:
             return error_message
 
     def _register_functions(self):
-
+        """Register image generation functions with the agents."""
         # Wrapper functions before registring to agents
 
         def flux_image_generator_wrapper(
@@ -101,9 +104,11 @@ class ImageGenerator:
         )
 
     def get_context_keeper(self):
+        """Get the context keeper agent."""
         return autogen.AssistantAgent(name="context_keeper", llm_config=self.llm_config)
 
     def get_user_intent_agent(self):
+        """Get the user intent classification agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("user_intent").llm_config
             or "default"
@@ -116,6 +121,7 @@ class ImageGenerator:
         )
 
     def get_image_prompt_generator_agent(self):
+        """Get the image prompt generator agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("image_prompt_generator").llm_config
             or "default"
@@ -128,6 +134,7 @@ class ImageGenerator:
         )
 
     def get_image_generator_caller_agent(self):
+        """Get the image generator caller agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("image_generator_caller").llm_config
             or "default"
@@ -140,6 +147,7 @@ class ImageGenerator:
         )
 
     def get_image_generator_agent(self):
+        """Get the image generator executor agent."""
         return UserProxyAgent(
             name="image_generator",
             human_input_mode="NEVER",
@@ -148,6 +156,7 @@ class ImageGenerator:
         )
 
     def get_process_completion_agent(self):
+        """Get the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("process_completion").llm_config
             or "default"
@@ -162,6 +171,7 @@ class ImageGenerator:
         )
 
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
+        """Select the next speaker in the group chat based on conversation flow."""
         try:
             self._check_cancellation()
 
@@ -191,6 +201,7 @@ class ImageGenerator:
             raise
 
     def get_agents(self) -> list[Agent]:
+        """Initialize and return all agents for the image generation workflow."""
         self.user_intent = self.get_user_intent_agent()
         self.context_keeper = self.get_context_keeper()
         self.image_prompt_generator = self.get_image_prompt_generator_agent()
@@ -207,6 +218,7 @@ class ImageGenerator:
         ]
 
     def get_chat_manager(self):
+        """Initialize and return the group chat manager."""
         self.groupchat = autogen.GroupChat(
             agents=self.agents,
             messages=[],

@@ -5,12 +5,14 @@ from typing import Any
 
 
 class ChatType(Enum):
+    """Enum for chat types in the memory system."""
+
     MAIN = "main"
     CAPABILITY = "capability"
 
 
 class MessageEntry:
-    """Represents a single message entry with metadata"""
+    """Represents a single message entry with metadata."""
 
     def __init__(
         self,
@@ -22,6 +24,17 @@ class MessageEntry:
         sequence_id: int | None = None,
         feedback: dict[str, Any] | None = None,
     ):
+        """Initialize MessageEntry.
+
+        Args:
+            message: Message dictionary.
+            chat_id: Chat identifier.
+            chat_type: Type of chat (main or capability).
+            capability_name: Name of capability if applicable.
+            timestamp: Message timestamp.
+            sequence_id: Sequential message ID.
+            feedback: Feedback dictionary.
+        """
         self.message = message
         self.chat_id = chat_id
         self.chat_type = chat_type
@@ -31,6 +44,11 @@ class MessageEntry:
         self.feedback = feedback or {}
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert MessageEntry to dictionary.
+
+        Returns:
+            Dictionary representation of the message entry.
+        """
         return {
             "message": self.message,
             "chat_id": self.chat_id,
@@ -43,12 +61,17 @@ class MessageEntry:
 
 
 class OmniMemory:
-    """
-    Memory class for PyAutoGen multi-groupchat setup with capabilities.
+    """Memory class for PyAutoGen multi-groupchat setup with capabilities.
+
     Stores all messages from main chat (omni) and capability groupchats.
     """
 
     def __init__(self, main_chat_id: str = "omni"):
+        """Initialize OmniMemory.
+
+        Args:
+            main_chat_id: Identifier for the main chat.
+        """
         self.main_chat_id = main_chat_id
         self.messages: list[MessageEntry] = []
         self.capability_instances: dict[str, list[str]] = (
@@ -62,13 +85,12 @@ class OmniMemory:
         chat_id: str,
         capability_name: str | None = None,
     ) -> None:
-        """
-        Push a message to memory.
+        """Push a message to memory.
 
         Args:
-            message: The message dict (standard pyautogen format)
-            chat_id: Identifier for the chat/groupchat
-            capability_name: Name of the capability if this is from a capability groupchat
+            message: The message dict (standard pyautogen format).
+            chat_id: Identifier for the chat/groupchat.
+            capability_name: Name of the capability if this is from a capability groupchat.
         """
         # Determine chat type
         chat_type = (
@@ -95,32 +117,40 @@ class OmniMemory:
         self._sequence_counter += 1
 
     def push_main_message(self, message: dict[str, Any]) -> None:
-        """Push message to main chat (omni)"""
+        """Push message to main chat (omni).
+
+        Args:
+            message: Message dictionary to push.
+        """
         self.push_message(message, self.main_chat_id)
 
     def push_capability_message(
         self, message: dict[str, Any], capability_name: str, chat_id: str
     ) -> None:
-        """Push message to capability chat"""
+        """Push message to capability chat.
+
+        Args:
+            message: Message dictionary to push.
+            capability_name: Name of the capability.
+            chat_id: Chat identifier.
+        """
         self.push_message(message, chat_id, capability_name)
 
     def load_main_messages(self, messages: list[dict[str, Any]]) -> None:
-        """
-        Load multiple messages into main chat (omni) in bulk.
+        """Load multiple messages into main chat (omni) in bulk.
 
         Args:
-            messages: List of message dicts to load into main chat
+            messages: List of message dicts to load into main chat.
         """
         for message in messages:
             self.push_main_message(message)
 
     def get_last_capability(self) -> dict[str, str] | None:
-        """
-        Get the last capability called.
+        """Get the last capability called.
 
         Returns:
-            Dict with capability details or None if no capabilities called
-            Format: {'capability_name': str, 'chat_id': str, 'timestamp': str}
+            Dict with capability details or None if no capabilities called.
+            Format: {'capability_name': str, 'chat_id': str, 'timestamp': str}.
         """
         # Find the last capability message
         for entry in reversed(self.messages):
@@ -135,14 +165,13 @@ class OmniMemory:
     def pull_last_capability_messages(
         self, include_metadata: bool = False
     ) -> list[dict[str, Any] | MessageEntry]:
-        """
-        Pull all messages from the last capability called.
+        """Pull all messages from the last capability called.
 
         Args:
-            include_metadata: Whether to include MessageEntry objects or just message dicts
+            include_metadata: Whether to include MessageEntry objects or just message dicts.
 
         Returns:
-            List of messages from the last capability called, empty list if none
+            List of messages from the last capability called, empty list if none.
         """
         last_capability = self.get_last_capability()
         if not last_capability:
@@ -157,7 +186,14 @@ class OmniMemory:
     def pull_all_messages(
         self, include_metadata: bool = False
     ) -> list[dict[str, Any] | MessageEntry]:
-        """Pull all messages in sequential order"""
+        """Pull all messages in sequential order.
+
+        Args:
+            include_metadata: Whether to include MessageEntry objects.
+
+        Returns:
+            List of all messages.
+        """
         if include_metadata:
             return self.messages
         return [entry.message for entry in self.messages]
@@ -165,7 +201,14 @@ class OmniMemory:
     def pull_main_messages(
         self, include_metadata: bool = False
     ) -> list[dict[str, Any] | MessageEntry]:
-        """Pull only main chat (omni) messages"""
+        """Pull only main chat (omni) messages.
+
+        Args:
+            include_metadata: Whether to include MessageEntry objects.
+
+        Returns:
+            List of main chat messages.
+        """
         main_entries = [
             entry for entry in self.messages if entry.chat_type == ChatType.MAIN
         ]
@@ -179,13 +222,15 @@ class OmniMemory:
         chat_id: str | None = None,
         include_metadata: bool = False,
     ) -> list[dict[str, Any] | MessageEntry]:
-        """
-        Pull capability messages with optional filtering.
+        """Pull capability messages with optional filtering.
 
         Args:
-            capability_name: Specific capability name, or None for all capabilities
-            chat_id: Specific chat_id, or None for all instances of the capability
-            include_metadata: Whether to include MessageEntry objects or just message dicts
+            capability_name: Specific capability name, or None for all capabilities.
+            chat_id: Specific chat_id, or None for all instances of the capability.
+            include_metadata: Whether to include MessageEntry objects or just message dicts.
+
+        Returns:
+            List of capability messages.
         """
         capability_entries = [
             entry for entry in self.messages if entry.chat_type == ChatType.CAPABILITY
@@ -214,14 +259,16 @@ class OmniMemory:
         capability_name: str | None = None,
         from_role: str | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Pull recent messages with optional filtering.
+        """Pull recent messages with optional filtering.
 
         Args:
-            count: Number of recent messages to return
-            chat_type: Filter by chat type ('main' or 'capability')
-            capability_name: Filter by specific capability name
-            from_role: Filter by message role/name (e.g., 'chat_manager', 'user', 'assistant')
+            count: Number of recent messages to return.
+            chat_type: Filter by chat type ('main' or 'capability').
+            capability_name: Filter by specific capability name.
+            from_role: Filter by message role/name (e.g., 'chat_manager', 'user', 'assistant').
+
+        Returns:
+            List of recent messages.
         """
         filtered_messages = self.messages
 
@@ -253,33 +300,48 @@ class OmniMemory:
         return [entry.message for entry in filtered_messages[-count:]]
 
     def pull_recent_from_chat_manager(self, count: int = 5) -> list[dict[str, Any]]:
-        """
-        Pull recent messages from chat_manager in omni chat.
+        """Pull recent messages from chat_manager in omni chat.
 
         Args:
-            count: Number of recent messages to return from chat_manager
+            count: Number of recent messages to return from chat_manager.
+
+        Returns:
+            List of recent chat_manager messages.
         """
         return self.pull_recent_messages(
             count=count, chat_type="main", from_role="chat_manager"
         )
 
     def pull_recent_from_executor(self, count: int = 5) -> list[dict[str, Any]]:
-        """
-        Pull recent messages from executor in omni chat.
+        """Pull recent messages from executor in omni chat.
 
         Args:
-            count: Number of recent messages to return from chat_manager
+            count: Number of recent messages to return from executor.
+
+        Returns:
+            List of recent executor messages.
         """
         return self.pull_recent_messages(
             count=count, chat_type="main", from_role="agent_executor"
         )
 
     def get_capability_instances(self, capability_name: str) -> list[str]:
-        """Get all chat_ids for a specific capability"""
+        """Get all chat_ids for a specific capability.
+
+        Args:
+            capability_name: Name of the capability.
+
+        Returns:
+            List of chat IDs.
+        """
         return self.capability_instances.get(capability_name, [])
 
     def get_all_capabilities(self) -> dict[str, list[str]]:
-        """Get all registered capabilities and their chat_ids"""
+        """Get all registered capabilities and their chat_ids.
+
+        Returns:
+            Dictionary mapping capability names to chat ID lists.
+        """
         return self.capability_instances.copy()
 
     def add_feedback(
@@ -289,17 +351,16 @@ class OmniMemory:
         feedback_value: Any,
         feedback_notes: str | None = None,
     ) -> bool:
-        """
-        Add feedback to a specific message.
+        """Add feedback to a specific message.
 
         Args:
-            sequence_id: Sequence ID of the message to add feedback to
-            feedback_type: Type of feedback ('rating', 'helpful', 'quality', etc.)
-            feedback_value: Value of the feedback (rating score, boolean, etc.)
-            feedback_notes: Optional notes about the feedback
+            sequence_id: Sequence ID of the message to add feedback to.
+            feedback_type: Type of feedback ('rating', 'helpful', 'quality', etc.).
+            feedback_value: Value of the feedback (rating score, boolean, etc.).
+            feedback_notes: Optional notes about the feedback.
 
         Returns:
-            True if feedback was added successfully, False if message not found
+            True if feedback was added successfully, False if message not found.
         """
         for entry in self.messages:
             if entry.sequence_id == sequence_id:
@@ -314,11 +375,13 @@ class OmniMemory:
     def pull_messages_with_feedback(
         self, feedback_type: str | None = None
     ) -> list[dict[str, Any]]:
-        """
-        Pull messages that have feedback.
+        """Pull messages that have feedback.
 
         Args:
-            feedback_type: Specific feedback type to filter by, or None for any feedback
+            feedback_type: Specific feedback type to filter by, or None for any feedback.
+
+        Returns:
+            List of messages with feedback.
         """
         result = []
         for entry in self.messages:
@@ -341,13 +404,15 @@ class OmniMemory:
         chat_id: str | None = None,
         context_length: int = 5,
     ) -> dict[str, Any]:
-        """
-        Get context before a capability was called.
+        """Get context before a capability was called.
 
         Args:
-            capability_name: Name of the capability
-            chat_id: Specific chat_id, or None for latest instance
-            context_length: Number of previous messages to include
+            capability_name: Name of the capability.
+            chat_id: Specific chat_id, or None for latest instance.
+            context_length: Number of previous messages to include.
+
+        Returns:
+            Dictionary with context messages and capability info.
         """
         # Find the capability instance
         target_entry = None
@@ -394,13 +459,17 @@ class OmniMemory:
         }
 
     def clear_memory(self) -> None:
-        """Clear all stored messages and reset counters"""
+        """Clear all stored messages and reset counters."""
         self.messages.clear()
         self.capability_instances.clear()
         self._sequence_counter = 0
 
     def export_memory(self, filepath: str) -> None:
-        """Export memory to JSON file"""
+        """Export memory to JSON file.
+
+        Args:
+            filepath: Path to export file.
+        """
         export_data = {
             "main_chat_id": self.main_chat_id,
             "capability_instances": self.capability_instances,
@@ -412,7 +481,11 @@ class OmniMemory:
             json.dump(export_data, f, indent=2)
 
     def load_memory(self, filepath: str) -> None:
-        """Load memory from JSON file"""
+        """Load memory from JSON file.
+
+        Args:
+            filepath: Path to JSON file.
+        """
         with open(filepath) as f:
             data = json.load(f)
 
@@ -435,7 +508,11 @@ class OmniMemory:
             self.messages.append(entry)
 
     def get_statistics(self) -> dict[str, Any]:
-        """Get memory usage statistics"""
+        """Get memory usage statistics.
+
+        Returns:
+            Dictionary with memory statistics.
+        """
         main_count = len([m for m in self.messages if m.chat_type == ChatType.MAIN])
         capability_count = len(
             [m for m in self.messages if m.chat_type == ChatType.CAPABILITY]
@@ -475,8 +552,11 @@ class OmniMemory:
 
 # Comprehensive demonstration of all functions
 def demonstrate_memory_usage():
-    """Comprehensive demonstration of OmniMemory functionality"""
+    """Comprehensive demonstration of OmniMemory functionality.
 
+    Returns:
+        OmniMemory instance with demonstration data.
+    """
     print("=== PyAutoGen Memory System Demonstration ===\n")
 
     # 1. Initialize memory

@@ -4,24 +4,32 @@ from pydantic import BaseModel, Field
 
 
 class CompletionStatus(str, Enum):
+    """Enum for image generation completion status."""
+
     COMPLETED = "COMPLETED"
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
 
 
 class OutcomeStatus(str, Enum):
+    """Enum for outcome achievement status."""
+
     ACHIEVED = "ACHIEVED"
     PARTIAL = "PARTIAL"
     NOT_ACHIEVED = "NOT_ACHIEVED"
 
 
 class NextAction(str, Enum):
+    """Enum for recommended next action after image generation."""
+
     READY_FOR_NEW_REQUESTS = "Ready for new requests"
     REGENERATION_NEEDED = "Regeneration needed"
     ERROR_RESOLUTION_REQUIRED = "Error resolution required"
 
 
 class GeneratedImage(BaseModel):
+    """Model for generated image information."""
+
     filename: str = Field(
         ..., description="Name of the generated image file with extension"
     )
@@ -47,6 +55,8 @@ class GeneratedImage(BaseModel):
 
 
 class ProcessCompletionResponse(BaseModel):
+    """Model for image generation process completion response."""
+
     status: CompletionStatus = Field(
         ..., description="Overall completion status of image generation"
     )
@@ -106,6 +116,7 @@ class ProcessCompletionResponse(BaseModel):
 
 # Additional response examples for different scenarios
 class CompletionResponseExamples:
+    """Collection of example responses for different completion scenarios."""
 
     SUCCESS_EXAMPLE = ProcessCompletionResponse(
         status=CompletionStatus.COMPLETED,
@@ -143,8 +154,7 @@ class CompletionResponseExamples:
 
 # Usage example for integration
 def validate_completion_response(response_data: dict) -> ProcessCompletionResponse:
-    """
-    Validate and parse the completion agent response
+    """Validate and parse the completion agent response.
 
     Args:
         response_data: Raw response dictionary from the completion agent
@@ -160,7 +170,7 @@ def validate_completion_response(response_data: dict) -> ProcessCompletionRespon
 
 # JSON Schema generation for API documentation
 def get_json_schema():
-    """Generate JSON schema for API documentation"""
+    """Generate JSON schema for API documentation."""
     return ProcessCompletionResponse.schema()
 
 

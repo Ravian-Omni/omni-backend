@@ -1,4 +1,5 @@
-"""
+"""OMNI - Multi-capability AI orchestration system.
+
      OOOOOOOOO      MMMMMMMM               MMMMMMMM NNNNNNNN        NNNNNNNN IIIIIIIIII
    OO:::::::::OO    M:::::::M             M:::::::M N:::::::N       N::::::N I::::::::I
  OO:::::::::::::OO  M::::::::M           M::::::::M N::::::::N      N::::::N I::::::::I

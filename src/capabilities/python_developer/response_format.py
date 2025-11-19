@@ -4,11 +4,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class StatusDecision(str, Enum):
+    """Enum for decision status values."""
+
     YES = "Yes"
     NO = "No"
 
 
 class ProblemStatusResponse(BaseModel):
+    """Model for problem status response with decision and explanation."""
+
     decision: StatusDecision = Field(
         ...,
         title="Decision",
@@ -31,7 +35,7 @@ class ProblemStatusResponse(BaseModel):
     @field_validator("reason")
     @classmethod
     def validate_reason_for_no(cls, value, info):
-        """Ensure reason is provided when decision is No"""
+        """Ensure reason is provided when decision is No."""
         if hasattr(info, "data") and info.data.get("decision") == StatusDecision.NO:
             if not value or not value.strip():
                 raise ValueError("Reason must be provided when decision is 'No'")
@@ -40,7 +44,7 @@ class ProblemStatusResponse(BaseModel):
     @field_validator("explanation")
     @classmethod
     def validate_explanation_format(cls, value, info):
-        """Ensure explanation follows the required template format"""
+        """Ensure explanation follows the required template format."""
         if hasattr(info, "data"):
             decision = info.data.get("decision")
             if decision == StatusDecision.YES:
@@ -55,9 +59,7 @@ class ProblemStatusResponse(BaseModel):
 
 
 class PlannerResponseFormat(BaseModel):
-    """
-    Pydantic schema for structured Planner response format.
-    """
+    """Pydantic schema for structured Planner response format."""
 
     objective: str = Field(
         ..., description="Clear statement of what needs to be accomplished"

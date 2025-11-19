@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class TaskStatus(str, Enum):
+    """Enum for email task completion status."""
+
     COMPLETED = "COMPLETED"
     PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
     NOT_COMPLETED = "NOT_COMPLETED"
@@ -11,12 +13,16 @@ class TaskStatus(str, Enum):
 
 
 class OutcomeStatus(str, Enum):
+    """Enum for outcome achievement status."""
+
     ACHIEVED = "ACHIEVED"
     PARTIALLY_ACHIEVED = "PARTIALLY_ACHIEVED"
     NOT_ACHIEVED = "NOT_ACHIEVED"
 
 
 class QualityStatus(str, Enum):
+    """Enum for quality assessment status."""
+
     EXCELLENT = "EXCELLENT"
     GOOD = "GOOD"
     FAIR = "FAIR"
@@ -46,9 +52,7 @@ class EmailMetadata(BaseModel):
 
 
 class EmailProcessCompletion(BaseModel):
-    """
-    Pydantic model for structured email agent responses.
-    """
+    """Pydantic model for structured email agent responses."""
 
     # Status tracking
     status: TaskStatus = Field(..., description="Overall task completion status")
@@ -154,9 +158,7 @@ class EmailIntent(str, Enum):
 
 
 class IntentClassifier(BaseModel):
-    """
-    Pydantic model for Intent Classification Agent responses.
-    """
+    """Pydantic model for Intent Classification Agent responses."""
 
     # Core classification fields
     intent: EmailIntent = Field(..., description="The classified intent category")

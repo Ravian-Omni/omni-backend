@@ -54,7 +54,6 @@ class AG2AIVirtualEnvContext:
         Returns:
             Path to the virtual environment directory.
         """
-
         # Check environment variable first
         return settings.AG2AI_PYTHON_PATH
         # if 'AG2AI_VENV_PATH' in os.environ:

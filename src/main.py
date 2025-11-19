@@ -63,7 +63,6 @@ async def lifespan(app: FastAPI):
     Yields:
         None: Control during application runtime.
     """
-
     nest_asyncio.apply()  # 🧠 Patch the loop here
 
     # Startup: Setup logging first

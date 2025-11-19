@@ -19,7 +19,7 @@ from src.utilities.api_client import api_client
 
 
 class StreamingAgent(Agent):
-    """Agent subclass that streams actions and state changes to WebSocket clients"""
+    """Agent subclass that streams actions and state changes to WebSocket clients."""
 
     def __init__(
         self,
@@ -40,6 +40,26 @@ class StreamingAgent(Agent):
         *args,
         **kwargs,
     ):
+        """Initialize StreamingAgent with WebSocket support.
+
+        Args:
+            task: Task description for the agent.
+            browser: Browser instance.
+            browser_session: Browser session instance.
+            max_failures: Maximum number of failures allowed.
+            retry_delay: Delay between retries.
+            use_vision: Whether to use vision capabilities.
+            generate_gif: Whether to generate GIF recordings.
+            max_input_tokens: Maximum input tokens allowed.
+            validate_output: Whether to validate output.
+            llm: Language model instance.
+            controller: Controller instance.
+            session_id: Unique session identifier.
+            user_id: User identifier.
+            ws_manager: WebSocket manager instance.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+        """
         super().__init__(
             task=task,
             browser=browser,
@@ -63,7 +83,14 @@ class StreamingAgent(Agent):
     async def _deduct_tokens(
         self, model: str, input_tokens: int, output_tokens: int, total_tokens: int
     ):
-        """Call API to deduct tokens from user's balance"""
+        """Call API to deduct tokens from user's balance.
+
+        Args:
+            model: Model name used.
+            input_tokens: Number of input tokens.
+            output_tokens: Number of output tokens.
+            total_tokens: Total tokens used.
+        """
         try:
             # Your API call here
             # Example:
@@ -102,7 +129,14 @@ class StreamingAgent(Agent):
             # Decide whether to raise or continue
 
     def _extract_llm_metadata(self, response) -> dict[str, Any]:
-        """Extract metadata from LLM response with proper token extraction"""
+        """Extract metadata from LLM response with proper token extraction.
+
+        Args:
+            response: LLM response object.
+
+        Returns:
+            Dictionary containing extracted metadata.
+        """
         if not response:
             return {}
 
@@ -238,7 +272,11 @@ class StreamingAgent(Agent):
         return metadata
 
     def get_token_summary(self) -> dict[str, Any]:
-        """Get summary of token usage across all LLM calls"""
+        """Get summary of token usage across all LLM calls.
+
+        Returns:
+            Dictionary containing token usage statistics.
+        """
         total_input_tokens = 0
         total_output_tokens = 0
 
@@ -260,11 +298,19 @@ class StreamingAgent(Agent):
         }
 
     def get_latest_llm_metadata(self) -> dict[str, Any]:
-        """Get metadata from the most recent LLM call"""
+        """Get metadata from the most recent LLM call.
+
+        Returns:
+            Dictionary containing latest LLM metadata.
+        """
         return self.llm_calls_metadata[-1] if self.llm_calls_metadata else {}
 
     async def get_token_details(self) -> dict[str, Any]:
-        """Get current token consumption details"""
+        """Get current token consumption details.
+
+        Returns:
+            Dictionary containing current token details.
+        """
         try:
             current_tokens = getattr(
                 self._message_manager.state.history, "current_tokens", 0
@@ -288,7 +334,11 @@ class StreamingAgent(Agent):
             return {"error": f"Could not get token details: {str(e)}"}
 
     async def stream_action(self, action_data: dict[str, Any]):
-        """Stream action to all connected clients"""
+        """Stream action to all connected clients.
+
+        Args:
+            action_data: Action data to stream.
+        """
         # Add token information to every streamed action
         # token_details = await self.get_token_details()
         token_details = self.get_latest_llm_metadata()
@@ -312,8 +362,11 @@ class StreamingAgent(Agent):
         )
 
     async def step(self, step_info: AgentStepInfo | None = None) -> None:
-        """Override step method to stream step information"""
+        """Override step method to stream step information.
 
+        Args:
+            step_info: Step information object.
+        """
         # Stream step start
         await self.stream_action(
             {
@@ -359,8 +412,14 @@ class StreamingAgent(Agent):
 
     @time_execution_async("--get_next_action")
     async def get_next_action(self, input_messages: list[BaseMessage]) -> AgentOutput:
-        """Override get_next_action to capture LLM metadata"""
+        """Override get_next_action to capture LLM metadata.
 
+        Args:
+            input_messages: List of input messages.
+
+        Returns:
+            AgentOutput with parsed action.
+        """
         start_time = time.time()
 
         # Convert input messages
@@ -490,8 +549,15 @@ class StreamingAgent(Agent):
     async def multi_act(
         self, actions: list[ActionModel], check_for_new_elements: bool = True
     ) -> list[ActionResult]:
-        """Override multi_act to stream individual action execution"""
+        """Override multi_act to stream individual action execution.
 
+        Args:
+            actions: List of actions to execute.
+            check_for_new_elements: Whether to check for new elements.
+
+        Returns:
+            List of action results.
+        """
         # Stream multi-action start
         await self.stream_action(
             {
@@ -614,7 +680,14 @@ class StreamingAgent(Agent):
         return results
 
     def _get_action_summary(self, action: ActionModel) -> dict[str, Any]:
-        """Extract summary information from an action"""
+        """Extract summary information from an action.
+
+        Args:
+            action: ActionModel instance.
+
+        Returns:
+            Dictionary containing action summary.
+        """
         action_data = action.model_dump(exclude_unset=True)
         if not action_data:
             return {
@@ -643,7 +716,11 @@ class StreamingAgent(Agent):
         }
 
     async def _get_browser_context(self) -> dict[str, Any]:
-        """Get current browser context information"""
+        """Get current browser context information.
+
+        Returns:
+            Dictionary containing browser context.
+        """
         try:
             if not self.browser_session:
                 return {"error": "No browser session available"}
@@ -663,8 +740,16 @@ class StreamingAgent(Agent):
             return {"error": f"Could not get browser context: {str(e)}"}
 
     async def run(self, max_steps: int = 100, on_step_start=None, on_step_end=None):
-        """Override run to stream agent lifecycle events"""
+        """Override run to stream agent lifecycle events.
 
+        Args:
+            max_steps: Maximum number of steps.
+            on_step_start: Callback for step start.
+            on_step_end: Callback for step end.
+
+        Returns:
+            Agent execution result.
+        """
         # Stream agent start
         await self.stream_action(
             {

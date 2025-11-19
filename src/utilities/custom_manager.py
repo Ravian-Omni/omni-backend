@@ -115,15 +115,14 @@ async def create_capability_chat(context: ChatContext) -> dict[str, str]:
 
 
 async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> bool:
-    """
-    Update chat history in MongoDB.
+    """Update chat history in MongoDB.
 
     Args:
-        context: Chat context with all identifiers
-        message: Message data to store
+        context: Chat context with all identifiers.
+        message: Message data to store.
 
     Returns:
-        bool: True if update was successful
+        True if update was successful.
     """
     try:
         # Extract message fields safely
@@ -251,11 +250,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         self._initialize_agent_tracking()
 
     def _initialize_agent_tracking(self):
-        """Initialize usage tracking for all agents.
-
-        Set up initial usage tracking state for each agent in the group chat
-        to enable accurate delta calculations.
-        """
+        """Initialize usage tracking for all agents."""
         for agent in self.groupchat.agents:
             # Initialize with current usage if any
             current_usage = self._get_agent_current_usage(agent)
@@ -458,11 +453,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
     # Additional utility methods for comprehensive usage tracking
 
     def get_all_agents_current_usage(self) -> dict[str, dict[str, Any]]:
-        """Get current usage for all agents in the group.
-
-        Returns:
-            Dictionary mapping agent names to their current usage statistics.
-        """
+        """Get current usage for all agents in the group."""
         all_usage = {}
         for agent in self.groupchat.agents:
             all_usage[agent.name] = self._get_agent_current_usage(agent)
@@ -507,11 +498,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         return total_summary
 
     def reset_usage_tracking(self):
-        """Reset usage tracking.
-
-        Clear and reinitialize usage tracking for all agents, useful for
-        starting fresh tracking mid-conversation or after a checkpoint.
-        """
+        """Reset usage tracking."""
         for agent in self.groupchat.agents:
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()

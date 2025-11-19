@@ -1,5 +1,5 @@
-"""
-Main entry point for the Omni Backend application.
+"""Main entry point for the Omni Backend application.
+
 This file provides a convenient way to run the application from the root directory.
 """
 

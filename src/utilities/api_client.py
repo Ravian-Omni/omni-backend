@@ -227,11 +227,10 @@ class APIResponse:
             }
 
     def standard_response(self) -> dict[str, Any]:
-        """
-        Parse response as StandardResponse and return key values directly
+        """Parse response as StandardResponse and return key values directly.
 
         Returns:
-            dict: {"success": bool, "message": str, "data": dict}
+            Dictionary with keys: success (bool), message (str), data (dict).
         """
         if self.error:
             return self.error.to_dict()
@@ -427,16 +426,18 @@ class ServerAPIClient:
         json_data: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> APIResponse:
-        """
-        Make HTTP request with structured error handling
+        """Make HTTP request with structured error handling.
 
         Args:
-            method: HTTP method (GET, POST, PUT, DELETE, etc.)
-            endpoint: API endpoint path
-            params: Query parameters
-            data: Request body data (form/raw)
-            json_data: JSON request body
-            headers: Custom headers
+            method: HTTP method (GET, POST, PUT, DELETE, etc.).
+            endpoint: API endpoint path.
+            params: Query parameters.
+            data: Request body data (form/raw).
+            json_data: JSON request body.
+            headers: Custom headers.
+
+        Returns:
+            APIResponse object wrapping the response.
         """
         start_time = time.time()
 

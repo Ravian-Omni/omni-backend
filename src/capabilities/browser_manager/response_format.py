@@ -4,16 +4,14 @@ from pydantic import BaseModel, Field
 
 
 class QuestionCategory(str, Enum):
-    """Enum for question classification categories"""
+    """Enum for question classification categories."""
 
     FACTUAL = "factual"
     EXPLORATORY = "exploratory"
 
 
 class QuestionClassification(BaseModel):
-    """
-    Pydantic model for question classification response from browser agent
-    """
+    """Pydantic model for question classification response from browser agent."""
 
     question_category: QuestionCategory = Field(
         ...,
@@ -42,11 +40,13 @@ class QuestionClassification(BaseModel):
     #     }
 
     def __str__(self) -> str:
-        """String representation matching the required template"""
+        """String representation matching the required template."""
         return f"Question_category: {self.question_category.value}"
 
 
 class TaskStatus(str, Enum):
+    """Enum for browser task completion status."""
+
     COMPLETED = "completed"
     FAILED = "failed"
     IN_PROGRESS = "in_progress"
@@ -54,7 +54,7 @@ class TaskStatus(str, Enum):
 
 
 class FileInfo(BaseModel):
-    """Information about a downloaded or generated file"""
+    """Information about a downloaded or generated file."""
 
     filename: str = Field(..., description="Name of the file")
     full_path: str = Field(..., description="Complete absolute path to the file")
@@ -85,7 +85,7 @@ class FileInfo(BaseModel):
 
 
 class URLInfo(BaseModel):
-    """Information about URLs visited or referenced"""
+    """Information about URLs visited or referenced."""
 
     url: str = Field(..., description="The complete URL")
     title: str | None = Field(None, description="Page title if available")
@@ -96,7 +96,7 @@ class URLInfo(BaseModel):
 
 
 class WebProcessCompletion(BaseModel):
-    """Enhanced web browser agent response model"""
+    """Enhanced web browser agent response model."""
 
     # Task completion status
     task_completed: bool = Field(

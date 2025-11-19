@@ -64,7 +64,7 @@ async def run_websocket(
     user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for Omni multi-capability AI chat.
+    """Websocket endpoint for Omni multi-capability AI chat.
 
     Handles real-time communication for Omni conversations with support for
     multiple AI capabilities, context preservation, and streaming responses.
@@ -252,7 +252,7 @@ async def run_capability_websocket(
     capability_name: str = "email_sender",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for single capability-specific chat.
+    """Websocket endpoint for single capability-specific chat.
 
     Handles real-time communication for individual capabilities like email,
     browser, file finder, image generator, and Python developer.

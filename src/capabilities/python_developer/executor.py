@@ -13,9 +13,16 @@ from src.utilities.async_helpers import async_to_sync
 
 
 class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
-    """Extension that makes ALL code execution interactive via async subprocess with proper lifecycle management"""
+    """Extension that makes ALL code execution interactive via async subprocess with proper lifecycle management."""
 
     def __init__(self, session_id, *args, **kwargs):
+        """Initialize InteractiveLocalCommandLineCodeExecutor.
+
+        Args:
+            session_id: Session identifier.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+        """
         self.session_id: str = session_id
         super().__init__(*args, **kwargs)
 
@@ -30,7 +37,11 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         )  # Output monitoring tasks
 
     async def stream_action(self, action_data: dict[str, Any]):
-        """Stream action to all connected clients"""
+        """Stream action to all connected clients.
+
+        Args:
+            action_data: Action data to stream.
+        """
         try:
             websocket_manager = await get_websocket_manager()
             await websocket_manager.send_chat_message(
@@ -42,7 +53,14 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
     def _execute_code_dont_check_setup(
         self, code_blocks: list[CodeBlock]
     ) -> CommandLineCodeResult:
-        """Override to make ALL code execution async and interactive"""
+        """Override to make ALL code execution async and interactive.
+
+        Args:
+            code_blocks: List of code blocks to execute.
+
+        Returns:
+            CommandLineCodeResult with execution results.
+        """
         try:
             return async_to_sync(self._async_execute_blocks(code_blocks))
         except Exception as e:
@@ -53,8 +71,14 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
     async def _async_execute_blocks(
         self, code_blocks: list[CodeBlock]
     ) -> CommandLineCodeResult:
-        """Execute all code blocks asynchronously with proper lifecycle management"""
+        """Execute all code blocks asynchronously with proper lifecycle management.
 
+        Args:
+            code_blocks: List of code blocks to execute.
+
+        Returns:
+            CommandLineCodeResult with execution results.
+        """
         logs_all = ""
         file_names = []
         exitcode = 0
@@ -319,7 +343,13 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         process_id: str,
         future: asyncio.Future,
     ):
-        """Monitor process lifecycle and handle completion/termination"""
+        """Monitor process lifecycle and handle completion/termination.
+
+        Args:
+            process: Process instance.
+            process_id: Process identifier.
+            future: Future for tracking completion.
+        """
         try:
             # Wait for process to complete naturally
             return_code = await process.wait()
@@ -364,7 +394,14 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
                 future.set_exception(e)
 
     def _get_signal_name(self, signal_num: int) -> str:
-        """Get human-readable signal name"""
+        """Get human-readable signal name.
+
+        Args:
+            signal_num: Signal number.
+
+        Returns:
+            Human-readable signal name.
+        """
         signal_names = {
             signal.SIGTERM: "SIGTERM",
             signal.SIGKILL: "SIGKILL",
@@ -380,7 +417,11 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         return signal_names.get(signal_num, f"SIGNAL_{signal_num}")
 
     async def _handle_process_timeout(self, process_id: str):
-        """Handle process timeout with graceful and forceful termination"""
+        """Handle process timeout with graceful and forceful termination.
+
+        Args:
+            process_id: Process identifier.
+        """
         if process_id not in self.active_processes:
             return
 
@@ -422,7 +463,13 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
     async def _monitor_and_collect_stdout(
         self, process: asyncio.subprocess.Process, process_id: str, collector: list[str]
     ):
-        """Monitor stdout with enhanced input detection and real-time streaming"""
+        """Monitor stdout with enhanced input detection and real-time streaming.
+
+        Args:
+            process: Process instance.
+            process_id: Process identifier.
+            collector: List to collect output lines.
+        """
         try:
             while True:
                 line = await process.stdout.readline()
@@ -498,7 +545,13 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
     async def _monitor_and_collect_stderr(
         self, process: asyncio.subprocess.Process, process_id: str, collector: list[str]
     ):
-        """Monitor stderr with real-time streaming"""
+        """Monitor stderr with real-time streaming.
+
+        Args:
+            process: Process instance.
+            process_id: Process identifier.
+            collector: List to collect error lines.
+        """
         try:
             while True:
                 line = await process.stderr.readline()
@@ -529,7 +582,15 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             )
 
     async def send_input_to_process(self, process_id: str, input_text: str) -> bool:
-        """Send input to running process with comprehensive error handling"""
+        """Send input to running process with comprehensive error handling.
+
+        Args:
+            process_id: Process identifier.
+            input_text: Input text to send.
+
+        Returns:
+            True if input was sent successfully.
+        """
         if process_id not in self.active_processes:
             await self.stream_action(
                 {
@@ -619,7 +680,14 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             return False
 
     async def terminate_process(self, process_id: str) -> bool:
-        """Terminate a specific process with proper cleanup"""
+        """Terminate a specific process with proper cleanup.
+
+        Args:
+            process_id: Process identifier.
+
+        Returns:
+            True if termination was successful.
+        """
         if process_id not in self.active_processes:
             await self.stream_action(
                 {
@@ -691,7 +759,11 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             return False
 
     async def _cleanup_single_process(self, process_id: str):
-        """Clean up a single process and all its resources"""
+        """Clean up a single process and all its resources.
+
+        Args:
+            process_id: Process identifier.
+        """
         try:
             # Cancel and clean up monitor task
             if process_id in self._process_monitor_tasks:
@@ -745,7 +817,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             )
 
     async def _cleanup_all_processes(self):
-        """Clean up all remaining processes"""
+        """Clean up all remaining processes."""
         if not self.active_processes:
             return
 
@@ -771,7 +843,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
         )
 
     async def cleanup(self):
-        """Main cleanup method for executor"""
+        """Main cleanup method for executor."""
         try:
             await self._cleanup_all_processes()
 
@@ -787,11 +859,22 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             print(f"Error during executor cleanup: {e}")
 
     def get_active_processes(self) -> list[str]:
-        """Get list of active process IDs"""
+        """Get list of active process IDs.
+
+        Returns:
+            List of active process IDs.
+        """
         return list(self.active_processes.keys())
 
     async def get_process_info(self, process_id: str) -> dict[str, Any]:
-        """Get detailed process information for debugging"""
+        """Get detailed process information for debugging.
+
+        Args:
+            process_id: Process identifier.
+
+        Returns:
+            Dictionary with process information.
+        """
         if process_id not in self.active_processes:
             return {"error": "Process not found", "process_id": process_id}
 
@@ -816,7 +899,15 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
     # ===== SYNC WRAPPERS FOR BACKWARD COMPATIBILITY =====
 
     def send_input_sync(self, process_id: str, input_text: str) -> bool:
-        """Sync wrapper for sending input"""
+        """Sync wrapper for sending input.
+
+        Args:
+            process_id: Process identifier.
+            input_text: Input text to send.
+
+        Returns:
+            True if successful.
+        """
         try:
             return async_to_sync(self.send_input_to_process(process_id, input_text))
         except Exception as e:
@@ -824,7 +915,14 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             return False
 
     def terminate_sync(self, process_id: str) -> bool:
-        """Sync wrapper for terminating process"""
+        """Sync wrapper for terminating process.
+
+        Args:
+            process_id: Process identifier.
+
+        Returns:
+            True if successful.
+        """
         try:
             return async_to_sync(self.terminate_process(process_id))
         except Exception as e:
@@ -832,14 +930,21 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
             return False
 
     def cleanup_sync(self):
-        """Sync wrapper for cleanup"""
+        """Sync wrapper for cleanup."""
         try:
             async_to_sync(self.cleanup())
         except Exception as e:
             print(f"Error during cleanup: {e}")
 
     def get_process_info_sync(self, process_id: str) -> dict[str, Any]:
-        """Sync wrapper for getting process info"""
+        """Sync wrapper for getting process info.
+
+        Args:
+            process_id: Process identifier.
+
+        Returns:
+            Dictionary with process information.
+        """
         try:
             return async_to_sync(self.get_process_info(process_id))
         except Exception as e:

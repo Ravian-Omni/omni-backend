@@ -75,14 +75,14 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         self._initialize_agent_tracking()
 
     def _initialize_agent_tracking(self):
-        """Initialize usage tracking for all agents"""
+        """Initialize usage tracking for all agents."""
         for agent in self.groupchat.agents:
             # Initialize with current usage if any
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
 
     def _get_agent_current_usage(self, agent) -> dict[str, Any]:
-        """Get current usage for a specific agent"""
+        """Get current usage for a specific agent."""
         default_usage = {
             "model": "unknown",
             "prompt_tokens": 0,
@@ -116,7 +116,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         }
 
     def _calculate_agent_usage_delta(self, agent, agent_name: str) -> dict[str, Any]:
-        """Calculate usage delta for a specific agent since last check"""
+        """Calculate usage delta for a specific agent since last check."""
         current_usage = self._get_agent_current_usage(agent)
         previous_usage = self._agent_previous_usage[agent_name]
 
@@ -142,7 +142,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         }
 
     def _get_sender_agent_usage(self, sender) -> dict[str, Any]:
-        """Get usage details for the sender agent when message is received"""
+        """Get usage details for the sender agent when message is received."""
         return self._calculate_agent_usage_delta(sender, sender.name)
 
     async def _send_websocket_message(self, message_data: dict) -> None:
@@ -225,14 +225,14 @@ class OmniGroupChatManager(autogen.GroupChatManager):
     # Additional utility methods for comprehensive usage tracking
 
     def get_all_agents_current_usage(self) -> dict[str, dict[str, Any]]:
-        """Get current usage for all agents in the group"""
+        """Get current usage for all agents in the group."""
         all_usage = {}
         for agent in self.groupchat.agents:
             all_usage[agent.name] = self._get_agent_current_usage(agent)
         return all_usage
 
     def get_group_usage_summary(self) -> dict[str, Any]:
-        """Get aggregated usage summary for the entire group"""
+        """Get aggregated usage summary for the entire group."""
         all_usage = self.get_all_agents_current_usage()
 
         total_summary = {
@@ -257,22 +257,25 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         return total_summary
 
     def reset_usage_tracking(self):
-        """Reset usage tracking (useful for starting fresh tracking mid-conversation)"""
+        """Reset usage tracking (useful for starting fresh tracking mid-conversation)."""
         for agent in self.groupchat.agents:
             current_usage = self._get_agent_current_usage(agent)
             self._agent_previous_usage[agent.name] = current_usage.copy()
 
 
 class CustomUserProxyAgent(UserProxyAgent):
+    """Custom user proxy agent with WebSocket input support."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def set_input_function(self, input_function):
+        """Set the custom input function for WebSocket communication."""
         self.input_function = input_function
         return self.input_function
 
     def get_human_input(self, prompt: str) -> str:
-        """Override the default input method to use websocket"""
+        """Override the default input method to use websocket."""
         print("🔄 Waiting for user input via websocket...")
 
         # Send input request to websocket client
@@ -282,6 +285,7 @@ class CustomUserProxyAgent(UserProxyAgent):
         return super().get_human_input(prompt)
 
     async def a_get_human_input(self, prompt: str) -> str:
+        """Asynchronously get human input via WebSocket."""
         print("🔁 Custom logic before input...")
 
         # Safely call super, assuming you have registered an async input
@@ -294,6 +298,8 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 
 class Omni:
+    """Main Omni orchestrator for multi-agent task execution and capability management."""
+
     def __init__(
         self,
         chat_id: str,
@@ -327,6 +333,7 @@ class Omni:
         self.get_chat_manager()
 
     def set_input_function(self, input_function):
+        """Set the custom input function for user interactions."""
         self.input_function = input_function
         return self.input_function
 
@@ -334,17 +341,19 @@ class Omni:
         self.cancellation_token = cancellation_token
 
     def set_task_id(self, task_id):
+        """Set the current task ID for tracking."""
         self.task_id = task_id
         self.manager.task_id = task_id
 
     def _check_cancellation(self):
-        """Check if operations should be cancelled"""
+        """Check if operations should be cancelled."""
         if self.cancellation_token and self.cancellation_token.is_cancelled():
             raise asyncio.CancelledError(
                 f"OMNI operation cancelled for session {self.chat_id}"
             )
 
     def get_last_call_id(self):
+        """Get the last tool call IDs from the agent caller."""
         last_speaker = self.groupchat.messages[-1]
         if last_speaker.get("name") == "agent_caller":
             tool_calls = last_speaker.get("tool_calls")
@@ -367,8 +376,7 @@ class Omni:
         return None
 
     def find_call_id(self, capability_name: str, query: str) -> str | None:
-        """
-        Find matching call ID for any capability
+        """Find matching call ID for any capability.
 
         Args:
             capability_name: Name of the capability (e.g., "email_sender", "file_finder")
@@ -407,6 +415,7 @@ class Omni:
     async def get_image_generator(
         self, query: Annotated[str, "The detailed image generation prompt"]
     ):
+        """Execute the image generator capability."""
         call_id = self.find_call_id("image_generator", query)
         self.image_gen_config = CapabilityConfig(
             name=CapabilityType.IMAGE_GENERATOR.value,
@@ -430,6 +439,7 @@ class Omni:
         str,
         "The complete search query with all the details like subject relationship with the message",
     ]:
+        """Execute the web browser capability."""
         call_id = self.find_call_id("web_browser", query)
         self.web_browser_config = CapabilityConfig(
             name=CapabilityType.BROWSER_MANAGER.value,
@@ -452,6 +462,7 @@ class Omni:
             "The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",
         ],
     ) -> Annotated[str, "The results"]:
+        """Execute the Python coder capability."""
         call_id = self.find_call_id("python_coder", query)
         websocket_manager = await get_websocket_manager()
         self.python_coder_config = CapabilityConfig(
@@ -470,6 +481,7 @@ class Omni:
     async def get_email_sender(
         self, query: Annotated[str, "The complete user query"]
     ) -> dict:
+        """Execute the email sender capability."""
         call_id = self.find_call_id("email_sender", query)
         self.email_sender_config = CapabilityConfig(
             name=CapabilityType.EMAIL_MANAGER.value,
@@ -485,6 +497,7 @@ class Omni:
         )
 
     async def get_file_finder(self, query: Annotated[str, "The search query"]):
+        """Execute the file finder capability."""
         call_id = self.find_call_id("file_finder", query)
         self.file_finder_config = CapabilityConfig(
             name=CapabilityType.FILE_FINDER.value,
@@ -581,6 +594,7 @@ class Omni:
         )
 
     def get_judge_question(self):
+        """Create and configure the question judge agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("judge_question").llm_config
             or "default"
@@ -594,6 +608,7 @@ class Omni:
         )
 
     def get_conversation_agent(self):
+        """Create and configure the conversation agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("conversation_agent").llm_config
             or "default"
@@ -606,6 +621,7 @@ class Omni:
         )
 
     def get_planner(self):
+        """Create and configure the planner agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("conversation_agent").llm_config
             or "default"
@@ -619,6 +635,7 @@ class Omni:
         )
 
     def get_user_acceptance(self):
+        """Create and configure the user acceptance agent."""
         return CustomUserProxyAgent(
             name="get_user_acceptance",
             # default_auto_reply="Awaiting for manual verification",
@@ -628,6 +645,7 @@ class Omni:
         )
 
     def get_agent_aligner(self):
+        """Create and configure the agent aligner."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("agent_aligner").llm_config
             or "default"
@@ -642,6 +660,7 @@ class Omni:
         )
 
     def get_agent_router(self):
+        """Create and configure the agent router."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("agent_router").llm_config
             or "default"
@@ -656,6 +675,7 @@ class Omni:
         )
 
     def get_agent_caller(self):
+        """Create and configure the agent caller."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("agent_caller").llm_config
             or "default"
@@ -669,6 +689,7 @@ class Omni:
         )
 
     def get_agent_executor(self):
+        """Create and configure the agent executor."""
         return UserProxyAgent(
             "agent_executor",
             human_input_mode="NEVER",
@@ -679,6 +700,7 @@ class Omni:
         )
 
     def get_problem_status_checker(self):
+        """Create and configure the problem status checker agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("problem_status_checker").llm_config
             or "default"
@@ -692,6 +714,7 @@ class Omni:
         )
 
     def get_manual_verification(self):
+        """Create and configure the manual verification agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("manual_verification").llm_config
             or "default"
@@ -704,6 +727,7 @@ class Omni:
         )
 
     def get_user_input(self):
+        """Create and configure the user input agent."""
         return CustomUserProxyAgent(
             name="user_input",
             default_auto_reply="Awaiting for manual verification",
@@ -713,6 +737,7 @@ class Omni:
         )
 
     def get_process_completion(self):
+        """Create and configure the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config(
                 "process_completion_agent"
@@ -728,6 +753,7 @@ class Omni:
 
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
+        """Select the next speaker based on conversation state and agent responses."""
         try:
             self._check_cancellation()
 
@@ -803,6 +829,7 @@ class Omni:
             raise
 
     def get_agents(self):
+        """Initialize and return all agents for the Omni workflow."""
         self.judge_question = self.get_judge_question()
         self.conversation_agent = self.get_conversation_agent()
         self.planner = self.get_planner()
@@ -829,6 +856,7 @@ class Omni:
         ]
 
     def get_chat_manager(self):
+        """Create and configure the group chat manager."""
         self.groupchat = autogen.GroupChat(
             agents=self.agents,
             messages=[],

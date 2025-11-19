@@ -10,7 +10,7 @@ from src.utilities.custom_manager import ChatContext, create_capability_chat
 
 @dataclass
 class CapabilityConfig:
-    """Configuration for a capability"""
+    """Configuration for a capability."""
 
     name: str
     collection: str
@@ -24,14 +24,23 @@ class CapabilityConfig:
     )
 
     def __post_init__(self):
+        """Initialize manager_kwargs if not provided."""
         if self.manager_kwargs is None:
             self.manager_kwargs = {}
 
 
 class CapabilityManager:
-    """Generic manager for handling capability operations"""
+    """Generic manager for handling capability operations."""
 
     def __init__(self, user_id: str, chat_id: str, chat_dir: str, memory):
+        """Initialize CapabilityManager.
+
+        Args:
+            user_id: User identifier.
+            chat_id: Chat identifier.
+            chat_dir: Chat directory path.
+            memory: Memory instance.
+        """
         self.user_id = user_id
         self.chat_id = chat_id
         self.chat_dir = chat_dir
@@ -40,16 +49,15 @@ class CapabilityManager:
     async def execute_capability(
         self, query: str, config: CapabilityConfig, call_id: str
     ) -> dict[str, Any]:
-        """
-        Execute a capability with the given configuration
+        """Execute a capability with the given configuration.
 
         Args:
-            query: The complete user query
-            config: Configuration for the capability
-            call_id: The call ID to use for this capability
+            query: The complete user query.
+            config: Configuration for the capability.
+            call_id: The call ID to use for this capability.
 
         Returns:
-            Dict containing the result or error message
+            Dict containing the result or error message.
         """
         try:
             # Validate call_id
@@ -109,7 +117,11 @@ class CapabilityManager:
             return {"error": f"{config.name} process failed: {str(e)}", "query": query}
 
     def _prepare_chat_messages(self) -> list[dict[str, Any]]:
-        """Prepare messages for capability manager chat"""
+        """Prepare messages for capability manager chat.
+
+        Returns:
+            List of prepared messages.
+        """
         # messages = self.memory.pull_recent_from_chat_manager()
         messages = []
         omni_executor = self.memory.pull_recent_from_executor()
@@ -139,7 +151,11 @@ class CapabilityManager:
         return messages
 
     def _get_last_completion_content(self) -> list | None:
-        """Get last completion content from capability messages for all specified agents"""
+        """Get last completion content from capability messages for all specified agents.
+
+        Returns:
+            List of agent messages or None.
+        """
         try:
             capability_messages = self.memory.pull_last_capability_messages()
             agent_messages = []
@@ -163,7 +179,15 @@ class CapabilityManager:
     def _extract_completion_result(
         self, messages: list[dict[str, Any]], completion_agent_name: str
     ) -> str | None:
-        """Extract completion result from chat messages"""
+        """Extract completion result from chat messages.
+
+        Args:
+            messages: List of chat messages.
+            completion_agent_name: Name of completion agent.
+
+        Returns:
+            Completion result string or None.
+        """
         try:
             # Search from most recent messages
             for msg in reversed(messages):

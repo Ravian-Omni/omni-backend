@@ -22,11 +22,14 @@ from src.utilities.venv_config import AG2AIVirtualEnvContext
 
 
 class LoopDetector:
+    """Detects repetitive patterns in conversation messages."""
+
     def __init__(self, window_size=3):
         self.recent_messages = []
         self.window_size = window_size
 
     def update(self, message: str) -> bool:
+        """Update the detector with a new message and check for loops."""
         if message in self.recent_messages:
             return True
         self.recent_messages.append(message)
@@ -39,6 +42,8 @@ loop_detector = LoopDetector()
 
 
 class PythonDeveloper:
+    """Manager for Python code development and execution capabilities."""
+
     def __init__(self, context: ChatContext):
         self.context = context
         self.groupchat_config = (
@@ -63,7 +68,7 @@ class PythonDeveloper:
         self.get_chat_manager()
 
     def _check_cancellation(self):
-        """Check if the chat should be cancelled"""
+        """Check if the chat should be cancelled."""
         if (
             self.context.cancellation_token
             and self.context.cancellation_token.is_cancelled()
@@ -73,6 +78,7 @@ class PythonDeveloper:
             )
 
     def get_planner(self):
+        """Get the planner agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("planner_agent").llm_config
             or "default"
@@ -88,9 +94,11 @@ class PythonDeveloper:
         )
 
     def get_context_keeper(self):
+        """Get the context keeper agent."""
         return autogen.AssistantAgent(name="context_keeper", llm_config=self.llm_config)
 
     def get_code_writer(self):
+        """Get the code writer agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("code_writer_agent").llm_config
             or "default"
@@ -104,6 +112,7 @@ class PythonDeveloper:
         )
 
     def get_code_executor(self):
+        """Get the code executor agent."""
         return UserProxyAgent(
             name="code_executor_agent",
             human_input_mode="NEVER",
@@ -112,6 +121,7 @@ class PythonDeveloper:
         )
 
     def get_code_debugger(self):
+        """Get the code debugger agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config("code_debugger_agent").llm_config
             or "default"
@@ -127,6 +137,7 @@ class PythonDeveloper:
         )
 
     def problem_status_checker(self):
+        """Get the problem status checker agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config(
                 "problem_status_checker_agent"
@@ -142,6 +153,7 @@ class PythonDeveloper:
         )
 
     def get_process_completion(self):
+        """Get the process completion agent."""
         llm_config_name = (
             self.groupchat_config.get_agent_config(
                 "process_completion_agent"
@@ -156,6 +168,7 @@ class PythonDeveloper:
         )
 
     def get_stop_agent(self):
+        """Get the stop agent for terminating conversations."""
         return autogen.ConversableAgent(
             name="stop_agent",
             llm_config=self.llm_config,
@@ -163,10 +176,11 @@ class PythonDeveloper:
         )
 
     def is_termination_msg(msg: str) -> bool:
+        """Check if the message indicates termination."""
         return "terminate" in msg.lower() or "exit" in msg.lower()
 
-    # static custom speaker selection, no dynamic agent selection or conditional chat routing
     def custom_speaker_selection_func(self, last_speaker: Agent, groupchat: GroupChat):
+        """Select the next speaker based on conversation state and last speaker."""
         try:
             self._check_cancellation()
 
@@ -206,6 +220,7 @@ class PythonDeveloper:
         # return groupchat.agent_by_name("stop_agent")
 
     def get_agents(self) -> list[Agent]:
+        """Initialize and return all agents for the Python development workflow."""
         self.planner = self.get_planner()
         self.context_keeper = self.get_context_keeper()
         self.code_writer = self.get_code_writer()
@@ -227,6 +242,7 @@ class PythonDeveloper:
         ]
 
     def get_chat_manager(self):
+        """Initialize and return the group chat manager."""
         self.groupchat = autogen.GroupChat(
             agents=self.agents,
             messages=[],

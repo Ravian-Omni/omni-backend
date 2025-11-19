@@ -4,7 +4,14 @@ from .country_data import country_codes
 
 
 def _get_user_country(country_codes: list[dict[str, str]]) -> dict[str, str]:
-    """Get user's country from IP address."""
+    """Get user's country from IP address.
+
+    Args:
+        country_codes: List of country code dictionaries.
+
+    Returns:
+        Dictionary with country code and name.
+    """
     try:
         response = requests.get("https://ipinfo.io/json", timeout=5)
         response.raise_for_status()
@@ -40,6 +47,7 @@ def _get_user_country(country_codes: list[dict[str, str]]) -> dict[str, str]:
 
 
 def main():
+    """Main entry point for country detection demonstration."""
     country = _get_user_country(country_codes)
     print(f"Your country is: {country}")
 
