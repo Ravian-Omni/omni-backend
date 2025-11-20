@@ -9,12 +9,14 @@ This module provides endpoints for:
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel
 
+from src.configs.datetime_utils import dt
+from src.configs.routes import RoutesConfig
 from src.configs.settings import CapabilityType, settings
 from src.utilities.api_client import api_client
 from src.utilities.storage import ensure_path
@@ -91,13 +93,15 @@ async def create_new_chat(
             "chat_dir": chat_dir,
             "messages": [],
             "raw_messages": [],
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
+            "created_at": dt.now(),
+            "updated_at": dt.now(),
         }
 
         # Create database record
         create_chat = await api_client.post(
-            "/chats/new", params={"capability": "omni"}, data=chat_document
+            RoutesConfig.API_CREATE_OMNI_CHAT,
+            params={"capability": "omni"},
+            data=chat_document,
         )
         create_chat = create_chat.standard_response()
         if not create_chat.get("success"):
@@ -170,14 +174,16 @@ async def create_new_capability_chat(
             "capability_id": chat_id,
             "messages": [],
             "raw_messages": [],
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
+            "created_at": dt.now(),
+            "updated_at": dt.now(),
         }
 
         # Create database record
         # await mongodb.insert_one(collection_name, chat_document)
         create_chat = await api_client.post(
-            "/chats/new", params={"capability": collection_name}, data=chat_document
+            RoutesConfig.API_CREATE_OMNI_CHAT,
+            params={"capability": collection_name},
+            data=chat_document,
         )
         create_chat = create_chat.standard_response()
         if not create_chat.get("success"):
@@ -287,7 +293,9 @@ async def get_specific_chat(
         query = {"user_id": user_id, "chat_id": chat_id}
         # document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
         chat_history = await api_client.post(
-            "/chats/history", params={"capability": "omni"}, data=query
+            RoutesConfig.API_OMNI_CHAT_HISTORY,
+            params={"capability": "omni"},
+            data=query,
         )
         chat_history = chat_history.standard_response()
         if not chat_history.get("success"):
@@ -365,7 +373,7 @@ async def get_task_specific_chat(filter_criteria: ChatHistoryByTaskId):
     """
     try:
         chat_history = await api_client.post(
-            "/chats/history/task_id", data=filter_criteria.model_dump()
+            RoutesConfig.API_OMNI_TASK_HISTORY, data=filter_criteria.model_dump()
         )
         chat_history = chat_history.standard_response()
         if not chat_history.get("success"):
@@ -435,7 +443,9 @@ async def get_specific_capability_chat_messages(
         collection_name = capability.collection
         # document = await mongodb.find_one(collection_name, query)
         chat_history = await api_client.post(
-            "/chats/history", params={"capability": collection_name}, data=query
+            RoutesConfig.API_OMNI_CHAT_HISTORY,
+            params={"capability": collection_name},
+            data=query,
         )
         chat_history = chat_history.standard_response()
         if not chat_history.get("success"):

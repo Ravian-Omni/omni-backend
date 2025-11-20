@@ -3,6 +3,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from src.configs.datetime_utils import dt
+
 
 class ChatType(Enum):
     """Enum for chat types in the memory system."""
@@ -39,7 +41,7 @@ class MessageEntry:
         self.chat_id = chat_id
         self.chat_type = chat_type
         self.capability_name = capability_name
-        self.timestamp = timestamp or datetime.now()
+        self.timestamp = timestamp or dt.now()
         self.sequence_id = sequence_id
         self.feedback = feedback or {}
 
@@ -367,7 +369,7 @@ class OmniMemory:
                 entry.feedback[feedback_type] = {
                     "value": feedback_value,
                     "notes": feedback_notes,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": dt.now_iso(),
                 }
                 return True
         return False
@@ -501,7 +503,7 @@ class OmniMemory:
                 chat_id=msg_data["chat_id"],
                 chat_type=ChatType(msg_data["chat_type"]),
                 capability_name=msg_data["capability_name"],
-                timestamp=datetime.fromisoformat(msg_data["timestamp"]),
+                timestamp=dt.iso_to_datetime(msg_data["timestamp"]),
                 sequence_id=msg_data["sequence_id"],
                 feedback=msg_data.get("feedback", {}),
             )

@@ -10,18 +10,18 @@ This module initializes and configures the FastAPI application with:
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import nest_asyncio
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware import Middleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import RedirectResponse
 
+from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
 from src.dependencies import init_managers
 
@@ -32,10 +32,8 @@ from src.utilities.logging import cleanup_logging, setup_logging
 # Initialize application
 load_dotenv()
 
-base = "/autogen/"
-prefix = base + "api/v1"
-openapi_url = prefix + "/openapi.json"
-docs_url = prefix + "/docs"
+# Initialize Jinja2 templates
+templates = Jinja2Templates(directory="templates")
 
 middleware = [
     Middleware(
@@ -98,10 +96,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Autogen FastAPI Backend",
-    openapi_url=openapi_url,
-    # docs_url=docs_url,
-    redoc_url=None,
+    title="RAVIAN AI",
     lifespan=lifespan,
     middleware=middleware,
 )
@@ -129,16 +124,6 @@ app.include_router(
 #     Root endpoint
 #     """
 #     return {"message": f"Welcome to {settings.PROJECT_NAME}"}
-
-
-@app.get(path=base, include_in_schema=False)
-async def docs_redirect():
-    """Redirect base path to API documentation.
-
-    Returns:
-        RedirectResponse: Redirect to the Swagger docs URL.
-    """
-    return RedirectResponse(url=docs_url)
 
 
 def custom_openapi():
@@ -181,36 +166,51 @@ app.openapi = custom_openapi
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_html():
-    """Serve the main HTML page.
+async def serve_html(request: Request):
+    """Serve the main HTML page with backend URL.
+
+    Args:
+        request: FastAPI request object.
 
     Returns:
-        HTMLResponse: The main index.html page content.
+        HTMLResponse: The main index.html page content with template variables.
     """
-    html_content = Path("templates/index.html").read_text(encoding="utf-8")
-    return HTMLResponse(content=html_content)
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "backend_url": RoutesConfig.BACKEND_URL_FALLBACK},
+    )
 
 
 @app.get("/chatbot", response_class=HTMLResponse)
-async def serve_chat_html():
-    """Serve the main HTML page.
+async def serve_chat_html(request: Request):
+    """Serve the chat HTML page with backend URL.
+
+    Args:
+        request: FastAPI request object.
 
     Returns:
-        HTMLResponse: The main index.html page content.
+        HTMLResponse: The chat.html page content with template variables.
     """
-    html_content = Path("templates/chat.html").read_text(encoding="utf-8")
-    return HTMLResponse(content=html_content)
+    return templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "backend_url": RoutesConfig.BACKEND_URL_FALLBACK},
+    )
 
 
 @app.get("/capability", response_class=HTMLResponse)
-async def serve_capability_html():
-    """Serve the capability demonstration HTML page.
+async def serve_capability_html(request: Request):
+    """Serve the capability demonstration HTML page with backend URL.
+
+    Args:
+        request: FastAPI request object.
 
     Returns:
-        HTMLResponse: The capability.html page content.
+        HTMLResponse: The capability.html page content with template variables.
     """
-    html_content = Path("templates/capability.html").read_text(encoding="utf-8")
-    return HTMLResponse(content=html_content)
+    return templates.TemplateResponse(
+        "capability.html",
+        {"request": request, "backend_url": RoutesConfig.BACKEND_URL_FALLBACK},
+    )
 
 
 @app.get("/health")

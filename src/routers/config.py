@@ -11,10 +11,10 @@ import base64
 import json
 import re
 import time
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
+from src.configs.datetime_utils import dt
 from src.configs.settings import settings
 
 router = APIRouter()
@@ -115,7 +115,7 @@ async def update_user_token(token: str):
         # Optional: Check if token is expired
         if "exp" in payload:
             exp_timestamp = payload["exp"]
-            if datetime.utcnow().timestamp() > exp_timestamp:
+            if dt.now_timestamp() > exp_timestamp:
                 raise HTTPException(status_code=400, detail="JWT token is expired")
 
     except json.JSONDecodeError:
@@ -137,9 +137,7 @@ async def update_user_token(token: str):
         "message": "USER_TOKEN updated successfully",
         "token_preview": f"{token[:20]}...{token[-10:]}" if len(token) > 30 else "***",
         "expires_at": (
-            datetime.fromtimestamp(payload.get("exp")).isoformat()
-            if payload.get("exp")
-            else None
+            dt.timestamp_to_iso(payload.get("exp")) if payload.get("exp") else None
         ),
         "timestamp": time.time(),
     }

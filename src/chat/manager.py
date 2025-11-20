@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 from collections import defaultdict
-from datetime import datetime
 from typing import Annotated, Any
 
 import autogen
@@ -13,6 +12,7 @@ from src.chat import prompts
 from src.chat.tools.brave import BraveSearchClient, BraveSearchTool
 from src.chat.tools.composio import ComposioToolManager
 from src.chat.tools.together_image import FluxImageGenerator
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
@@ -22,7 +22,7 @@ from src.utilities.storage import a_speak, update_chat_history
 
 # Import tool registration functions
 
-today_date = datetime.now()
+today_date = dt.now()
 
 
 class GroupChatManager(autogen.GroupChatManager):

@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 from collections import defaultdict
-from datetime import datetime
 from string import Template
 from typing import Annotated, Any
 
@@ -15,6 +14,7 @@ from src.capabilities.email_manager.manager import EmailManager
 from src.capabilities.file_finder.manager import FileFinder
 from src.capabilities.image_generator.manager import ImageGenerator
 from src.capabilities.python_developer.manager import PythonDeveloper
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
@@ -38,7 +38,7 @@ from src.omni.response_format import (
 from src.utilities.async_helpers import async_to_sync
 from src.utilities.storage import a_speak, update_chat_history
 
-today_date = datetime.now()
+today_date = dt.now()
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):

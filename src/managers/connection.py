@@ -13,11 +13,11 @@ import logging
 import traceback
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.managers.cancellation_token import CancellationToken
 
@@ -81,7 +81,7 @@ class WebSocketManager:
                 {
                     "type": "system",
                     "status": "connected",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": dt.now_iso(),
                 },
             )
 
@@ -131,7 +131,7 @@ class WebSocketManager:
                         "data": {
                             "source": "user",
                             "content": initial_message,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": dt.now_iso(),
                         },
                     },
                 )
@@ -160,7 +160,7 @@ class WebSocketManager:
                     {
                         "type": "completion",
                         "status": "complete",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": dt.now_iso(),
                     },
                 )
             else:
@@ -169,7 +169,7 @@ class WebSocketManager:
                     {
                         "type": "completion",
                         "status": "cancelled",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": dt.now_iso(),
                     },
                 )
 
@@ -222,7 +222,7 @@ class WebSocketManager:
                         "data": {
                             "source": "user",
                             "content": initial_message,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": dt.now_iso(),
                         },
                     },
                 )
@@ -252,7 +252,7 @@ class WebSocketManager:
                     {
                         "type": "completion",
                         "status": "complete",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": dt.now_iso(),
                     },
                 )
             else:
@@ -261,7 +261,7 @@ class WebSocketManager:
                     {
                         "type": "completion",
                         "status": "cancelled",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": dt.now_iso(),
                     },
                 )
 
@@ -318,7 +318,7 @@ class WebSocketManager:
                         "input_type": input_type,
                         "prompt": prompt,
                         "data": {"source": "system", "content": prompt},
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": dt.now_iso(),
                     },
                 )
 
@@ -393,7 +393,7 @@ class WebSocketManager:
                 "data": {
                     "source": source,
                     "content": content,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": dt.now_iso(),
                 },
             },
         )
@@ -487,7 +487,7 @@ class WebSocketManager:
                             "type": "completion",
                             "status": "stopped",
                             "reason": reason,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": dt.now_iso(),
                         },
                     )
 
@@ -567,7 +567,7 @@ class WebSocketManager:
                     "type": "terminal_error",
                     "process_id": process_id,
                     "content": f"Session {session_id} is not active for terminal input",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": dt.now_iso(),
                 },
             )
         else:
@@ -594,7 +594,7 @@ class WebSocketManager:
                     "type": "terminal_error",
                     "process_id": process_id,
                     "content": f"Session {session_id} is not active for terminal kill",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": dt.now_iso(),
                 },
             )
         else:
@@ -665,7 +665,7 @@ class WebSocketManager:
                 {
                     "type": "error",
                     "message": str(error),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": dt.now_iso(),
                 },
             )
 

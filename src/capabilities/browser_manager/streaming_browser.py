@@ -15,6 +15,7 @@ from browser_use.utils import time_execution_async
 from langchain_core.messages import BaseMessage
 from pydantic import ValidationError
 
+from src.configs.routes import RoutesConfig
 from src.utilities.api_client import api_client
 
 
@@ -103,7 +104,7 @@ class StreamingAgent(Agent):
             #     provider=self.chat_model_library
             # )
             update_result = await api_client.post(
-                "/credits/deduct",
+                RoutesConfig.API_CREDIT_DEDUCT,
                 params={
                     "user_id": self.user_id,
                     "model": model,

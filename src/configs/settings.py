@@ -8,7 +8,7 @@ settings from environment variables and provides a global settings instance.
 # src/config/settings.py
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -83,13 +83,13 @@ class Settings:
             "IMAGE_GENERATOR_COLLECTION", "image_generator"
         )
 
-    def get_date_time_now(self) -> str:
-        """Get the current date and time in ISO 8601 format.
+    def get_date_time_now(self) -> datetime:
+        """Get the current date and time in UTC timezone.
 
         Returns:
-            Current date and time as an ISO 8601 formatted string.
+            Timezone-aware datetime object in UTC.
         """
-        return datetime.now()
+        return datetime.now(timezone.utc)
 
     def update_setting(self, key: str, value: Any) -> bool:
         """Update a single setting at runtime.

@@ -215,7 +215,7 @@ class GroupchatConfigurationManager:
             Dictionary containing all groupchat configurations.
         """
         # Replace this with your actual API call
-        # result = await api_client.get("/chats/configurations")
+        # result = await api_client.get(RoutesConfig.API_AGENT_CONFIGURATIONS)
         # result = result.standard_response()
         # if not result.get("success"):
         #     raise Exception(f"Failed: {result.get('message', 'Unknown error')}")

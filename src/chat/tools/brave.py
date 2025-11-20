@@ -5,6 +5,7 @@ from typing import Any
 import aiohttp
 
 from src.configs.llm_configs_manager import LLMConfigManager
+from src.configs.routes import RoutesConfig
 
 
 class BraveSearchClient:
@@ -32,7 +33,7 @@ class BraveSearchClient:
         # Initialize Tavily client
         self.api_key = brave_llm_config.get("config_list", [])[0].get("api_key")
 
-        self.base_url = "https://api.search.brave.com/res/v1"
+        self.base_url = RoutesConfig.BRAVE_SEARCH_BASE_URL
         self.headers = {
             "Accept": "application/json",
             "Accept-Encoding": "gzip",

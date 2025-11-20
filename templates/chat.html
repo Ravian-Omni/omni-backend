@@ -1711,7 +1711,7 @@
             newChatBtn.disabled = true;
 
             try {
-                const response = await fetch('http://localhost:8000/chats/new_chat', {
+                const response = await fetch('{{ backend_url }}/chats/new_chat', {
                     method: 'POST',
                     headers: {
                         'accept': 'application/json',

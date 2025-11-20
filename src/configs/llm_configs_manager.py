@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from src.configs.routes import RoutesConfig
 from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
 
@@ -244,7 +245,7 @@ class LLMConfigManager:
         try:
             print(f"🔄 Fetching fresh configs for date: {current_date}")
 
-            response = async_to_sync(api_client.get("/chats/api_keys"))
+            response = async_to_sync(api_client.get(RoutesConfig.API_LLM_KEYS))
             response = response.standard_response()
 
             if response["success"]:
@@ -309,7 +310,7 @@ class LLMConfigManager:
 
             cls.clear_cache()
 
-            response = async_to_sync(api_client.get("/chats/api_keys"))
+            response = async_to_sync(api_client.get(RoutesConfig.API_LLM_KEYS))
             response = response.standard_response()
 
             if response["success"]:
@@ -343,7 +344,7 @@ class LLMConfigManager:
             True if server is reachable and responding, False otherwise.
         """
         try:
-            response = async_to_sync(api_client.get("/"))
+            response = async_to_sync(api_client.get(RoutesConfig.API_SERVER_CHECK))
             return response["success"]
         except Exception:
             return False

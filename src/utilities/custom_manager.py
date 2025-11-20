@@ -8,12 +8,13 @@ and real-time WebSocket communication capabilities.
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 import autogen
 from loguru import logger
 
+from src.configs.datetime_utils import dt
+from src.configs.routes import RoutesConfig
 from src.dependencies import get_websocket_manager
 from src.managers.cancellation_token import CancellationToken
 from src.omni.memory import OmniMemory
@@ -93,13 +94,15 @@ async def create_capability_chat(context: ChatContext) -> dict[str, str]:
         "capability_id": context.capability_id,
         "messages": [],
         "raw_messages": [],
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "created_at": dt.now(),
+        "updated_at": dt.now(),
     }
 
     # Create database record
     create_chat = await api_client.post(
-        "/chats/new", params={"capability": context.collection_name}, data=chat_document
+        RoutesConfig.API_CREATE_OMNI_CHAT,
+        params={"capability": context.collection_name},
+        data=chat_document,
     )
     create_chat = create_chat.standard_response()
     if not create_chat.get("success"):
@@ -135,9 +138,7 @@ async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> 
             k: message.get(k) for k in ["role", "name", "content"] if k in message
         }
 
-        raw_message["timestamp"] = datetime.now(
-            timezone.utc
-        ).isoformat()  # Add timestamp to raw message
+        raw_message["timestamp"] = dt.now_iso()  # Add timestamp to raw message
 
         # Build push operations
         push_operations = {"raw_messages": raw_message}
@@ -147,7 +148,7 @@ async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> 
         # Prepare update document
         update_document = {
             "$push": push_operations,
-            "$set": {"updated_at": datetime.now()},
+            "$set": {"updated_at": dt.now()},
         }
 
         # Execute update
@@ -159,7 +160,7 @@ async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> 
         }
 
         update_result = await api_client.post(
-            "/chats/chat_update",
+            RoutesConfig.API_UPDATE_OMNI_CHAT,
             params={"capability": context.collection_name},
             data={"filter_criteria": filter_criteria, "document": update_document},
         )

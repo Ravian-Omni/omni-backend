@@ -1,5 +1,7 @@
 import requests
 
+from src.configs.routes import RoutesConfig
+
 from .country_data import country_codes
 
 
@@ -13,7 +15,7 @@ def _get_user_country(country_codes: list[dict[str, str]]) -> dict[str, str]:
         Dictionary with country code and name.
     """
     try:
-        response = requests.get("https://ipinfo.io/json", timeout=5)
+        response = requests.get(RoutesConfig.IPINFO_URL, timeout=5)
         response.raise_for_status()
 
         data = response.json()

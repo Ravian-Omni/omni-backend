@@ -8,11 +8,12 @@ import asyncio
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
+from src.configs.datetime_utils import dt
+from src.configs.routes import RoutesConfig
 from src.utilities.api_client import api_client
 
 
@@ -45,9 +46,7 @@ async def update_chat_history(
             field: message[field] for field in content_fields if field in message
         }
 
-        raw_message_data["timestamp"] = datetime.now(
-            timezone.utc
-        ).isoformat()  # Add timestamp to raw message
+        raw_message_data["timestamp"] = dt.now_iso()  # Add timestamp to raw message
         # Build push operations
         push_operations = {"raw_messages": raw_message_data}
 
@@ -58,13 +57,13 @@ async def update_chat_history(
         # Prepare update document
         update_document = {
             "$push": push_operations,
-            "$set": {"updated_at": datetime.now()},
+            "$set": {"updated_at": dt.now()},
         }
 
         # Execute update operation
         filter_criteria = {"chat_id": chat_id}
         update_result = await api_client.post(
-            "/chats/chat_update",
+            RoutesConfig.API_UPDATE_OMNI_CHAT,
             params={"capability": collection_name},
             data={"filter_criteria": filter_criteria, "document": update_document},
         )

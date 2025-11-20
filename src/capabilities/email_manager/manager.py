@@ -6,7 +6,6 @@ import imaplib
 import json
 import os
 import smtplib
-from datetime import datetime
 from email import encoders
 from email.header import decode_header
 from email.message import EmailMessage
@@ -24,13 +23,14 @@ from src.capabilities.email_manager.response_format import (
     EmailProcessCompletion,
     IntentClassifier,
 )
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
 from src.utilities.storage import ensure_path
 
-today_date = datetime.now()
+today_date = dt.now()
 
 
 def validate_attachments(file_paths):
@@ -120,7 +120,7 @@ class EmailManager:
                 "modify": "Modify email before sending",
                 "cancel": "Cancel email sending",
             },
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": dt.now_iso(),
             "preview": {
                 "subject_preview": (
                     subject[:50] + "..." if len(subject) > 50 else subject
@@ -154,7 +154,7 @@ class EmailManager:
                 "status": "cancelled",
                 "message": "Email sending cancelled by user",
                 "action_taken": "cancel",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.now_iso(),
             }
 
         # Handle send as-is
@@ -375,7 +375,7 @@ class EmailManager:
                     },
                 },
                 "was_modified": was_modified,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.now_iso(),
                 "action_taken": "send",
             }
 
@@ -397,7 +397,7 @@ class EmailManager:
                 "status": "error",
                 "message": f"Error sending email: {str(e)}",
                 "error_type": "smtp_error",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.now_iso(),
             }
 
     async def read_latest_email_with_attachments(

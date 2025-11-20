@@ -10,7 +10,6 @@ This module provides WebSocket endpoints for:
 import asyncio
 import json
 import os
-from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
@@ -21,7 +20,9 @@ from src.capabilities.file_finder.manager import FileFinder
 from src.capabilities.image_generator.manager import ImageGenerator
 from src.capabilities.python_developer.manager import PythonDeveloper
 from src.chat.manager import Chat
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
+from src.configs.routes import RoutesConfig
 from src.configs.settings import CapabilityType, settings
 from src.dependencies import get_websocket_manager
 from src.managers.connection import WebSocketManager
@@ -51,7 +52,7 @@ def extract_user_summary(data: dict) -> dict:
         "dob": data.get("dob", ""),
         "gender": data.get("gender", ""),
         "country": data.get("country", ""),
-        "date": date.today().isoformat(),
+        "date": dt.today_date_iso(),
     }
 
 
@@ -81,7 +82,7 @@ async def run_websocket(
     """
     # Verify run exists and is in valid state
     chat_history = await api_client.post(
-        "/chats/history",
+        RoutesConfig.API_OMNI_CHAT_HISTORY,
         params={"capability": "omni"},
         data={"chat_id": chat_id, "user_id": user_id},
     )
@@ -104,7 +105,7 @@ async def run_websocket(
 
     omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
     messages = history.get("messages", [])
-    user_details = await api_client.get("/auth/user")
+    user_details = await api_client.get(RoutesConfig.API_USER_DETAILS)
     user_details = user_details.standard_response()
     if not user_details.get("success"):
         raise Exception(
@@ -167,7 +168,7 @@ async def run_websocket(
                             {
                                 "type": "error",
                                 "error": "Invalid start message format",
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": dt.now_iso(),
                             }
                         )
 
@@ -180,7 +181,7 @@ async def run_websocket(
 
                 elif message.get("type") == "ping":
                     await websocket.send_json(
-                        {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                        {"type": "pong", "timestamp": dt.now_iso()}
                     )
 
                 elif message.get("type") == "executor_input":
@@ -220,7 +221,7 @@ async def run_websocket(
                     {
                         "type": "error",
                         "error": "Invalid message format",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": dt.now_iso(),
                     }
                 )
 
@@ -258,7 +259,7 @@ async def run_chat_websocket(
     """
     # Verify run exists and is in valid state
     # chat_history = await api_client.post(
-    #     "/chats/history",
+    #     RoutesConfig.API_OMNI_CHAT_HISTORY,
     #     params={"capability": "omni"},
     #     data={"chat_id": chat_id, "user_id": user_id},
     # )
@@ -282,7 +283,7 @@ async def run_chat_websocket(
 
     omni = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
     # messages = history.get("messages", [])
-    # user_details = await api_client.get("/auth/user")
+    # user_details = await api_client.get(RoutesConfig.API_USER_DETAILS)
     # user_details = user_details.standard_response()
     # if not user_details.get("success"):
     #     raise Exception(
@@ -344,7 +345,7 @@ async def run_chat_websocket(
                             {
                                 "type": "error",
                                 "error": "Invalid start message format",
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": dt.now_iso(),
                             }
                         )
 
@@ -357,7 +358,7 @@ async def run_chat_websocket(
 
                 elif message.get("type") == "ping":
                     await websocket.send_json(
-                        {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                        {"type": "pong", "timestamp": dt.now_iso()}
                     )
 
                 elif message.get("type") == "executor_input":
@@ -397,7 +398,7 @@ async def run_chat_websocket(
                     {
                         "type": "error",
                         "error": "Invalid message format",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": dt.now_iso(),
                     }
                 )
 
@@ -462,7 +463,9 @@ async def run_capability_websocket(
 
     # Verify run exists and is in valid state
     chat_history = await api_client.post(
-        "/chats/history", params={"capability": collection_name}, data=query
+        RoutesConfig.API_OMNI_CHAT_HISTORY,
+        params={"capability": collection_name},
+        data=query,
     )
     chat_history = chat_history.standard_response()
     if not chat_history.get("success"):
@@ -535,7 +538,7 @@ async def run_capability_websocket(
                             {
                                 "type": "error",
                                 "error": "Invalid start message format",
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": dt.now_iso(),
                             }
                         )
 
@@ -547,7 +550,7 @@ async def run_capability_websocket(
 
                 elif message.get("type") == "ping":
                     await websocket.send_json(
-                        {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                        {"type": "pong", "timestamp": dt.now_iso()}
                     )
 
                 elif message.get("type") == "input_response":
@@ -572,7 +575,7 @@ async def run_capability_websocket(
                     {
                         "type": "error",
                         "error": "Invalid message format",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": dt.now_iso(),
                     }
                 )
 

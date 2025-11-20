@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
 
 
@@ -135,7 +136,7 @@ class APIResponse:
         error: APIError instance if an error occurred.
 
     Example:
-        >>> response = await api_client.get("/users/123")
+        >>> response = await api_client.get(RoutesConfig.API_USER_DETAILS)
         >>> if response.is_success:
         ...     data = response.json()
         ...     print(f"Request took {response.elapsed_time}s")
@@ -365,7 +366,9 @@ class ServerAPIClient:
     def __init__(self):
         """Initialize the API client with default configuration."""
         if not self._initialized:
-            self.base_url = getattr(settings, "BACKEND_URL", "http://localhost:8000")
+            self.base_url = getattr(
+                settings, "BACKEND_URL", RoutesConfig.BACKEND_URL_FALLBACK
+            )
             self.timeout = 300.0
             self.default_headers = {"Content-Type": "application/json"}
             self._initialized = True

@@ -3,7 +3,7 @@ import gc
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -30,9 +30,11 @@ from src.capabilities.browser_manager.function_description import (
 )
 from src.capabilities.browser_manager.response_format import WebProcessCompletion
 from src.capabilities.browser_manager.streaming_browser import StreamingAgent
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 
 # Your custom imports
+from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
@@ -47,7 +49,7 @@ class BraveSearchClient:
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://api.search.brave.com/res/v1"
+        self.base_url = RoutesConfig.BRAVE_SEARCH_BASE_URL
         self.headers = {
             "Accept": "application/json",
             "Accept-Encoding": "gzip",
@@ -227,7 +229,7 @@ class BrowserManager:
     def _get_user_country(self) -> str:
         """Get user's country from IP address."""
         try:
-            response = requests.get("https://ipinfo.io/json", timeout=5)
+            response = requests.get(RoutesConfig.IPINFO_URL, timeout=5)
             data = response.json()
             country_code = data.get("country")
 
@@ -909,7 +911,7 @@ class BrowserManager:
         if not self.save_results:
             return
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = dt.format_datetime(format_str="%Y%m%d_%H%M%S")
         filename = os.path.join(
             self.results_dir, f"search_result_{self.context.chat_id}_{timestamp}.json"
         )
