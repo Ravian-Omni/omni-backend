@@ -403,7 +403,7 @@ class GroupchatConfigurationManager:
             "chat": {
                 "groupchat_settings": {"max_round": 500},
                 "agents": {
-                    "chat_agent": {"llm_config": "claude-sonnet-4-20250514"},
+                    "chat_agent": {"llm_config": "gpt_4_1_mini"},
                     "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
                 },
             },

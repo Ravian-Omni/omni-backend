@@ -3,28 +3,22 @@ import json
 import os
 from collections import defaultdict
 from datetime import datetime
-from string import Template
-from typing import Any
+from typing import Annotated, Any
+
 import autogen
 from autogen import UserProxyAgent
 from loguru import logger
-from src.capabilities.browser_manager.manager import BrowserManager
-from src.capabilities.email_manager.manager import EmailManager
-from src.capabilities.file_finder.manager import FileFinder
-from src.capabilities.image_generator.manager import ImageGenerator
-from src.capabilities.python_developer.manager import PythonDeveloper
+
+from src.chat import prompts
+from src.chat.tools.brave import BraveSearchClient, BraveSearchTool
+from src.chat.tools.composio import ComposioToolManager
+from src.chat.tools.together_image import FluxImageGenerator
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
-from src.chat import prompts
-from src.omni.capability_manager import CapabilityConfig, CapabilityManager
 from src.utilities.async_helpers import async_to_sync
 from src.utilities.storage import a_speak, update_chat_history
-from src.chat.tools.composio import ComposioToolManager
-from src.chat.tools.together_image import FluxImageGenerator 
-from src.chat.tools.brave import BraveSearchClient, BraveSearchTool 
-from typing import Annotated, Any
 
 # Import tool registration functions
 
@@ -172,18 +166,18 @@ class GroupChatManager(autogen.GroupChatManager):
         content = (
             message.get("content", "") if isinstance(message, dict) else str(message)
         )
-        message_data = {
-            "role": "user",
-            "name": sender.name,
-            "content": content,
-            "raw_message": message,
-            "usage": sender_usage
-        }
+        # message_data = {
+        #     "role": "user",
+        #     "name": sender.name,
+        #     "content": content,
+        #     "raw_message": message,
+        #     "usage": sender_usage,
+        # }
         websocket_message = {
             "role": "user",
             "name": sender.name,
             "content": content,
-            "raw_message": message
+            "raw_message": message,
         }
         # Log the usage information for debugging
         logger.info(
@@ -193,7 +187,6 @@ class GroupChatManager(autogen.GroupChatManager):
             f"Total: {sender_usage['current_total']['total_tokens']} tokens, "
             f"${sender_usage['current_total']['cost']:.4f}"
         )
-
 
         # Process async operations
         # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
@@ -317,21 +310,37 @@ class Chat:
             )
 
     def get_chat_agent(self):
+        """Create and configure the main chat agent.
+
+        Initializes an Autogen AssistantAgent with appropriate LLM configuration,
+        termination conditions, and system prompts for conversational interactions.
+
+        Returns:
+            autogen.AssistantAgent: Configured chat agent for handling user conversations.
+        """
         llm_config_name = (
-            self.groupchat_config.get_agent_config("chat_agent").llm_config
-            or "default"
+            self.groupchat_config.get_agent_config("chat_agent").llm_config or "default"
         )
         llm_chat_agent = LLMConfigManager.get_config(llm_config_name)
         return autogen.AssistantAgent(
             name="chat_agent",
             llm_config=llm_chat_agent,
-            is_termination_msg=lambda msg: msg.get(
-                "content", "").strip().upper() == "TERMINATE",
+            is_termination_msg=lambda msg: msg.get("content", "").strip().upper()
+            == "TERMINATE",
             system_message=prompts.chat_agent.format(
-                today=today_date.strftime("%Y-%m-%d"))
+                today=today_date.strftime("%Y-%m-%d")
+            ),
         )
 
     def get_agent_executor(self):
+        """Create and configure the agent executor.
+
+        Initializes a CustomUserProxyAgent that serves as the execution agent
+        for running registered tools and functions without human intervention.
+
+        Returns:
+            CustomUserProxyAgent: Configured executor agent for tool execution.
+        """
         return CustomUserProxyAgent(
             "agent_executor",
             human_input_mode="NEVER",
@@ -340,20 +349,23 @@ class Chat:
             # is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
         )
 
-
     def _register_functions(self):
         """Register all tools for the chat manager."""
-        composio_tool_manager = ComposioToolManager(user_id=self.user_id, chat_agent=self.chat_agent, agent_executor=self.agent_executor)
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.chat_agent,
+            agent_executor=self.agent_executor,
+        )
         composio_tool_manager.register_all_tools()
-        
-        #Image generation
+
+        # Image generation
         def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
         ):
             generator = FluxImageGenerator(output_dir=self.chat_dir)
             return generator.generate_image(query, filename)
-        
+
         async def search_tool_wrapper(
             query: Annotated[
                 str,
@@ -376,13 +388,10 @@ class Chat:
             """
             client = BraveSearchClient()
             search_tool = BraveSearchTool(client)
-            
+
             # Perform search
-            return await search_tool.search(
-                query=query,
-                search_type=search_type
-            )
-            
+            return await search_tool.search(query=query, search_type=search_type)
+
         autogen.agentchat.register_function(
             flux_image_generator_wrapper,
             caller=self.chat_agent,
@@ -390,7 +399,7 @@ class Chat:
             name="image_generator",
             description="This tool will be used to generate images based on the information.",
         )
-        
+
         autogen.register_function(
             search_tool_wrapper,
             caller=self.chat_agent,
@@ -407,6 +416,21 @@ class Chat:
         )
 
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
+        """Determine the next speaker in the group chat conversation flow.
+
+        Implements custom logic for speaker selection based on conversation state,
+        enabling smooth transitions between chat agent and executor agent.
+
+        Args:
+            last_speaker: The agent that spoke last in the conversation.
+            groupchat: The group chat instance containing all agents and messages.
+
+        Returns:
+            The next agent to speak, or None if no valid transition exists.
+
+        Raises:
+            asyncio.CancelledError: If the operation is cancelled via cancellation token.
+        """
         try:
             self._check_cancellation()
 
@@ -414,7 +438,10 @@ class Chat:
 
             if len(messages) == 1 or last_speaker.name == "chat_manager":
                 return groupchat.agent_by_name("chat_agent")
-            if last_speaker.name == "chat_agent" and len(messages[-1].get('tool_calls', []))>0:
+            if (
+                last_speaker.name == "chat_agent"
+                and len(messages[-1].get("tool_calls", [])) > 0
+            ):
                 return groupchat.agent_by_name("agent_executor")
             if last_speaker.name == "agent_executor":
                 return groupchat.agent_by_name("chat_agent")
@@ -423,6 +450,14 @@ class Chat:
             raise
 
     def get_agents(self):
+        """Initialize and return all agents for the chat system.
+
+        Creates both the chat agent and executor agent, storing them as
+        instance attributes and returning them as a list for group chat setup.
+
+        Returns:
+            list: List containing the chat agent and executor agent instances.
+        """
         self.chat_agent = self.get_chat_agent()
         self.agent_executor = self.get_agent_executor()
         return [

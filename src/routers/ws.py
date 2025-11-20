@@ -20,6 +20,7 @@ from src.capabilities.email_manager.manager import EmailManager
 from src.capabilities.file_finder.manager import FileFinder
 from src.capabilities.image_generator.manager import ImageGenerator
 from src.capabilities.python_developer.manager import PythonDeveloper
+from src.chat.manager import Chat
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.dependencies import get_websocket_manager
@@ -28,7 +29,7 @@ from src.omni.manager import Omni
 from src.omni.memory import OmniMemory
 from src.utilities.api_client import api_client
 from src.utilities.custom_manager import ChatContext
-from src.chat.manager import Chat
+
 
 def extract_user_summary(data: dict) -> dict:
     """Extract and format user information summary.
@@ -235,7 +236,7 @@ async def run_websocket(
 
 
 @router.websocket("/chat/{chat_id}")
-async def run_websocket(
+async def run_chat_websocket(
     websocket: WebSocket,
     chat_id: str,
     user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",

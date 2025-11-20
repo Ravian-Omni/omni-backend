@@ -90,7 +90,7 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Connection error for session {session_id}: {e}")
             return False
-        
+
     async def chat_mode_initiate(
         self,
         session_id: str,

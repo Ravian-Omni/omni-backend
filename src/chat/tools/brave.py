@@ -1,44 +1,44 @@
 import logging
-import aiohttp
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from typing import Any
+
+import aiohttp
+
 from src.configs.llm_configs_manager import LLMConfigManager
 
 
 class BraveSearchClient:
-    """
-    Client for interacting with Brave Search API.
-    
+    """Client for interacting with Brave Search API.
+
     Handles low-level HTTP communication with Brave Search API,
     including authentication, parameter formatting, and error handling.
-    
+
     Attributes:
         api_key (str): Brave Search API subscription token
         base_url (str): Base URL for Brave Search API
         headers (Dict[str, str]): HTTP headers for API requests
     """
-    
+
     def __init__(self):
-        """
-        Initialize Brave Search API client.
-        
+        """Initialize Brave Search API client.
+
         Args:
             api_key: Brave Search API subscription token
-            
+
         Raises:
             ValueError: If api_key is not provided
         """
         brave_llm_config = LLMConfigManager.get_config("brave_llm_config")
         # Initialize Tavily client
         self.api_key = brave_llm_config.get("config_list", [])[0].get("api_key")
-        
+
         self.base_url = "https://api.search.brave.com/res/v1"
         self.headers = {
             "Accept": "application/json",
             "Accept-Encoding": "gzip",
             "X-Subscription-Token": self.api_key,
         }
-    
+
     async def search(
         self,
         query: str,
@@ -48,17 +48,16 @@ class BraveSearchClient:
         count: int = 20,
         offset: int = 0,
         safesearch: str = "moderate",
-        freshness: Optional[str] = None,
+        freshness: str | None = None,
         text_decorations: bool = False,
         spellcheck: bool = True,
-        result_filter: Optional[str] = None,
-        goggles_id: Optional[str] = None,
+        result_filter: str | None = None,
+        goggles_id: str | None = None,
         units: str = "metric",
         extra_snippets: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Perform a web search using Brave Search API.
-        
+    ) -> dict[str, Any]:
+        """Perform a web search using Brave Search API.
+
         Args:
             query: Search query string
             country: Country code for search results (default: "US")
@@ -74,10 +73,10 @@ class BraveSearchClient:
             goggles_id: Goggles ID for custom ranking
             units: Unit system - "metric" or "imperial"
             extra_snippets: Include extra snippets in results
-            
+
         Returns:
             Dict containing raw API response
-            
+
         Raises:
             Exception: If API request fails
         """
@@ -93,7 +92,7 @@ class BraveSearchClient:
             "units": units,
             "extra_snippets": "true" if extra_snippets else "false",
         }
-        
+
         # Add optional parameters if provided
         if freshness:
             params["freshness"] = freshness
@@ -101,7 +100,7 @@ class BraveSearchClient:
             params["result_filter"] = result_filter
         if goggles_id:
             params["goggles_id"] = goggles_id
-        
+
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(
@@ -125,8 +124,9 @@ class BraveSearchClient:
 @dataclass
 class SearchQuery:
     """Search query metadata from Brave API."""
+
     original: str
-    altered: Optional[str] = None
+    altered: str | None = None
     show_strict_warning: bool = False
     is_navigational: bool = False
     is_news_breaking: bool = False
@@ -143,26 +143,26 @@ class SearchQuery:
 @dataclass
 class SearchResult:
     """Standardized search result format."""
+
     status: str
-    query: Dict[str, Any]
+    query: dict[str, Any]
     results_count: int
     answer: str
-    urls: List[str]
-    web: Dict[str, Any]
-    videos: Optional[Dict[str, Any]] = None
-    images: Optional[Dict[str, Any]] = None
-    news: Optional[Dict[str, Any]] = None
-    discussions: Optional[Dict[str, Any]] = None
-    locations: Optional[Dict[str, Any]] = None
-    faq: Optional[Dict[str, Any]] = None
-    infobox: Optional[Dict[str, Any]] = None
-    mixed: Dict[str, Any] = field(default_factory=dict)
+    urls: list[str]
+    web: dict[str, Any]
+    videos: dict[str, Any] | None = None
+    images: dict[str, Any] | None = None
+    news: dict[str, Any] | None = None
+    discussions: dict[str, Any] | None = None
+    locations: dict[str, Any] | None = None
+    faq: dict[str, Any] | None = None
+    infobox: dict[str, Any] | None = None
+    mixed: dict[str, Any] = field(default_factory=dict)
 
 
 class BraveSearchTool:
-    """
-    Production-ready Brave Search API tool for Autogen integration.
-    
+    """Production-ready Brave Search API tool for Autogen integration.
+
     Provides comprehensive search functionality with multiple result types:
     - Web results with metadata
     - Videos with thumbnails
@@ -172,19 +172,19 @@ class BraveSearchTool:
     - Local locations
     - FAQ results
     - Infobox information
-    
+
     Attributes:
         brave_client (BraveSearchClient): Brave Search API client
         logger: Logger instance for this class
     """
-    
+
     # Search type configurations
     SEARCH_TYPES = {
         "quick": {"max_count": 5, "freshness": None},
         "comprehensive": {"max_count": 20, "freshness": None},
         "recent": {"max_count": 10, "freshness": "pw"},  # Past week
     }
-    
+
     # Freshness filter options
     FRESHNESS_OPTIONS = {
         "pd": "Past day",
@@ -192,33 +192,31 @@ class BraveSearchTool:
         "pm": "Past month",
         "py": "Past year",
     }
-    
+
     def __init__(self, brave_client: BraveSearchClient):
-        """
-        Initialize the Brave Search Tool.
-        
+        """Initialize the Brave Search Tool.
+
         Args:
             brave_client: Initialized BraveSearchClient instance
         """
         self.brave_client = brave_client
         self.logger = logging.getLogger(__name__)
         self.logger.info("BraveSearchTool initialized")
-    
+
     async def search(
         self,
         query: str,
         search_type: str = "comprehensive",
         count: int = 5,
-        freshness: Optional[str] = None,
+        freshness: str | None = None,
         country: str = "US",
         safesearch: str = "moderate",
-    ) -> Dict[str, Any]:
-        """
-        Execute a search query using Brave Search API.
-        
+    ) -> dict[str, Any]:
+        """Execute a search query using Brave Search API.
+
         This is the main entry point for performing searches. It handles
         parameter validation, API calls, and result formatting.
-        
+
         Args:
             query: Search query string
             search_type: Type of search - "quick", "comprehensive", or "recent"
@@ -226,10 +224,10 @@ class BraveSearchTool:
             freshness: Time filter - "pd" (day), "pw" (week), "pm" (month), "py" (year)
             country: Country code for localized results (default: "US")
             safesearch: Safe search level - "off", "moderate", or "strict"
-            
+
         Returns:
             Dict containing formatted search results or error information
-            
+
         Example:
             >>> client = BraveSearchClient(api_key="your_key")
             >>> tool = BraveSearchTool(client)
@@ -241,7 +239,7 @@ class BraveSearchTool:
             search_params = self._prepare_search_parameters(
                 search_type, count, freshness
             )
-            
+
             # Execute search
             response = await self._execute_search(
                 query=query,
@@ -250,7 +248,7 @@ class BraveSearchTool:
                 country=country,
                 safesearch=safesearch,
             )
-            
+
             # Format and return results
             if response and "web" in response:
                 return self._format_search_results(response, query, country)
@@ -258,28 +256,26 @@ class BraveSearchTool:
                 return self._create_error_response(
                     query, "No web results found in response"
                 )
-                
+
         except Exception as e:
             self.logger.error(
-                f"Search failed for query '{query}': {str(e)}", 
-                exc_info=True
+                f"Search failed for query '{query}': {str(e)}", exc_info=True
             )
             return self._create_error_response(query, str(e), is_exception=True)
-    
+
     def _prepare_search_parameters(
         self,
         search_type: str,
         count: int,
-        freshness: Optional[str],
-    ) -> Dict[str, Any]:
-        """
-        Validate and prepare search parameters based on search type.
-        
+        freshness: str | None,
+    ) -> dict[str, Any]:
+        """Validate and prepare search parameters based on search type.
+
         Args:
             search_type: Type of search requested
             count: Requested number of results
             freshness: Requested freshness filter
-            
+
         Returns:
             Dict with validated 'count' and 'freshness' parameters
         """
@@ -288,46 +284,45 @@ class BraveSearchTool:
                 f"Invalid search_type '{search_type}', defaulting to 'comprehensive'"
             )
             search_type = "comprehensive"
-        
+
         config = self.SEARCH_TYPES[search_type]
-        
+
         # Apply search type defaults
         adjusted_count = min(count, config["max_count"])
         adjusted_freshness = freshness or config["freshness"]
-        
+
         self.logger.debug(
             f"Search params - type: {search_type}, count: {adjusted_count}, "
             f"freshness: {adjusted_freshness}"
         )
-        
+
         return {
             "count": adjusted_count,
             "freshness": adjusted_freshness,
         }
-    
+
     async def _execute_search(
         self,
         query: str,
         count: int,
-        freshness: Optional[str],
+        freshness: str | None,
         country: str,
         safesearch: str,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Execute the actual Brave Search API call.
-        
+    ) -> dict[str, Any] | None:
+        """Execute the actual Brave Search API call.
+
         Args:
             query: Search query
             count: Number of results
             freshness: Time filter
             country: Country code
             safesearch: Safe search level
-            
+
         Returns:
             Raw API response or None on failure
         """
         self.logger.info(f"Executing search: '{query}' (count={count})")
-        
+
         response = await self.brave_client.search(
             query=query,
             count=count,
@@ -337,35 +332,34 @@ class BraveSearchTool:
             extra_snippets=True,
             text_decorations=False,
         )
-        
+
         return response
-    
+
     def _format_search_results(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         query: str,
         country: str,
-    ) -> Dict[str, Any]:
-        """
-        Format raw Brave API response into standardized structure.
-        
+    ) -> dict[str, Any]:
+        """Format raw Brave API response into standardized structure.
+
         Orchestrates the formatting of all result types:
         - Query metadata
         - Web results
         - Multimedia (videos, images)
         - News and discussions
         - Special results (infobox, FAQ, locations)
-        
+
         Args:
             response: Raw API response
             query: Original search query
             country: Country code used
-            
+
         Returns:
             Formatted search results dictionary
         """
         web_results = response.get("web", {}).get("results", [])
-        
+
         formatted_result = {
             "status": "success",
             "query": self._format_query_metadata(response, query, country),
@@ -382,19 +376,19 @@ class BraveSearchTool:
             "infobox": self._format_infobox(response.get("infobox")),
             "mixed": self._format_mixed_layout(response.get("mixed", {})),
         }
-        
+
         self.logger.info(f"Formatted {len(web_results)} results for query: '{query}'")
         return formatted_result
-    
+
     def _format_query_metadata(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         query: str,
         country: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Extract and format query metadata from response."""
         query_data = response.get("query", {})
-        
+
         return {
             "original": query_data.get("original", query),
             "altered": query_data.get("altered"),
@@ -410,11 +404,11 @@ class BraveSearchTool:
             "city": query_data.get("city", ""),
             "state": query_data.get("state", ""),
         }
-    
-    def _format_web_results(self, web_data: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _format_web_results(self, web_data: dict[str, Any]) -> dict[str, Any]:
         """Format web search results with full metadata."""
         results = web_data.get("results", [])
-        
+
         return {
             "type": web_data.get("type", "search"),
             "family_friendly": web_data.get("family_friendly", True),
@@ -441,15 +435,14 @@ class BraveSearchTool:
                 for result in results
             ],
         }
-    
+
     def _format_videos(
-        self, 
-        videos_data: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+        self, videos_data: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         """Format video search results."""
         if not videos_data:
             return None
-        
+
         return {
             "type": videos_data.get("type", ""),
             "mutated_by_goggles": videos_data.get("mutated_by_goggles", False),
@@ -470,15 +463,14 @@ class BraveSearchTool:
                 for video in videos_data.get("results", [])
             ],
         }
-    
+
     def _format_images(
-        self, 
-        images_data: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+        self, images_data: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         """Format image search results."""
         if not images_data:
             return None
-        
+
         return {
             "type": images_data.get("type", ""),
             "mutated_by_goggles": images_data.get("mutated_by_goggles", False),
@@ -497,15 +489,12 @@ class BraveSearchTool:
                 for img in images_data.get("results", [])
             ],
         }
-    
-    def _format_news(
-        self, 
-        news_data: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+
+    def _format_news(self, news_data: dict[str, Any] | None) -> dict[str, Any] | None:
         """Format news search results."""
         if not news_data:
             return None
-        
+
         return {
             "type": news_data.get("type", ""),
             "mutated_by_goggles": news_data.get("mutated_by_goggles", False),
@@ -525,15 +514,15 @@ class BraveSearchTool:
                 for news in news_data.get("results", [])
             ],
         }
-    
+
     def _format_discussions(
         self,
-        discussions_data: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        discussions_data: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Format discussion/forum search results."""
         if not discussions_data:
             return None
-        
+
         return {
             "type": discussions_data.get("type", ""),
             "mutated_by_goggles": discussions_data.get("mutated_by_goggles", False),
@@ -553,15 +542,15 @@ class BraveSearchTool:
                 for disc in discussions_data.get("results", [])
             ],
         }
-    
+
     def _format_locations(
         self,
-        locations_data: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        locations_data: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Format local business/location search results."""
         if not locations_data:
             return None
-        
+
         return {
             "type": locations_data.get("type", ""),
             "results": [
@@ -582,15 +571,12 @@ class BraveSearchTool:
                 for loc in locations_data.get("results", [])
             ],
         }
-    
-    def _format_faq(
-        self, 
-        faq_data: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+
+    def _format_faq(self, faq_data: dict[str, Any] | None) -> dict[str, Any] | None:
         """Format FAQ search results."""
         if not faq_data:
             return None
-        
+
         return {
             "type": faq_data.get("type", ""),
             "results": [
@@ -604,15 +590,15 @@ class BraveSearchTool:
                 for faq in faq_data.get("results", [])
             ],
         }
-    
+
     def _format_infobox(
         self,
-        infobox_data: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        infobox_data: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Format infobox (knowledge panel) results."""
         if not infobox_data:
             return None
-        
+
         return {
             "type": infobox_data.get("type", ""),
             "title": infobox_data.get("title", ""),
@@ -629,8 +615,8 @@ class BraveSearchTool:
             "meta_url": infobox_data.get("meta_url", {}),
             "attributes": infobox_data.get("attributes", []),
         }
-    
-    def _format_mixed_layout(self, mixed_data: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _format_mixed_layout(self, mixed_data: dict[str, Any]) -> dict[str, Any]:
         """Format mixed layout configuration."""
         return {
             "type": mixed_data.get("type", "mixed"),
@@ -638,22 +624,22 @@ class BraveSearchTool:
             "top": mixed_data.get("top", []),
             "side": mixed_data.get("side", []),
         }
-    
+
     def _format_thumbnail(
         self,
-        thumbnail_data: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        thumbnail_data: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Format thumbnail data."""
         if not thumbnail_data:
             return None
-        
+
         return {
             "src": thumbnail_data.get("src", ""),
             "original": thumbnail_data.get("original", ""),
             "logo": thumbnail_data.get("logo", False),
         }
-    
-    def _format_profile(self, profile_data: Dict[str, Any]) -> Dict[str, str]:
+
+    def _format_profile(self, profile_data: dict[str, Any]) -> dict[str, str]:
         """Format profile/source information."""
         return {
             "name": profile_data.get("name", ""),
@@ -661,8 +647,8 @@ class BraveSearchTool:
             "long_name": profile_data.get("long_name", ""),
             "img": profile_data.get("img", ""),
         }
-    
-    def _format_meta_url(self, meta_url_data: Dict[str, Any]) -> Dict[str, str]:
+
+    def _format_meta_url(self, meta_url_data: dict[str, Any]) -> dict[str, str]:
         """Format meta URL information."""
         return {
             "scheme": meta_url_data.get("scheme", ""),
@@ -671,15 +657,15 @@ class BraveSearchTool:
             "favicon": meta_url_data.get("favicon", ""),
             "path": meta_url_data.get("path", ""),
         }
-    
+
     def _format_image_properties(
         self,
-        properties_data: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        properties_data: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Format image properties (dimensions, format, size)."""
         if not properties_data:
             return None
-        
+
         return {
             "url": properties_data.get("url", ""),
             "width": properties_data.get("width", 0),
@@ -687,48 +673,46 @@ class BraveSearchTool:
             "format": properties_data.get("format", ""),
             "size": properties_data.get("size", 0),
         }
-    
-    def _generate_answer_summary(self, web_results: List[Dict[str, Any]]) -> str:
-        """
-        Generate a brief answer summary from top search results.
-        
+
+    def _generate_answer_summary(self, web_results: list[dict[str, Any]]) -> str:
+        """Generate a brief answer summary from top search results.
+
         Args:
             web_results: List of web search results
-            
+
         Returns:
             Concatenated summary from top results' descriptions
         """
         if not web_results:
             return ""
-        
+
         # Take top 3 results and combine their descriptions
         summaries = [
             result.get("description", "")
             for result in web_results[:3]
             if result.get("description")
         ]
-        
+
         return " ".join(summaries)
-    
+
     def _create_error_response(
         self,
         query: str,
         error_message: str,
         is_exception: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Create standardized error response.
-        
+    ) -> dict[str, Any]:
+        """Create standardized error response.
+
         Args:
             query: Original search query
             error_message: Error description
             is_exception: Whether this was an exception or expected failure
-            
+
         Returns:
             Error response dictionary
         """
         status = "error" if is_exception else "failed"
-        
+
         return {
             "status": status,
             "query": query,
@@ -739,54 +723,52 @@ class BraveSearchTool:
 
 # Autogen Integration Wrapper
 class BraveSearchAutogenTool:
-    """
-    Autogen-compatible wrapper for BraveSearchTool.
-    
+    """Autogen-compatible wrapper for BraveSearchTool.
+
     Provides synchronous wrapper methods that Autogen agents can call.
     """
-    
+
     def __init__(self, brave_search_tool: BraveSearchTool):
-        """
-        Initialize Autogen wrapper.
-        
+        """Initialize Autogen wrapper.
+
         Args:
             brave_search_tool: Instance of BraveSearchTool
         """
         self.search_tool = brave_search_tool
         self.logger = logging.getLogger(__name__)
-    
+
     def search_web(
         self,
         query: str,
         search_type: str = "comprehensive",
         count: int = 5,
-    ) -> Dict[str, Any]:
-        """
-        Synchronous wrapper for search method (for Autogen compatibility).
-        
+    ) -> dict[str, Any]:
+        """Synchronous wrapper for search method (for Autogen compatibility).
+
         Args:
             query: Search query
             search_type: Type of search
             count: Number of results
-            
+
         Returns:
             Search results dictionary
         """
         import asyncio
-        
+
         try:
             # Run async search in sync context
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # If already in async context, create new loop
                 import nest_asyncio
+
                 nest_asyncio.apply()
-            
+
             result = loop.run_until_complete(
                 self.search_tool.search(query, search_type, count)
             )
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Search wrapper failed: {str(e)}", exc_info=True)
             return {
@@ -799,32 +781,31 @@ class BraveSearchAutogenTool:
 
 # Usage Example
 if __name__ == "__main__":
-    import asyncio
-    
+    pass
+
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    
+
     async def demo():
+        """Demonstrate usage of BraveSearchTool with example searches."""
         # Initialize client and tool
         client = BraveSearchClient()
         search_tool = BraveSearchTool(client)
-        
+
         # Perform search
         results = await search_tool.search(
-            query="Python programming tutorials",
-            search_type="comprehensive",
-            count=10
+            query="Python programming tutorials", search_type="comprehensive", count=10
         )
-        
+
         print(f"Status: {results['status']}")
         print(f"Results: {results['results_count']}")
         print(f"URLs: {results['urls'][:3]}")
-        
+
         # For Autogen integration
-        autogen_tool = BraveSearchAutogenTool(search_tool)
+        BraveSearchAutogenTool(search_tool)
         # autogen_results = autogen_tool.search_web("AI news")
-    
+
     # asyncio.run(demo())
