@@ -53,6 +53,80 @@ class ComposioToolManager:
         
         self.logger.info(f"Initialized ComposioToolManager for user: {user_id}")
     
+    def get_user_connected_apps(
+        self, 
+        user_id: str,
+        status_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get all connected apps for a user from Composio
+        
+        Args:
+            user_id: User identifier
+            status_filter: Optional filter by status (ACTIVE, EXPIRED, etc.)
+            
+        Returns:
+            Dictionary with user's connected apps information
+        """
+        print(f"Fetching connected apps for user {user_id}")
+        
+        try:
+            # Fetch all connections from Composio
+            connections = self.composio.connected_accounts.list(user_ids=[user_id])
+            
+            apps = []
+            app_names = []
+            active_count = 0
+            
+            for conn in connections.items:
+                try:
+                    # Extract app name from toolkit
+                    app_name = conn.toolkit.slug.upper() if conn.toolkit else "UNKNOWN"
+                    display_name = conn.toolkit.slug.title() if conn.toolkit else "Unknown"
+                    
+                    # Get status
+                    status = conn.status
+                    
+                    # Apply status filter if provided
+                    if status_filter and status != status_filter.upper():
+                        continue
+                    
+                    # Check if active
+                    is_active = status == "ACTIVE"
+                    if is_active:
+                        active_count += 1
+                    
+                    # Create app info
+                    app_info = {
+                        "app_name": app_name,
+                        "display_name": display_name,
+                        "connection_id": conn.id,
+                        "status": status,
+                        "connected_at": conn.created_at if hasattr(conn, 'created_at') else None,
+                        "is_active": is_active
+                    }
+                    
+                    apps.append(app_info)
+                    app_names.append(app_name)
+                    
+                except Exception as e:
+                    print(f"Error parsing connection {conn.id}: {e}")
+                    continue
+            
+            print(f"Found {len(apps)} connected apps for user {user_id} ({active_count} active)")
+            
+            return {
+                "user_id": user_id,
+                "total_apps": len(apps),
+                "active_apps": active_count,
+                "apps": apps,
+                "app_names": app_names
+            }
+            
+        except Exception as e:
+            print(f"Failed to fetch connected apps: {e}")
+            raise
+    
     def get_configured_toolkits(self) -> List[str]:
         """
         Retrieve the list of toolkits from environment configuration.
@@ -67,8 +141,10 @@ class ComposioToolManager:
             >>> manager.get_configured_toolkits()
             ['GMAIL', 'GITHUB', 'SLACK']
         """
-        toolkits_str = os.environ.get("COMPOSIO_TOOLKITS", "GMAIL,GITHUB")
-        toolkits = [toolkit.strip() for toolkit in toolkits_str.split(",")]
+        toolkits_user = self.get_user_connected_apps(self.user_id)
+        # toolkits_str = os.environ.get("COMPOSIO_TOOLKITS", "GMAIL,GITHUB")
+        # toolkits = [toolkit.strip() for toolkit in toolkits_str.split(",")]
+        toolkits = toolkits_user.get("app_names")
         
         self.logger.info(f"Configured toolkits: {toolkits}")
         return toolkits
