@@ -63,7 +63,7 @@ router = APIRouter()
 async def run_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",
+    user_id: str = "b38661d1-dbcf-4d3f-bd2a-fdf5e9789964",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """Websocket endpoint for Omni multi-capability AI chat.
@@ -240,7 +240,7 @@ async def run_websocket(
 async def run_chat_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "f1a3adfa-f041-70ee-4486-59b1fbc15018",
+    user_id: str = "b38661d1-dbcf-4d3f-bd2a-fdf5e9789964",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """Websocket endpoint for Chat multi-capability AI chat.
@@ -258,31 +258,30 @@ async def run_chat_websocket(
         WebSocketDisconnect: When connection is closed by client or server.
     """
     # Verify run exists and is in valid state
-    # chat_history = await api_client.post(
-    #     RoutesConfig.API_OMNI_CHAT_HISTORY,
-    #     params={"capability": "omni"},
-    #     data={"chat_id": chat_id, "user_id": user_id},
-    # )
-    # chat_history = chat_history.standard_response()
-    # if not chat_history.get("success"):
-    #     logger.error(chat_history)
-    #     await websocket.close(
-    #         code=3001, reason=chat_history.get("message", "Run not found")
-    #     )
-    #     return
+    chat_history = await api_client.post(
+        RoutesConfig.API_CHAT_HISTORY,
+        params={"capability": "chats"},
+        data={"chat_id": chat_id, "user_id": user_id},
+    )
+    chat_history = chat_history.standard_response()
+    if not chat_history.get("success"):
+        logger.error(chat_history)
+        await websocket.close(
+            code=3001, reason=chat_history.get("message", "Run not found")
+        )
+        return
 
-    # history = chat_history.get("data")
-    # # history = await db.find_one(settings.OMNI_COLLECTION,{"chat_id":chat_id, "user_id":user_id})
-    # if not history:
-    #     logger.warning(f"Run not found: {user_id} & {chat_id}")
-    #     await websocket.close(code=4003, reason="Run not found")
-    #     return
+    history = chat_history.get("data")
+    if not history:
+        logger.warning(f"Run not found: {user_id} & {chat_id}")
+        await websocket.close(code=4003, reason="Run not found")
+        return
 
-    # chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
-    chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
+    chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
+    # chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
 
     omni = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
-    # messages = history.get("messages", [])
+    messages = history.get("messages", [])
     # user_details = await api_client.get(RoutesConfig.API_USER_DETAILS)
     # user_details = user_details.standard_response()
     # if not user_details.get("success"):
@@ -306,10 +305,9 @@ async def run_chat_websocket(
     # omni.judge_question.update_system_message(
     #     omni.judge_question.system_message + context
     # )
-    # # messages.append({"role":"user", "name":"chat_manager", "content":context})
-    # if messages:
-    #     last_agent, last_message = omni.manager.resume(messages=messages)
-    #     omni.memory.load_main_messages(messages)
+    # messages.append({"role":"user", "name":"chat_manager", "content":context})
+    if messages:
+        last_agent, last_message = omni.manager.resume(messages=messages)
 
     input_func = ws_manager._create_input_func(chat_id)
     omni.agent_executor.set_input_function(input_func)

@@ -33,6 +33,11 @@ class RoutesConfig:
     # USER DETAILS
     API_USER_DETAILS = "/auth/user"
 
+    # CHAT MODE
+    API_CREATE_CHAT = "/chats/new"
+    API_UPDATE_CHAT = "/chats/chat_update"
+    API_CHAT_HISTORY = "/chats/history"
+
     # Credits
     API_CREDIT_DEDUCT = "/credits/deduct"
 

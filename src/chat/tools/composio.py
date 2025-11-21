@@ -3,7 +3,7 @@ import os
 from typing import Any
 
 from composio import Composio
-from composio_autogen import AutogenProvider
+from composio_autogen import AutogenProvider  # type: ignore
 
 
 class ComposioToolManager:

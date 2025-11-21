@@ -14,15 +14,82 @@ from src.chat.tools.composio import ComposioToolManager
 from src.chat.tools.together_image import FluxImageGenerator
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
+from src.configs.routes import RoutesConfig
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
+from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
-from src.utilities.storage import a_speak, update_chat_history
 
 # Import tool registration functions
 
 today_date = dt.now()
+
+
+async def update_chat_history(
+    chat_id: str, message: dict, collection_name: str
+) -> bool:
+    """Update chat history in MongoDB with message data.
+
+    Args:
+        chat_id: Unique identifier for the chat session
+        message: Message dictionary containing role, name, content, and raw_message
+        collection_name: MongoDB collection name for the capability
+
+    Returns:
+        bool: True if update was successful
+
+    Raises:
+        Exception: If MongoDB operation fails
+    """
+    try:
+
+        # Extract required fields for different message types
+        required_fields = ["role", "name", "raw_message", "usage", "task_id"]
+        content_fields = ["role", "name", "content"]
+
+        raw_message_data = {
+            field: message[field] for field in required_fields if field in message
+        }
+        content_message_data = {
+            field: message[field] for field in content_fields if field in message
+        }
+
+        raw_message_data["timestamp"] = dt.now_iso()  # Add timestamp to raw message
+        # Build push operations
+        push_operations = {"raw_messages": raw_message_data}
+
+        # Only add to messages if content exists and is not empty
+        if content_message_data.get("content"):
+            push_operations["messages"] = content_message_data
+
+        # Prepare update document
+        update_document = {
+            "$push": push_operations,
+            "$set": {"updated_at": dt.now()},
+        }
+
+        # Execute update operation
+        filter_criteria = {"chat_id": chat_id}
+        update_result = await api_client.post(
+            RoutesConfig.API_UPDATE_CHAT,
+            params={"capability": collection_name},
+            data={"filter_criteria": filter_criteria, "document": update_document},
+        )
+        update_result = update_result.standard_response()
+        if not update_result.get("success"):
+            raise Exception(f"Failed: {update_result.get('message', 'Unknown error')}")
+
+        update_result = update_result.get("data")
+
+        # Log the actual result, not the task object
+        logger.info(f"MongoDB update completed for chat_id: {chat_id}")
+
+        return update_result
+
+    except Exception as e:
+        logger.error(f"Failed to update chat history for chat_id {chat_id}: {str(e)}")
+        raise
 
 
 class GroupChatManager(autogen.GroupChatManager):
@@ -132,26 +199,16 @@ class GroupChatManager(autogen.GroupChatManager):
             await websocket_manager.send_chat_message(
                 session_id=self.chat_id,
                 content=message_data,
-                source=CapabilityType.OMNI.value.upper(),
+                source=CapabilityType.CHAT.value.upper(),
             )
         except Exception as e:
             logger.error(f"WebSocket send failed for chat_id {self.chat_id}: {e}")
-
-    async def _handle_voice_alert(self, agent_name: str, content: str) -> None:
-        """Handle voice alerts for specific agents."""
-        try:
-            if agent_name == "manual_verification":
-                await a_speak(content)
-            elif agent_name == "process_completion_agent":
-                await a_speak("Hey there! Ravian finished your task!")
-        except Exception as e:
-            logger.error(f"Voice alert failed for agent {agent_name}: {e}")
 
     async def _process_message_async(self, message_data: dict) -> None:
         """Process message asynchronously."""
         await self._handle_voice_alert(message_data["name"], message_data["content"])
         await self._send_websocket_message(message_data)
-        await update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION)
+        await update_chat_history(self.chat_id, message_data, settings.CHAT_COLLECTION)
 
     def _print_received_message(
         self, message: dict[str, Any], sender: "autogen.Agent"
@@ -166,13 +223,13 @@ class GroupChatManager(autogen.GroupChatManager):
         content = (
             message.get("content", "") if isinstance(message, dict) else str(message)
         )
-        # message_data = {
-        #     "role": "user",
-        #     "name": sender.name,
-        #     "content": content,
-        #     "raw_message": message,
-        #     "usage": sender_usage,
-        # }
+        message_data = {
+            "role": "user",
+            "name": sender.name,
+            "content": content,
+            "raw_message": message,
+            "usage": sender_usage,
+        }
         websocket_message = {
             "role": "user",
             "name": sender.name,
@@ -191,9 +248,9 @@ class GroupChatManager(autogen.GroupChatManager):
         # Process async operations
         # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
         async_to_sync(self._send_websocket_message(websocket_message))
-        # async_to_sync(
-        #     update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION)
-        # )
+        async_to_sync(
+            update_chat_history(self.chat_id, message_data, settings.CHAT_COLLECTION)
+        )
 
     # Additional utility methods for comprehensive usage tracking
 

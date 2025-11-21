@@ -125,7 +125,7 @@ async def create_new_chat(
         )
 
 
-@router.post("capability/new-chat")
+@router.post("/capability/new-chat")
 async def create_new_capability_chat(
     request: Request,
     capability_name: str = Query(..., description="Capability name"),
@@ -485,3 +485,69 @@ async def get_specific_capability_chat_messages(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
+
+
+# ############### CHAT MODE ROUTES ################
+
+
+@router.post("/chat_mode/new_chat")
+async def create_new_chat_mode(
+    request: Request,
+    user_id: str = "default_user",
+    chat_dir=os.path.join(settings.ROOT_DIR, "ravian"),
+):
+    """Create a new general chat session.
+
+    Args:
+        request: The FastAPI request object.
+        user_id: User identifier. Defaults to "default_user".
+        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/ravian.
+
+    Returns:
+        dict: Created chat document containing chat_id, user_id, and timestamps.
+
+    Raises:
+        HTTPException: If chat creation fails with appropriate status code.
+    """
+    try:
+        chat_dir = ensure_path(chat_dir)
+        # Generate unique chat identifier
+        chat_id = str(uuid.uuid4())
+
+        # Prepare chat document
+        chat_document = {
+            "user_id": user_id,  # Placeholder for user_id, can be replaced with actual user ID logic
+            "chat_id": chat_id,
+            "chat_dir": chat_dir,
+            "messages": [],
+            "raw_messages": [],
+            "created_at": dt.now(),
+            "updated_at": dt.now(),
+        }
+
+        # Create database record
+        create_chat = await api_client.post(
+            RoutesConfig.API_CREATE_CHAT,
+            params={"capability": "chats"},
+            data=chat_document,
+        )
+        create_chat = create_chat.standard_response()
+        if not create_chat.get("success"):
+            raise Exception(
+                f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}"
+            )
+
+        result = create_chat.get("data")
+
+        # Return standardized response using Pydantic model
+        return result
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat creation failed due to server error: {e}",
+        )

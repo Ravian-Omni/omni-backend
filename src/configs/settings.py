@@ -72,6 +72,7 @@ class Settings:
         )
 
         # MongoDB settings
+        self.CHAT_COLLECTION = os.getenv("CHAT_COLLECTION", "chats")
         self.OMNI_COLLECTION = os.getenv("OMNI_COLLECTION", "omni")
         self.EMAIL_COLLECTION = os.getenv("EMAIL_COLLECTION", "email_manager")
         self.BROWSER_COLLECTION = os.getenv("BROWSER_COLLECTION", "browser_manager")
@@ -176,6 +177,7 @@ class CapabilityType(Enum):
         IMAGE_GENERATOR: Image generation capability.
     """
 
+    CHAT = "chat"
     OMNI = "omni"
     EMAIL_MANAGER = "email_sender"
     BROWSER_MANAGER = "web_browser"
@@ -214,6 +216,7 @@ class CapabilityType(Enum):
             MongoDB collection name string for the capability.
         """
         return {
+            CapabilityType.CHAT: settings.CHAT_COLLECTION,
             CapabilityType.OMNI: settings.OMNI_COLLECTION,
             CapabilityType.EMAIL_MANAGER: settings.EMAIL_COLLECTION,
             CapabilityType.BROWSER_MANAGER: settings.BROWSER_COLLECTION,
