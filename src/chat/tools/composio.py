@@ -3,7 +3,8 @@ import os
 from typing import Any
 
 from composio import Composio
-from composio_autogen import AutogenProvider  # type: ignore
+from composio_autogen import AutogenProvider
+from src.configs.llm_configs_manager import LLMConfigManager  # type: ignore
 
 
 class ComposioToolManager:
@@ -43,9 +44,9 @@ class ComposioToolManager:
         self.logger = logging.getLogger(__name__)
 
         # Initialize Composio client
-        api_key = os.environ.get("COMPOSIO_API_KEY")
-        if not api_key:
-            raise ValueError("COMPOSIO_API_KEY environment variable is required")
+        composio_api_key = LLMConfigManager.get_config("composio_api_key")
+        # Initialize Tavily client
+        api_key = composio_api_key.get("config_list", [])[0].get("api_key")
 
         self.composio = Composio(api_key=api_key)
         self.toolset = AutogenProvider()
