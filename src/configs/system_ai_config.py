@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.configs.routes import RoutesConfig
+from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
 
 
@@ -215,199 +217,199 @@ class GroupchatConfigurationManager:
             Dictionary containing all groupchat configurations.
         """
         # Replace this with your actual API call
-        # result = await api_client.get(RoutesConfig.API_AGENT_CONFIGURATIONS)
-        # result = result.standard_response()
-        # if not result.get("success"):
-        #     raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
+        result = await api_client.get(RoutesConfig.API_AGENT_CONFIGURATIONS)
+        result = result.standard_response()
+        if not result.get("success"):
+            raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
 
-        # return result.get("data")
-        return {
-            "omni": {
-                "groupchat_settings": {"max_round": 500},
-                "agents": {
-                    "judge_question": {"llm_config": "gpt_4_1_mini"},
-                    "conversation_agent": {"llm_config": "gpt_4_1_mini"},
-                    "planner_agent": {"llm_config": "gpt_4_1_mini"},
-                    "agent_aligner": {"llm_config": "gpt_4_1_mini"},
-                    "agent_router": {"llm_config": "gpt_4_1_mini"},
-                    "agent_caller": {"llm_config": "claude-sonnet-4-20250514"},
-                    "manual_verification": {"llm_config": "gpt_4_1_mini"},
-                    "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
-                },
-            },
-            "web_browser": {
-                "groupchat_settings": {"max_round": 5},
-                "agents": {
-                    "browser_planner": {
-                        "llm_config": "claude-3-7-sonnet-20250219",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "browser_reader": {
-                        "llm_config": "claude-3-7-sonnet-20250219",
-                        "system_message": "You are a code writer that implements solutions based on plans.",
-                        "description": "Writes code based on planning requirements",
-                    },
-                    "process_completion": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                },
-                "function_description": {
-                    "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
-                    "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
-                },
-            },
-            "email_sender": {
-                "groupchat_settings": {"max_round": 5},
-                "agents": {
-                    "planner_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "intent_classifier_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "content_writer_agent": {
-                        "llm_config": "claude-3-7-sonnet-20250219",
-                        "system_message": "You are a code writer that implements solutions based on plans.",
-                        "description": "Writes code based on planning requirements",
-                    },
-                    "email_caller_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "process_completion_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                },
-                "function_description": {
-                    "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
-                    "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
-                },
-            },
-            "file_finder": {
-                "groupchat_settings": {"max_round": 5},
-                "agents": {
-                    "file_finder_planner": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "file_finder": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "prob_status_checker": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a code writer that implements solutions based on plans.",
-                        "description": "Writes code based on planning requirements",
-                    },
-                    "process_completion": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                },
-                "function_description": {
-                    "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
-                    "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
-                },
-            },
-            "image_generator": {
-                "groupchat_settings": {"max_round": 5},
-                "agents": {
-                    "user_intent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "image_prompt_generator": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "image_generator_caller": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a code writer that implements solutions based on plans.",
-                        "description": "Writes code based on planning requirements",
-                    },
-                    "process_completion": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                },
-                "function_description": {
-                    "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
-                    "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
-                },
-                "custom_properties": {
-                    "image_api": {
-                        "llm_config": "image_together_llm",
-                        "configuration": {"width": 768, "height": 432, "steps": 30},
-                    }
-                },
-            },
-            "python_coder": {
-                "groupchat_settings": {"max_round": 5},
-                "agents": {
-                    "planner_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "code_writer_agent": {
-                        "llm_config": "claude-sonnet-4-20250514",
-                        "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
-                        "description": "Plans the execution strategy for tasks",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "code_debugger_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a code writer that implements solutions based on plans.",
-                        "description": "Writes code based on planning requirements",
-                    },
-                    "problem_status_checker_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                    "process_completion_agent": {
-                        "llm_config": "gpt_4_1_mini",
-                        "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
-                        "max_consecutive_auto_reply": 5,
-                    },
-                },
-                "function_description": {
-                    "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
-                    "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
-                },
-            },
-            "chat": {
-                "groupchat_settings": {"max_round": 500},
-                "agents": {
-                    "chat_agent": {"llm_config": "gpt_4_1_mini"},
-                    "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
-                },
-            },
-        }
+        return result.get("data")
+        # return {
+        #     "omni": {
+        #         "groupchat_settings": {"max_round": 500},
+        #         "agents": {
+        #             "judge_question": {"llm_config": "gpt_4_1_mini"},
+        #             "conversation_agent": {"llm_config": "gpt_4_1_mini"},
+        #             "planner_agent": {"llm_config": "gpt_4_1_mini"},
+        #             "agent_aligner": {"llm_config": "gpt_4_1_mini"},
+        #             "agent_router": {"llm_config": "gpt_4_1_mini"},
+        #             "agent_caller": {"llm_config": "claude-sonnet-4-20250514"},
+        #             "manual_verification": {"llm_config": "gpt_4_1_mini"},
+        #             "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
+        #         },
+        #     },
+        #     "web_browser": {
+        #         "groupchat_settings": {"max_round": 5},
+        #         "agents": {
+        #             "browser_planner": {
+        #                 "llm_config": "claude-3-7-sonnet-20250219",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "browser_reader": {
+        #                 "llm_config": "claude-3-7-sonnet-20250219",
+        #                 "system_message": "You are a code writer that implements solutions based on plans.",
+        #                 "description": "Writes code based on planning requirements",
+        #             },
+        #             "process_completion": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #         },
+        #         "function_description": {
+        #             "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
+        #             "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
+        #         },
+        #     },
+        #     "email_sender": {
+        #         "groupchat_settings": {"max_round": 5},
+        #         "agents": {
+        #             "planner_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "intent_classifier_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "content_writer_agent": {
+        #                 "llm_config": "claude-3-7-sonnet-20250219",
+        #                 "system_message": "You are a code writer that implements solutions based on plans.",
+        #                 "description": "Writes code based on planning requirements",
+        #             },
+        #             "email_caller_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "process_completion_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #         },
+        #         "function_description": {
+        #             "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
+        #             "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
+        #         },
+        #     },
+        #     "file_finder": {
+        #         "groupchat_settings": {"max_round": 5},
+        #         "agents": {
+        #             "file_finder_planner": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "file_finder": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "prob_status_checker": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a code writer that implements solutions based on plans.",
+        #                 "description": "Writes code based on planning requirements",
+        #             },
+        #             "process_completion": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #         },
+        #         "function_description": {
+        #             "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
+        #             "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
+        #         },
+        #     },
+        #     "image_generator": {
+        #         "groupchat_settings": {"max_round": 5},
+        #         "agents": {
+        #             "user_intent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "image_prompt_generator": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "image_generator_caller": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a code writer that implements solutions based on plans.",
+        #                 "description": "Writes code based on planning requirements",
+        #             },
+        #             "process_completion": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #         },
+        #         "function_description": {
+        #             "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
+        #             "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
+        #         },
+        #         "custom_properties": {
+        #             "image_api": {
+        #                 "llm_config": "image_together_llm",
+        #                 "configuration": {"width": 768, "height": 432, "steps": 30},
+        #             }
+        #         },
+        #     },
+        #     "python_coder": {
+        #         "groupchat_settings": {"max_round": 5},
+        #         "agents": {
+        #             "planner_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "code_writer_agent": {
+        #                 "llm_config": "claude-sonnet-4-20250514",
+        #                 "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+        #                 "description": "Plans the execution strategy for tasks",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "code_debugger_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a code writer that implements solutions based on plans.",
+        #                 "description": "Writes code based on planning requirements",
+        #             },
+        #             "problem_status_checker_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #             "process_completion_agent": {
+        #                 "llm_config": "gpt_4_1_mini",
+        #                 "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+        #                 "max_consecutive_auto_reply": 5,
+        #             },
+        #         },
+        #         "function_description": {
+        #             "email_sender": "This function sends an email to the specified recipient with the given subject and body.",
+        #             "python_coder": "This function writes, executes, and debugs Python code based on the provided requirements.",
+        #         },
+        #     },
+        #     "chat": {
+        #         "groupchat_settings": {"max_round": 500},
+        #         "agents": {
+        #             "chat_agent": {"llm_config": "gpt_4_1_mini"},
+        #             "process_completion_agent": {"llm_config": "gpt_4_1_mini"},
+        #         },
+        #     },
+        # }
 
     def _parse_and_store_configurations(self, api_data: dict[str, Any]) -> None:
         """Parse API response and store configurations.
