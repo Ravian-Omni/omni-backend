@@ -105,14 +105,15 @@ class StreamingAgent(Agent):
             # )
             update_result = await api_client.post(
                 RoutesConfig.API_CREDIT_DEDUCT,
-                params={
-                    "user_id": self.user_id,
-                    "model": model,
+                data={
+                    "model_name": model,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "capability": "browser_manager",
+                    "metadata": {
+                        "chat_id": self.session_id,
+                        "agent_name": "browser_automation",
+                    },
                 },
-                data={},
             )
             update_result = update_result.standard_response()
             if not update_result.get("success"):

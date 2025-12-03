@@ -39,7 +39,7 @@ class RoutesConfig:
     API_CHAT_HISTORY = "/chats/history"
 
     # Credits
-    API_CREDIT_DEDUCT = "/credits/deduct"
+    API_CREDIT_DEDUCT = "/v1/wallet/credits-update"
 
     # API Keys
     API_LLM_KEYS = "/chats/api_keys"
