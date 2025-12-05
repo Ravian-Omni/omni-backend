@@ -99,6 +99,7 @@ class GroupChatManager(autogen.GroupChatManager):
         self,
         groupchat,
         chat_id: str,
+        task_id=None,
         llm_config=None,
         human_input_mode: str = "NEVER",
     ):
@@ -108,6 +109,7 @@ class GroupChatManager(autogen.GroupChatManager):
             human_input_mode=human_input_mode,
         )
         self.chat_id = chat_id
+        self.task_id = task_id
         # Track previous usage state for each agent to calculate deltas
         self._agent_previous_usage = defaultdict(
             lambda: {
@@ -229,12 +231,14 @@ class GroupChatManager(autogen.GroupChatManager):
             "content": content,
             "raw_message": message,
             "usage": sender_usage,
+            "task_id": self.task_id,
         }
         websocket_message = {
             "role": "user",
             "name": sender.name,
             "content": content,
             "raw_message": message,
+            "task_id": self.task_id,
         }
         # Log the usage information for debugging
         logger.info(
@@ -338,6 +342,7 @@ class Chat:
     ):
         self.user_id = user_id
         self.chat_id = chat_id
+        self.task_id = None
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
@@ -355,6 +360,11 @@ class Chat:
         """Set the custom input function for user interactions."""
         self.input_function = input_function
         return self.input_function
+
+    def set_task_id(self, task_id):
+        """Set the current task ID for tracking."""
+        self.task_id = task_id
+        self.manager.task_id = task_id
 
     def _set_cancellation_token(self, cancellation_token):
         self.cancellation_token = cancellation_token
@@ -535,5 +545,6 @@ class Chat:
             llm_config=self.llm_config,
             human_input_mode="ALWAYS",
             chat_id=self.chat_id,
+            task_id=self.task_id,
         )
         return self.manager, self.groupchat

@@ -280,38 +280,15 @@ async def run_chat_websocket(
     chat_dir = history.get("chat_dir", os.path.join(settings.ROOT_DIR, "ravian"))
     # chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
 
-    omni = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+    chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
     messages = history.get("messages", [])
-    # user_details = await api_client.get(RoutesConfig.API_USER_DETAILS)
-    # user_details = user_details.standard_response()
-    # if not user_details.get("success"):
-    #     raise Exception(
-    #         f"Failed to update chat history: {user_details.get('message', 'Unknown error')}"
-    #     )
-    # user_context = extract_user_summary(user_details.get("data"))
-    # context = f"""
 
-    # User Information:
-    # - User: {user_context['full_name']}
-    # - Birth Date: {user_context['dob']}
-    # - Email: {user_context['email']}
-    # - Gender: {user_context['gender']}
-    # - Location: {user_context['country']}
-    # - Today's Date: {user_context['date']}
-
-    # Please take this context into account when responding.
-
-    # """
-    # omni.judge_question.update_system_message(
-    #     omni.judge_question.system_message + context
-    # )
-    # messages.append({"role":"user", "name":"chat_manager", "content":context})
     if messages:
-        last_agent, last_message = omni.manager.resume(messages=messages)
+        last_agent, last_message = chat.manager.resume(messages=messages)
 
     input_func = ws_manager._create_input_func(chat_id)
-    omni.agent_executor.set_input_function(input_func)
-    omni.set_input_function(input_func)
+    chat.agent_executor.set_input_function(input_func)
+    chat.set_input_function(input_func)
     # Connect websocket
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
@@ -332,7 +309,7 @@ async def run_chat_websocket(
                     if message.get("task"):
                         asyncio.create_task(
                             ws_manager.chat_mode_initiate(
-                                session_id=chat_id, initial_message=message, omni=omni
+                                session_id=chat_id, initial_message=message, chat=chat
                             )
                         )
                     else:

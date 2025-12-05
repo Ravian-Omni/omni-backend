@@ -96,9 +96,9 @@ class WebSocketManager:
         session_id: str,
         # chat_handler: Callable[[str, InputFuncType], Awaitable[Any]],
         initial_message: str = "",
-        omni=None,
+        chat=None,
     ) -> None:
-        """Start a chat stream with the provided omni manager.
+        """Start a chat stream with the provided chat manager.
 
         Initiates an async chat session, manages the conversation lifecycle,
         handles cancellation, and sends completion/cancellation notifications.
@@ -106,7 +106,7 @@ class WebSocketManager:
         Args:
             session_id: Session identifier.
             initial_message: Optional initial message to start the conversation.
-            omni: Omni manager instance for handling the chat logic.
+            chat: chat manager instance for handling the chat logic.
 
         Raises:
             ValueError: If no active connection exists for the session.
@@ -120,7 +120,7 @@ class WebSocketManager:
         self._stop_flags[session_id] = False
         cancellation_token = CancellationToken()
         self._cancellation_tokens[session_id] = cancellation_token
-
+        chat.set_task_id(str(uuid.uuid4()))
         try:
             # Send initial message if provided
             if initial_message:
@@ -136,12 +136,12 @@ class WebSocketManager:
                     },
                 )
 
-            omni._set_cancellation_token(
+            chat._set_cancellation_token(
                 self._cancellation_tokens.get(session_id, None)
             )
             task = asyncio.create_task(
-                omni.manager.a_initiate_chat(
-                    omni.manager,
+                chat.manager.a_initiate_chat(
+                    chat.manager,
                     message=initial_message.get("task"),
                     clear_history=False,
                 )
