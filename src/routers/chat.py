@@ -551,3 +551,76 @@ async def create_new_chat_mode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat creation failed due to server error: {e}",
         )
+
+
+@router.get(
+    "/chat_mode/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory
+)
+async def get_specific_chat_mode(
+    user_id: str = Path(..., description="User ID"),
+    chat_id: str = Path(..., description="Chat ID"),
+):
+    """Get a specific chat by user_id and chat_id.
+
+    Args:
+        user_id: User identifier.
+        chat_id: Chat session identifier.
+
+    Returns:
+        SimplifiedChatHistory: Chat history containing chat_id, chat_dir, and raw_messages.
+
+    Raises:
+        HTTPException: 404 if chat not found, 500 if retrieval fails.
+    """
+    try:
+        query = {"user_id": user_id, "chat_id": chat_id}
+        # document = await mongodb.find_one(settings.OMNI_COLLECTION, query)
+        chat_history = await api_client.post(
+            RoutesConfig.API_CHAT_HISTORY,
+            params={"capability": "chats"},
+            data=query,
+        )
+        chat_history = chat_history.standard_response()
+        if not chat_history.get("success"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}",
+            )
+
+        document = chat_history.get("data")
+
+        # Serialize the full document first
+        serialized_doc = serialize_document(document)
+
+        # Transform messages to raw_messages format
+        raw_messages = []
+        if "raw_messages" in serialized_doc:
+            for message in serialized_doc["raw_messages"]:
+                raw_messages.append(
+                    {
+                        "role": message.get("role", ""),
+                        "name": message.get("name", ""),
+                        "raw_message": message.get(
+                            "raw_message", ""
+                        ),  # Using content as raw_message
+                        "task_id": message.get(
+                            "task_id", ""
+                        ),  # Using content as raw_message
+                        "timestamp": message.get(
+                            "timestamp", ""
+                        ),  # Using content as raw_message
+                    }
+                )
+
+        # Return only chat_id and raw_messages
+        return {
+            "chat_id": serialized_doc.get("chat_id", ""),
+            "chat_dir": serialized_doc.get("chat_dir", ""),
+            "raw_messages": raw_messages,
+            "feedback": serialized_doc.get("feedback", {}),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch chat: {str(e)}")
