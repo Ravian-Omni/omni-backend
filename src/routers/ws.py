@@ -59,6 +59,29 @@ def extract_user_summary(data: dict) -> dict:
 router = APIRouter()
 
 
+def build_user_context(ctx):
+    """Build user context string from extracted user information."""
+    fields = [
+        ("User", "full_name"),
+        ("Birth Date", "dob"),
+        ("Email", "email"),
+        ("Gender", "gender"),
+        ("Location", "country"),
+        ("Today's Date", "date"),
+    ]
+
+    lines = [f"- {label}: {ctx[key]}" for label, key in fields if ctx.get(key)]
+
+    if not lines:
+        return ""
+
+    return (
+        "User Information:\n"
+        + "\n".join(lines)
+        + "\n\nPlease take this context into account when responding."
+    )
+
+
 @router.websocket("/omni/{chat_id}")
 async def run_websocket(
     websocket: WebSocket,
@@ -112,19 +135,21 @@ async def run_websocket(
             f"Failed to update chat history: {user_details.get('message', 'Unknown error')}"
         )
     user_context = extract_user_summary(user_details.get("data"))
-    context = f"""
 
-    User Information:
-    - User: {user_context['full_name']}
-    - Birth Date: {user_context['dob']}
-    - Email: {user_context['email']}
-    - Gender: {user_context['gender']}
-    - Location: {user_context['country']}
-    - Today's Date: {user_context['date']}
+    # context = f"""
 
-    Please take this context into account when responding.
+    # User Information:
+    # - User: {user_context['full_name']}
+    # - Birth Date: {user_context['dob']}
+    # - Email: {user_context['email']}
+    # - Gender: {user_context['gender']}
+    # - Location: {user_context['country']}
+    # - Today's Date: {user_context['date']}
 
-    """
+    # Please take this context into account when responding.
+
+    # """
+    context = build_user_context(user_context)
     omni.judge_question.update_system_message(
         omni.judge_question.system_message + context
     )

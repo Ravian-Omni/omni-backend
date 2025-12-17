@@ -234,7 +234,12 @@ class WebSocketManager:
             task = asyncio.create_task(
                 omni.manager.a_initiate_chat(
                     omni.manager,
-                    message=initial_message.get("task"),
+                    message=str(
+                        {
+                            "task": initial_message.get("task"),
+                            "files": initial_message.get("files"),
+                        }
+                    ),
                     clear_history=False,
                 )
             )

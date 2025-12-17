@@ -100,6 +100,14 @@ class FileInfo(BaseModel):
         return value.strip()
 
 
+class TaskStatus(str, Enum):
+    """Status of the file search task."""
+
+    SUCCESS = "success"  # Files were found
+    FAILED = "failed"  # No files found (file not found)
+    ERROR = "error"  # Search operation failed (technical error)
+
+
 class FileFinderResponse(BaseModel):
     """Complete response from the file finder agent."""
 
@@ -113,10 +121,15 @@ class FileFinderResponse(BaseModel):
         title="Files Found",
         description="List of files found by the search",
     )
-    search_successful: bool = Field(
-        True,
-        title="Search Successful",
-        description="Whether the file search was successful",
+    task_status: TaskStatus = Field(
+        TaskStatus.FAILED,
+        title="Task Status",
+        description=(
+            "Overall task completion status for downstream agents. "
+            "SUCCESS = files were found (task completed). "
+            "FAILED = no files found (file not found, task failed). "
+            "ERROR = search operation failed (technical error)."
+        ),
     )
     total_files_found: int = Field(
         0, title="Total Files Found", description="Total number of files found"
