@@ -1,10 +1,55 @@
 import logging
+from inspect import Signature
 from typing import Any
 
+from autogen_core.tools import FunctionTool
 from composio import Composio
+from composio.client.types import Tool
+from composio.core.provider.agentic import AgenticProviderExecuteFn
+from composio.utils.shared import get_signature_format_from_schema_params
 from composio_autogen import AutogenProvider
 
 from src.configs.llm_configs_manager import LLMConfigManager  # type: ignore
+
+
+class NuitkaSafeAutogenProvider(AutogenProvider, name="autogen"):
+    """Nuitka-safe replacement for AutogenProvider.
+
+    Avoids types.FunctionType + closure recreation,
+    which crashes in Nuitka compiled binaries.
+    """
+
+    def wrap_tool(
+        self,
+        tool: Tool,
+        execute_tool: AgenticProviderExecuteFn,
+    ) -> FunctionTool:
+        """wrap_tool creates a FunctionTool without using closures."""
+
+        def execute_action(**kwargs: Any) -> dict:
+            return execute_tool(slug=tool.slug, arguments=kwargs)
+
+        # Generate safe function name
+        func_name = self._process_function_name_for_registration(input_string=tool.slug)
+
+        # Mutate function instead of recreating it
+        execute_action.__name__ = func_name
+        execute_action.__doc__ = tool.description
+
+        params = get_signature_format_from_schema_params(
+            schema_params=tool.input_parameters
+        )
+
+        execute_action.__signature__ = Signature(parameters=params)
+        execute_action.__annotations__ = {p.name: p.annotation for p in params} | {
+            "return": dict[str, Any]
+        }
+
+        return FunctionTool(
+            func=execute_action,
+            description=tool.description,
+            name=func_name,
+        )
 
 
 class ComposioToolManager:
@@ -49,7 +94,7 @@ class ComposioToolManager:
         api_key = composio_api_key.get("config_list", [])[0].get("api_key")
 
         self.composio = Composio(api_key=api_key)
-        self.toolset = AutogenProvider()
+        self.toolset = NuitkaSafeAutogenProvider()
 
         self.logger.info(f"Initialized ComposioToolManager for user: {user_id}")
 
