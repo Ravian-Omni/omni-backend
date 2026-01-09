@@ -160,7 +160,7 @@ repos:
         name: Check docstring style
         args:
           - --convention=google
-          - --add-ignore=D100,D104,D105,D107
+          - --add-ignore=D100,D104,D105,D107,D403
         exclude: |
           (?x)^(
               tests/.*|

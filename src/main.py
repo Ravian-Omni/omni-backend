@@ -24,9 +24,9 @@ from starlette.middleware.cors import CORSMiddleware
 from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
 from src.dependencies import init_managers
-
-# from src.routers import apis
-from src.routers import chat, config, ws
+from src.routers import chat
+from src.routers import settings as settings_router
+from src.routers import websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -102,16 +102,15 @@ app = FastAPI(
 )
 
 
-# app.include_router(apis.router)
 app.include_router(chat.router, prefix="/chats", tags=["Chat Management"])
 app.include_router(
-    ws.router,
+    websocket.router,
     prefix="/ws",
-    tags=["websocket"],
+    tags=["WebSocket"],
     responses={404: {"description": "Not found"}},
 )
 app.include_router(
-    config.router,
+    settings_router.router,
     prefix="/settings",
     tags=["Settings Management"],
     responses={404: {"description": "Not found"}},
