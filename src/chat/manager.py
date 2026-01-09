@@ -389,14 +389,19 @@ class Chat:
             self.groupchat_config.get_agent_config("chat_agent").llm_config or "default"
         )
         llm_chat_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_chat_agent["max_tokens"] = 15000
+        chat_prompt = self.groupchat_config.get_agent_config(
+            "chat_agent"
+        ).system_message
         return autogen.AssistantAgent(
             name="chat_agent",
             llm_config=llm_chat_agent,
             is_termination_msg=lambda msg: msg.get("content", "").strip().upper()
             == "TERMINATE",
-            system_message=prompts.chat_agent.format(
-                today=today_date.strftime("%Y-%m-%d")
-            ),
+            system_message=chat_prompt if chat_prompt else prompts.chat_agent,
+            # .format(
+            #     today=today_date.strftime("%Y-%m-%d")
+            # ),
         )
 
     def get_agent_executor(self):

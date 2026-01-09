@@ -37,6 +37,7 @@ class RoutesConfig:
     API_CREATE_CHAT = "/chats/new"
     API_UPDATE_CHAT = "/chats/chat_update"
     API_CHAT_HISTORY = "/chats/history"
+    API_CHAT_NO_AUTH_APPS = "/v1/composio/api/get-noAuth-apps"
 
     # Credits
     API_CREDIT_DEDUCT = "/v1/wallet/credits-update"

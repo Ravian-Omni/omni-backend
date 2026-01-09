@@ -49,7 +49,7 @@ build_command = [
     # ========================================
     "--lto=no",  # Changed from yes - faster builds, avoids some closure issues
     # "--remove-output",  # Remove debug info (15% smaller)
-    "--python-flag=-O",  # Changed from -OO - keeps docstrings for dynamic code
+    "--python-flag=-OO",  # Changed from -OO - keeps docstrings for dynamic code
     "--no-pyi-file",  # Skip type files (2% smaller)
     f"--jobs={max(1, (os.cpu_count() or 4) - 2)}",  # Leave 2 cores free for macOS responsiveness
     # ========================================

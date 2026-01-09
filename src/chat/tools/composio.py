@@ -10,6 +10,9 @@ from composio.utils.shared import get_signature_format_from_schema_params
 from composio_autogen import AutogenProvider
 
 from src.configs.llm_configs_manager import LLMConfigManager  # type: ignore
+from src.configs.routes import RoutesConfig
+from src.utilities.api_client import api_client
+from src.utilities.async_helpers import async_to_sync
 
 
 class NuitkaSafeAutogenProvider(AutogenProvider, name="autogen"):
@@ -98,6 +101,24 @@ class ComposioToolManager:
 
         self.logger.info(f"Initialized ComposioToolManager for user: {user_id}")
 
+    async def get_no_auth_apps(self) -> dict[str, Any]:
+        """Get all no-auth apps from Composio.
+
+        Returns:
+            Dictionary with no-auth apps information.
+        """
+        print("Fetching no-auth apps")
+
+        try:
+            result = await api_client.get(RoutesConfig.API_CHAT_NO_AUTH_APPS)
+            result = result.standard_response()
+            if not result.get("success"):
+                raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
+            return result.get("data")
+        except Exception as e:
+            print(f"Error loading NO-AUTH Apps: {e}")
+            raise Exception(f"Error loading NO-AUTH Apps: {e}")
+
     def get_user_connected_apps(
         self, user_id: str, status_filter: str | None = None
     ) -> dict[str, Any]:
@@ -164,7 +185,9 @@ class ComposioToolManager:
             print(
                 f"Found {len(apps)} connected apps for user {user_id} ({active_count} active)"
             )
-
+            # app_names.append("BROWSER_TOOL")
+            no_auth_apps = async_to_sync(self.get_no_auth_apps())
+            app_names.extend(no_auth_apps.get("apps", []))
             return {
                 "user_id": user_id,
                 "total_apps": len(apps),

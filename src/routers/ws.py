@@ -67,7 +67,7 @@ def build_user_context(ctx):
         ("Email", "email"),
         ("Gender", "gender"),
         ("Location", "country"),
-        ("Today's Date", "date"),
+        ("Date", "date"),
     ]
 
     lines = [f"- {label}: {ctx[key]}" for label, key in fields if ctx.get(key)]
@@ -76,9 +76,9 @@ def build_user_context(ctx):
         return ""
 
     return (
-        "User Information:\n"
+        "<user_identity>User Information:\n"
         + "\n".join(lines)
-        + "\n\nPlease take this context into account when responding."
+        + "\n\nPlease take this context into account when responding.</user_identity> }}"
     )
 
 
@@ -86,7 +86,7 @@ def build_user_context(ctx):
 async def run_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "b38661d1-dbcf-4d3f-bd2a-fdf5e9789964",
+    user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """Websocket endpoint for Omni multi-capability AI chat.
@@ -265,7 +265,7 @@ async def run_websocket(
 async def run_chat_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "b38661d1-dbcf-4d3f-bd2a-fdf5e9789964",
+    user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """Websocket endpoint for Chat multi-capability AI chat.
@@ -307,6 +307,29 @@ async def run_chat_websocket(
 
     chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
     messages = history.get("messages", [])
+    user_details = await api_client.get(RoutesConfig.API_USER_DETAILS)
+    user_details = user_details.standard_response()
+    if not user_details.get("success"):
+        raise Exception(
+            f"Failed to update chat history: {user_details.get('message', 'Unknown error')}"
+        )
+    user_context = extract_user_summary(user_details.get("data"))
+
+    # context = f"""
+
+    # User Information:
+    # - User: {user_context['full_name']}
+    # - Birth Date: {user_context['dob']}
+    # - Email: {user_context['email']}
+    # - Gender: {user_context['gender']}
+    # - Location: {user_context['country']}
+    # - Today's Date: {user_context['date']}
+
+    # Please take this context into account when responding.
+
+    # """
+    context = build_user_context(user_context)
+    chat.chat_agent.update_system_message(chat.chat_agent.system_message + context)
 
     if messages:
         last_agent, last_message = chat.manager.resume(messages=messages)
