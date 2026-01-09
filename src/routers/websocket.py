@@ -159,42 +159,50 @@ async def chat_websocket(
 
     try:
         # Send initialization status to client
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "connecting",
-            "message": "Loading chat history...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "connecting",
+                "message": "Loading chat history...",
+            }
+        )
 
         # STEP 2: Load chat history (lightweight API call)
         history = await load_chat_mode_history(chat_id, user_id)
         if not history:
             logger.warning(f"Run not found: {user_id} & {chat_id}")
-            await websocket.send_json({
-                "type": "error",
-                "error": "Chat session not found",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "Chat session not found",
+                }
+            )
             await websocket.close(code=4003, reason="Run not found")
             return
 
         chat_dir = history.get("chat_dir", get_default_chat_dir())
         messages = history.get("messages", [])
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "initializing",
-            "message": "Initializing chat agent and loading tools...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "initializing",
+                "message": "Initializing chat agent and loading tools...",
+            }
+        )
 
         # STEP 3: Initialize Chat instance (heavy - includes tool registration)
         # Note: Cannot use run_in_executor because Chat uses async_to_sync internally
         # which requires access to the same event loop
         chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "configuring",
-            "message": "Loading user context...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "configuring",
+                "message": "Loading user context...",
+            }
+        )
 
         # STEP 4: Load user context
         user_details = await get_user_details()
@@ -214,11 +222,13 @@ async def chat_websocket(
         chat.set_input_function(input_func)
 
         # Send ready status
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "ready",
-            "message": "Chat ready",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "ready",
+                "message": "Chat ready",
+            }
+        )
 
         logger.info(f"Chat initialization complete for {chat_id}")
 
@@ -235,10 +245,12 @@ async def chat_websocket(
         LLMConfigManager.clear_cache()
         # Try to send error to client before closing
         try:
-            await websocket.send_json({
-                "type": "error",
-                "error": f"Initialization failed: {str(e)}",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": f"Initialization failed: {str(e)}",
+                }
+            )
         except Exception:
             pass
     finally:
