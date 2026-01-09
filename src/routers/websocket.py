@@ -54,6 +54,9 @@ async def omni_websocket(
     Handles real-time communication for Omni conversations with support for
     multiple AI capabilities, context preservation, and streaming responses.
 
+    Uses early connection pattern: WebSocket is connected first, then heavy
+    initialization happens in background with status updates to the client.
+
     Args:
         websocket: WebSocket connection instance.
         chat_id: Unique identifier for the chat session.
@@ -63,48 +66,92 @@ async def omni_websocket(
     Raises:
         WebSocketDisconnect: When connection is closed by client or server.
     """
-    # Load chat history
-    history = await load_omni_chat_history(chat_id, user_id)
-    if not history:
-        logger.warning(f"Run not found: {user_id} & {chat_id}")
-        await websocket.close(code=4003, reason="Run not found")
-        return
-
-    chat_dir = history.get("chat_dir", get_default_chat_dir())
-
-    # Initialize Omni instance
-    omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
-    messages = history.get("messages", [])
-
-    # Load user context
-    user_details = await get_user_details()
-    user_context = extract_user_summary(user_details)
-    context = build_user_context(user_context)
-
-    # Update system message with user context
-    omni.judge_question.update_system_message(
-        omni.judge_question.system_message + context
-    )
-
-    # Resume from existing messages if available
-    if messages:
-        omni.manager.resume(messages=messages)
-        omni.memory.load_main_messages(messages)
-
-    # Set up input functions
-    input_func = ws_manager._create_input_func(chat_id)
-    omni.user_input.set_input_function(input_func)
-    omni.get_user_acceptance.set_input_function(input_func)
-    omni.set_input_function(input_func)
-
-    # Connect websocket
+    # STEP 1: Connect WebSocket FIRST (before any heavy initialization)
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
         await websocket.close(code=4002, reason="Failed to establish connection")
         return
 
+    logger.info(f"WebSocket connection established for run {chat_id}")
+
     try:
-        logger.info(f"WebSocket connection established for run {chat_id}")
+        # Send initialization status to client
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "connecting",
+                "message": "Loading chat history...",
+            }
+        )
+
+        # STEP 2: Load chat history (lightweight API call)
+        history = await load_omni_chat_history(chat_id, user_id)
+        if not history:
+            logger.warning(f"Run not found: {user_id} & {chat_id}")
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "Chat session not found",
+                }
+            )
+            await websocket.close(code=4003, reason="Run not found")
+            return
+
+        chat_dir = history.get("chat_dir", get_default_chat_dir())
+        messages = history.get("messages", [])
+
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "initializing",
+                "message": "Initializing Omni agent and loading tools...",
+            }
+        )
+
+        # STEP 3: Initialize Omni instance (heavy - includes tool registration)
+        omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "configuring",
+                "message": "Loading user context...",
+            }
+        )
+
+        # STEP 4: Load user context
+        user_details = await get_user_details()
+        user_context = extract_user_summary(user_details)
+        context = build_user_context(user_context)
+
+        # Update system message with user context
+        omni.judge_question.update_system_message(
+            omni.judge_question.system_message + context
+        )
+
+        # Resume from existing messages if available
+        if messages:
+            omni.manager.resume(messages=messages)
+            omni.memory.load_main_messages(messages)
+
+        # Set up input functions
+        input_func = ws_manager._create_input_func(chat_id)
+        omni.user_input.set_input_function(input_func)
+        omni.get_user_acceptance.set_input_function(input_func)
+        omni.set_input_function(input_func)
+
+        # Send ready status
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "ready",
+                "message": "Omni ready",
+            }
+        )
+
+        logger.info(f"Omni initialization complete for {chat_id}")
+
+        # STEP 5: Handle messages
         await _handle_websocket_messages(
             websocket, chat_id, ws_manager, omni, is_chat_mode=False
         )
@@ -115,6 +162,16 @@ async def omni_websocket(
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
         LLMConfigManager.clear_cache()
+        # Try to send error to client before closing
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": f"Initialization failed: {str(e)}",
+                }
+            )
+        except Exception:
+            pass
     finally:
         LLMConfigManager.clear_cache()
         await ws_manager.disconnect(chat_id)
