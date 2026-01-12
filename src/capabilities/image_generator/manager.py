@@ -95,9 +95,11 @@ class ImageGenerator:
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
             width: Annotated[int, "Width of the image"] = 1792,
-            height: Annotated[int, "Height of the image"] = 1792
+            height: Annotated[int, "Height of the image"] = 1792,
         ):
-            return self.flux_image_generator(prompt=query, filename=filename, width=width, height=height)
+            return self.flux_image_generator(
+                prompt=query, filename=filename, width=width, height=height
+            )
 
         autogen.agentchat.register_function(
             flux_image_generator_wrapper,

@@ -681,8 +681,8 @@ class Omni:
         llm_config_caller = LLMConfigManager.get_config(llm_config_name)
         # llm_config_caller["config_list"][0]["tool_choice"] = {"type": "any"}
         if agent_config.custom_properties.get("tool_choice"):
-            llm_config_caller["config_list"][0]["tool_choice"] = agent_config.custom_properties.get(
-                "tool_choice"
+            llm_config_caller["config_list"][0]["tool_choice"] = (
+                agent_config.custom_properties.get("tool_choice")
             )
         return autogen.AssistantAgent(
             name="agent_caller",
