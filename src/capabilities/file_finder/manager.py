@@ -595,7 +595,7 @@ class FileFinder:
                 "file_finder"
             )
         )
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         self.agents = self.get_agents()
         autogen.register_function(
             file_search_function,

@@ -23,8 +23,6 @@ from src.utilities.async_helpers import async_to_sync
 
 # Import tool registration functions
 
-today_date = dt.now()
-
 
 async def update_chat_history(
     chat_id: str, message: dict, collection_name: str
@@ -345,7 +343,7 @@ class Chat:
         self.task_id = None
         self.chat_dir = chat_dir
         self.cancellation_token = None
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         self.groupchat_config = (
             GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
                 "chat"
@@ -389,16 +387,19 @@ class Chat:
             self.groupchat_config.get_agent_config("chat_agent").llm_config or "default"
         )
         llm_chat_agent = LLMConfigManager.get_config(llm_config_name)
-        llm_chat_agent["max_tokens"] = 15000
-        chat_prompt = self.groupchat_config.get_agent_config(
-            "chat_agent"
-        ).system_message
+        agent_config = self.groupchat_config.get_agent_config("chat_agent")
+        chat_prompt = agent_config.system_message
+        if agent_config.custom_properties.get("max_tokens"):
+            llm_chat_agent["max_tokens"] = agent_config.custom_properties.get(
+                "max_tokens"
+            )
         return autogen.AssistantAgent(
             name="chat_agent",
             llm_config=llm_chat_agent,
             is_termination_msg=lambda msg: msg.get("content", "").strip().upper()
             == "TERMINATE",
             system_message=chat_prompt if chat_prompt else prompts.chat_agent,
+            # system_message=prompts.chat_agent,
             # .format(
             #     today=today_date.strftime("%Y-%m-%d")
             # ),
@@ -434,9 +435,13 @@ class Chat:
         def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
+            width: Annotated[int, "Width of the image"] = 512,
+            height: Annotated[int, "Height of the image"] = 512,
         ):
             generator = FluxImageGenerator(output_dir=self.chat_dir)
-            return generator.generate_image(query, filename)
+            return generator.generate_image(
+                prompt=query, filename=filename, width=width, height=height
+            )
 
         async def search_tool_wrapper(
             query: Annotated[
@@ -458,34 +463,53 @@ class Chat:
                 country: Country code
                 safesearch: Safe search level
             """
-            client = BraveSearchClient()
+            # Initialize client with SSL verification enabled by default
+            # If you encounter SSL certificate errors, you can disable verification with verify_ssl=False
+            # However, this is NOT recommended for production environments
+            client = BraveSearchClient(verify_ssl=True)
             search_tool = BraveSearchTool(client)
 
             # Perform search
             return await search_tool.search(query=query, search_type=search_type)
 
-        autogen.agentchat.register_function(
-            flux_image_generator_wrapper,
-            caller=self.chat_agent,
-            executor=self.agent_executor,
-            name="image_generator",
-            description="This tool will be used to generate images based on the information.",
-        )
-
-        autogen.register_function(
-            search_tool_wrapper,
-            caller=self.chat_agent,
-            executor=self.agent_executor,
-            name="web_api_search",
-            description=(
-                "Search the web using Brave Search API to find current information, "
-                "news, articles, videos, images, and other content. This tool provides "
-                "comprehensive search results including web pages, videos, images, news "
-                "articles, forum discussions, FAQs, and local business information. "
-                "Use this when you need to find real-time information, verify facts, "
-                "research topics, or gather current data from the internet."
-            ),
-        )
+        if self.groupchat_config.function_descriptions:
+            if "image_generator" in self.groupchat_config.function_descriptions.keys():
+                image_generator = self.groupchat_config.function_descriptions.get(
+                    "image_generator"
+                )
+                autogen.agentchat.register_function(
+                    flux_image_generator_wrapper,
+                    caller=self.chat_agent,
+                    executor=self.agent_executor,
+                    name="image_generator",
+                    description=(
+                        image_generator.get("description")
+                        if image_generator.get("description")
+                        else "This tool will be used to generate images based on the information."
+                    ),
+                )
+            if "web_api_search" in self.groupchat_config.function_descriptions.keys():
+                web_api_search = self.groupchat_config.function_descriptions.get(
+                    "web_api_search"
+                )
+                autogen.register_function(
+                    search_tool_wrapper,
+                    caller=self.chat_agent,
+                    executor=self.agent_executor,
+                    name="web_api_search",
+                    description=(
+                        web_api_search.get("description")
+                        if web_api_search.get("description")
+                        else (
+                            "Search the web using Brave Search API to find current information, "
+                            "news, articles, videos, images, and other content. This tool provides "
+                            "comprehensive search results including web pages, videos, images, news "
+                            "articles, forum discussions, FAQs, and local business information. "
+                            "Use this when you need to find real-time information, verify facts, "
+                            "research topics, or gather current data from the internet."
+                        )
+                    ),
+                )
 
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         """Determine the next speaker in the group chat conversation flow.
@@ -543,7 +567,7 @@ class Chat:
             agents=self.agents,
             messages=[],
             speaker_selection_method=self.custom_speaker_selection_func,
-            max_round=500,
+            max_round=self.groupchat_config.groupchat_settings.get("max_round", 500),
         )
         self.manager = GroupChatManager(
             groupchat=self.groupchat,

@@ -839,7 +839,7 @@ conversation = """
       ]
     },
     "knowledge_base": {
-      "company_info": "<company_details>Created by Ravian.AI team: Lokesh, Surya, Jignesh, Divya, and Satyam</company_details>",
+      "company_info": "<company_details>Created by Ravian.AI team: Lokesh, Surya, Jignesh, and Divya</company_details>",
       "technology_focus": "<tech_stack>Large Action Models (LAMs) combining reasoning with execution capabilities. Ravian AI is an application that work on workflow automation.</tech_stack>",
       "target_audience": "<users>Both individuals and enterprises seeking intelligent automation solutions</users>"
     },

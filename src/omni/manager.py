@@ -311,7 +311,7 @@ class Omni:
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.task_id = None
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         self.groupchat_config = (
             GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
                 "omni"
@@ -676,12 +676,14 @@ class Omni:
 
     def get_agent_caller(self):
         """Create and configure the agent caller."""
-        llm_config_name = (
-            self.groupchat_config.get_agent_config("agent_caller").llm_config
-            or "default"
-        )
+        agent_config = self.groupchat_config.get_agent_config("agent_caller")
+        llm_config_name = agent_config.llm_config or "default"
         llm_config_caller = LLMConfigManager.get_config(llm_config_name)
-        llm_config_caller["config_list"][0]["tool_choice"] = {"type": "any"}
+        # llm_config_caller["config_list"][0]["tool_choice"] = {"type": "any"}
+        if agent_config.custom_properties.get("tool_choice"):
+            llm_config_caller["config_list"][0]["tool_choice"] = agent_config.custom_properties.get(
+                "tool_choice"
+            )
         return autogen.AssistantAgent(
             name="agent_caller",
             llm_config=llm_config_caller,

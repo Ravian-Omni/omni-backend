@@ -1,8 +1,10 @@
 import logging
+import ssl
 from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
+import certifi
 
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.routes import RoutesConfig
@@ -18,13 +20,16 @@ class BraveSearchClient:
         api_key (str): Brave Search API subscription token
         base_url (str): Base URL for Brave Search API
         headers (Dict[str, str]): HTTP headers for API requests
+        ssl_context (ssl.SSLContext): SSL context for HTTPS requests
+        verify_ssl (bool): Whether to verify SSL certificates
     """
 
-    def __init__(self):
+    def __init__(self, verify_ssl: bool = True):
         """Initialize Brave Search API client.
 
         Args:
-            api_key: Brave Search API subscription token
+            verify_ssl: Whether to verify SSL certificates (default: True).
+                       Set to False only for development/testing with self-signed certs.
 
         Raises:
             ValueError: If api_key is not provided
@@ -39,6 +44,15 @@ class BraveSearchClient:
             "Accept-Encoding": "gzip",
             "X-Subscription-Token": self.api_key,
         }
+
+        # Configure SSL context
+        self.verify_ssl = verify_ssl
+        if verify_ssl:
+            # Use certifi's certificate bundle for better cross-platform compatibility
+            self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+        else:
+            # Disable SSL verification (not recommended for production)
+            self.ssl_context = False
 
     async def search(
         self,
@@ -102,7 +116,10 @@ class BraveSearchClient:
         if goggles_id:
             params["goggles_id"] = goggles_id
 
-        async with aiohttp.ClientSession() as session:
+        # Create connector with SSL context
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
             try:
                 async with session.get(
                     f"{self.base_url}/web/search",
@@ -116,6 +133,18 @@ class BraveSearchClient:
                         raise Exception(
                             f"Brave API error {response.status}: {error_text}"
                         )
+            except aiohttp.ClientConnectorCertificateError as e:
+                raise Exception(
+                    f"SSL Certificate verification failed: {str(e)}. "
+                    "This may be due to missing or outdated SSL certificates on your system. "
+                    "Solutions: 1) Update system certificates, 2) Install/update certifi package: pip install --upgrade certifi, "
+                    "3) For development only, you can disable SSL verification by passing verify_ssl=False to BraveSearchClient()"
+                )
+            except aiohttp.ClientSSLError as e:
+                raise Exception(
+                    f"SSL error occurred: {str(e)}. "
+                    "Check your network connection and SSL certificate configuration."
+                )
             except aiohttp.ClientError as e:
                 raise Exception(f"HTTP request failed: {str(e)}")
             except Exception as e:
@@ -792,8 +821,8 @@ if __name__ == "__main__":
 
     async def demo():
         """Demonstrate usage of BraveSearchTool with example searches."""
-        # Initialize client and tool
-        client = BraveSearchClient()
+        # Initialize client and tool with SSL verification enabled (default)
+        client = BraveSearchClient(verify_ssl=True)
         search_tool = BraveSearchTool(client)
 
         # Perform search

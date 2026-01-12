@@ -200,6 +200,7 @@ logs/*
 omni_venv
 ravian/
 test/
+local_test*/
 
 # Build specific
 dist/

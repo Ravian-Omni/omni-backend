@@ -55,7 +55,7 @@ class EmailManager:
             )
         )
         self.user_input_func = self.context.manager_kwargs["input_function"]
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         self.username = settings.USER_EMAIL
         self.password = settings.USER_EMAIL_PASSWORD
         self.agents = self.get_agents()

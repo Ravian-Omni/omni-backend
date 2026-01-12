@@ -29,7 +29,7 @@ class ImageGenerator:
             )
         )
         self.image_dir = ensure_path(os.path.join(self.context.chat_dir, "images"))
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         image_llm_config = LLMConfigManager.get_config("image_together_llm")
         self.image_llm_config = image_llm_config.get("config_list", [])[0]
         self.agents = self.get_agents()
@@ -50,6 +50,8 @@ class ImageGenerator:
         self,
         prompt: Annotated[str, "The image generation prompt"],
         filename: Annotated[str, "The filename to save the image as"],
+        width: Annotated[int, "Width of the image"] = 1792,
+        height: Annotated[int, "Height of the image"] = 1792,
     ):
         """Generate an image using the Flux model."""
         try:
@@ -57,8 +59,8 @@ class ImageGenerator:
             response = client.images.generate(
                 prompt=prompt,
                 model=self.image_llm_config.get("model"),
-                width=1792,  # 1792
-                height=1792,  # 1792
+                width=width,  # 1792
+                height=height,  # 1792
                 steps=40,  # 40 max
                 guidance_scale=18,  # 20 max , guidance is how closely the model should adhere to the prompt guidelines
             )
@@ -92,8 +94,10 @@ class ImageGenerator:
         def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
+            width: Annotated[int, "Width of the image"] = 1792,
+            height: Annotated[int, "Height of the image"] = 1792
         ):
-            return self.flux_image_generator(query, filename)
+            return self.flux_image_generator(prompt=query, filename=filename, width=width, height=height)
 
         autogen.agentchat.register_function(
             flux_image_generator_wrapper,

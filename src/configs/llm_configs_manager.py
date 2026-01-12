@@ -548,7 +548,7 @@ def get_llm_config_clean(config_name: str) -> dict[str, Any]:
 
 #         # 2. Get config with date-based decryption
 #         print(f"\n2. Getting config with date-based decryption:")
-#         config = LLMConfigManager.get_config("gpt_4_1_mini")
+#         config = LLMConfigManager.get_config("default")
 #         print(f"✅ Config retrieved successfully")
 
 #         # 3. List all available configs

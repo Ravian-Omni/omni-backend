@@ -52,7 +52,7 @@ class PythonDeveloper:
             )
         )
         self.websocket_manager = context.manager_kwargs["websocket_manager"]
-        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
+        self.llm_config = LLMConfigManager.get_config("default")
         self.coding_language = "python"
         self.results_dir = ensure_path(os.path.join(self.context.chat_dir, ".code"))
         self.file_location = ensure_path(os.path.join(self.context.chat_dir, "files"))
