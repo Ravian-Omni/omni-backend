@@ -14,7 +14,8 @@ Error Codes:
 import asyncio
 import functools
 import logging
-from typing import Any, Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from src.utilities.async_errors import AsyncErrorCode, create_error
 
@@ -94,6 +95,7 @@ def run_async(coro: Awaitable[T], timeout: float | None = None) -> T:
         asyncio.TimeoutError: If timeout is exceeded.
         RuntimeError: If event loop issues occur.
     """
+
     async def wrapped():
         if timeout:
             return await asyncio.wait_for(coro, timeout=timeout)
@@ -180,15 +182,17 @@ async def with_timeout(
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         error = create_error(
             AsyncErrorCode.OPERATION_TIMEOUT,
             operation_name,
             user_message=f"The operation timed out after {timeout} seconds. Please try again.",
             context={"timeout_seconds": timeout, "operation": operation_name},
         )
-        logger.error(f"[{error.code.value}] {operation_name} timed out after {timeout}s")
-        raise asyncio.TimeoutError(
+        logger.error(
+            f"[{error.code.value}] {operation_name} timed out after {timeout}s"
+        )
+        raise TimeoutError(
             f"[{error.code.value}] {operation_name} timed out after {timeout} seconds"
         )
 

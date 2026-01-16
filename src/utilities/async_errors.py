@@ -10,9 +10,10 @@ This module provides:
 import asyncio
 import functools
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -120,14 +121,17 @@ class AsyncOperationError(Exception):
 
     @property
     def code(self) -> str:
+        """Return the error code value."""
         return self.details.code.value
 
     @property
     def user_message(self) -> str:
+        """Return the user-facing error message."""
         return self.details.user_message
 
     @property
     def technical_message(self) -> str:
+        """Return the technical error message for logging."""
         return self.details.technical_message
 
 
@@ -135,37 +139,25 @@ class AsyncOperationError(Exception):
 class ConnectionError(AsyncOperationError):
     """WebSocket/network connection errors."""
 
-    pass
-
 
 class TaskError(AsyncOperationError):
     """Task execution errors."""
-
-    pass
 
 
 class IOError(AsyncOperationError):
     """File/network I/O errors."""
 
-    pass
-
 
 class ResourceError(AsyncOperationError):
     """Resource management errors."""
-
-    pass
 
 
 class TimeoutError(AsyncOperationError):
     """Operation timeout errors."""
 
-    pass
-
 
 class CancellationError(AsyncOperationError):
     """Operation cancellation errors."""
-
-    pass
 
 
 def create_error(
@@ -276,7 +268,7 @@ def handle_async_errors(
                     f"[{error.code.value}] {operation_name} cancelled: {error.technical_message}"
                 )
                 raise CancellationError(error) from e
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 error = create_error(
                     AsyncErrorCode.OPERATION_TIMEOUT,
                     operation_name,
@@ -301,7 +293,7 @@ def handle_async_errors(
                 logger.error(
                     f"[{error.code.value}] {operation_name} I/O error: {error.technical_message}"
                 )
-                raise IOError(error) from e
+                raise OSError(error) from e
             except Exception as e:
                 error = create_error(
                     default_error_code,
@@ -347,7 +339,7 @@ async def safe_task_execution(
         if on_cancel:
             on_cancel()
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         error = create_error(
             AsyncErrorCode.TASK_TIMEOUT,
             operation_name,
@@ -431,7 +423,9 @@ class TaskTracker:
                         original_exception=e,
                         context={"task_id": task_id},
                     )
-                    logger.error(f"[{error.code.value}] Task {task_id} failed: {str(e)}")
+                    logger.error(
+                        f"[{error.code.value}] Task {task_id} failed: {str(e)}"
+                    )
                     if on_error:
                         on_error(error)
                     raise
@@ -473,7 +467,7 @@ class TaskTracker:
             task.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+            except (asyncio.CancelledError, TimeoutError):
                 pass
 
             return True

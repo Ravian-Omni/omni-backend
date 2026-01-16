@@ -119,7 +119,9 @@ class WebSocketManager:
                 context={"session_id": session_id},
                 original_exception=e,
             )
-            logger.error(f"[{error.code.value}] Connection error for session {session_id}: {e}")
+            logger.error(
+                f"[{error.code.value}] Connection error for session {session_id}: {e}"
+            )
             return False
 
     async def chat_mode_initiate(
@@ -155,7 +157,9 @@ class WebSocketManager:
                     user_message="Session not found. Please reconnect and try again.",
                     context={"session_id": session_id},
                 )
-                raise ValueError(f"[{error.code.value}] No active connection for session {session_id}")
+                raise ValueError(
+                    f"[{error.code.value}] No active connection for session {session_id}"
+                )
 
         # Thread-safe state initialization
         async with self._flags_lock:
@@ -245,7 +249,9 @@ class WebSocketManager:
                 context={"session_id": session_id},
                 original_exception=e,
             )
-            logger.error(f"[{error.code.value}] Chat stream error for session {session_id}: {e}")
+            logger.error(
+                f"[{error.code.value}] Chat stream error for session {session_id}: {e}"
+            )
             traceback.print_exc()
             await self._handle_stream_error(session_id, e, error)
         finally:
@@ -289,7 +295,9 @@ class WebSocketManager:
                     user_message="Session not found. Please reconnect and try again.",
                     context={"session_id": session_id},
                 )
-                raise ValueError(f"[{error.code.value}] No active connection for session {session_id}")
+                raise ValueError(
+                    f"[{error.code.value}] No active connection for session {session_id}"
+                )
 
         # Thread-safe state initialization
         async with self._flags_lock:
@@ -383,7 +391,9 @@ class WebSocketManager:
                 context={"session_id": session_id},
                 original_exception=e,
             )
-            logger.error(f"[{error.code.value}] Chat stream error for session {session_id}: {e}")
+            logger.error(
+                f"[{error.code.value}] Chat stream error for session {session_id}: {e}"
+            )
             traceback.print_exc()
             await self._handle_stream_error(session_id, e, error)
         finally:
@@ -599,7 +609,9 @@ class WebSocketManager:
                                     technical_message=str(e),
                                     context={"session_id": session_id},
                                 )
-                                logger.warning(f"[{error.code.value}] Error cleaning up executor: {e}")
+                                logger.warning(
+                                    f"[{error.code.value}] Error cleaning up executor: {e}"
+                                )
                         self.active_executor.pop(session_id, None)
 
                 # Step 4: Handle browser cleanup (thread-safe)
@@ -617,13 +629,15 @@ class WebSocketManager:
                                 self.close_browser_session(browser),
                                 timeout=5.0,
                             )
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             error = create_error(
                                 AsyncErrorCode.OPERATION_TIMEOUT,
                                 "browser_close",
                                 context={"session_id": session_id, "timeout": 5.0},
                             )
-                            logger.warning(f"[{error.code.value}] Browser close timed out for {session_id}")
+                            logger.warning(
+                                f"[{error.code.value}] Browser close timed out for {session_id}"
+                            )
                         except Exception as e:
                             error = create_error(
                                 AsyncErrorCode.BROWSER_SESSION_FAILED,
@@ -631,13 +645,17 @@ class WebSocketManager:
                                 technical_message=str(e),
                                 context={"session_id": session_id},
                             )
-                            logger.warning(f"[{error.code.value}] Error closing browser for {session_id}: {e}")
+                            logger.warning(
+                                f"[{error.code.value}] Error closing browser for {session_id}: {e}"
+                            )
 
                         # Wait for browser task to complete
                         try:
                             await asyncio.wait_for(agent_task, timeout=2.0)
-                        except asyncio.TimeoutError:
-                            logger.warning(f"Browser task wait timed out for {session_id}")
+                        except TimeoutError:
+                            logger.warning(
+                                f"Browser task wait timed out for {session_id}"
+                            )
                         except asyncio.CancelledError:
                             pass  # Expected
                         except Exception as e:
@@ -654,8 +672,10 @@ class WebSocketManager:
                             task.cancel()
                             try:
                                 await asyncio.wait_for(task, timeout=3.0)
-                            except asyncio.TimeoutError:
-                                logger.warning(f"Main task wait timed out for {session_id}")
+                            except TimeoutError:
+                                logger.warning(
+                                    f"Main task wait timed out for {session_id}"
+                                )
                             except asyncio.CancelledError:
                                 pass  # Expected
                             except Exception as e:
@@ -689,7 +709,9 @@ class WebSocketManager:
                     context={"session_id": session_id, "reason": reason},
                     original_exception=e,
                 )
-                logger.error(f"[{error.code.value}] Error stopping session {session_id}: {e}")
+                logger.error(
+                    f"[{error.code.value}] Error stopping session {session_id}: {e}"
+                )
 
     async def close_browser_session(self, browser_session) -> bool:
         """Attempt to close browser gracefully using the session's built-in methods.
@@ -844,8 +866,12 @@ class WebSocketManager:
         # Thread-safe check for closed connections
         async with self._connections_lock:
             if session_id in self._closed_connections:
-                logger.warning(f"Attempted to send message to closed session {session_id}")
-                raise Exception(f"[{AsyncErrorCode.WEBSOCKET_DISCONNECTED.value}] Session closed for {session_id}")
+                logger.warning(
+                    f"Attempted to send message to closed session {session_id}"
+                )
+                raise Exception(
+                    f"[{AsyncErrorCode.WEBSOCKET_DISCONNECTED.value}] Session closed for {session_id}"
+                )
 
             websocket = self._connections.get(session_id)
 
@@ -860,7 +886,9 @@ class WebSocketManager:
                 "send_message",
                 context={"session_id": session_id},
             )
-            logger.warning(f"[{error.code.value}] WebSocket disconnected for session {session_id}")
+            logger.warning(
+                f"[{error.code.value}] WebSocket disconnected for session {session_id}"
+            )
             await self.disconnect(session_id)
         except Exception as e:
             error = create_error(
@@ -870,7 +898,9 @@ class WebSocketManager:
                 context={"session_id": session_id},
                 original_exception=e,
             )
-            logger.error(f"[{error.code.value}] Error sending message for session {session_id}: {e}")
+            logger.error(
+                f"[{error.code.value}] Error sending message for session {session_id}: {e}"
+            )
             await self.disconnect(session_id)
 
     async def _handle_stream_error(
@@ -942,13 +972,15 @@ class WebSocketManager:
                 for session_id in list(self.active_connections):
                     try:
                         await asyncio.wait_for(self.disconnect(session_id), timeout=2)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         error = create_error(
                             AsyncErrorCode.OPERATION_TIMEOUT,
                             "cleanup_disconnect",
                             context={"session_id": session_id, "timeout": 2},
                         )
-                        logger.warning(f"[{error.code.value}] Timeout disconnecting session {session_id}")
+                        logger.warning(
+                            f"[{error.code.value}] Timeout disconnecting session {session_id}"
+                        )
                     except Exception as e:
                         error = create_error(
                             AsyncErrorCode.INTERNAL_ERROR,
@@ -956,14 +988,16 @@ class WebSocketManager:
                             technical_message=str(e),
                             context={"session_id": session_id},
                         )
-                        logger.error(f"[{error.code.value}] Error disconnecting session {session_id}: {e}")
+                        logger.error(
+                            f"[{error.code.value}] Error disconnecting session {session_id}: {e}"
+                        )
 
             await asyncio.wait_for(disconnect_all(), timeout=10)
 
             # Clean up task tracker
             await self._task_tracker.cancel_all()
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             error = create_error(
                 AsyncErrorCode.OPERATION_TIMEOUT,
                 "websocket_manager_cleanup",
@@ -977,7 +1011,9 @@ class WebSocketManager:
                 technical_message=str(e),
                 original_exception=e,
             )
-            logger.error(f"[{error.code.value}] Error during WebSocketManager cleanup: {e}")
+            logger.error(
+                f"[{error.code.value}] Error during WebSocketManager cleanup: {e}"
+            )
         finally:
             # Clear all internal state (thread-safe)
             LLMConfigManager.clear_cache()

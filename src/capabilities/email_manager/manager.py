@@ -339,7 +339,9 @@ class EmailManager:
                     if os.path.exists(file_path):
                         try:
                             # Use async file I/O for non-blocking reads
-                            async with aiofiles.open(file_path, "rb") as attachment_file:
+                            async with aiofiles.open(
+                                file_path, "rb"
+                            ) as attachment_file:
                                 file_content = await attachment_file.read()
 
                             part = MIMEBase("application", "octet-stream")
@@ -347,7 +349,8 @@ class EmailManager:
                             encoders.encode_base64(part)
                             filename = os.path.basename(file_path)
                             part.add_header(
-                                "Content-Disposition", f"attachment; filename= {filename}"
+                                "Content-Disposition",
+                                f"attachment; filename= {filename}",
                             )
                             msg.attach(part)
                             attachment_info.append(
@@ -365,7 +368,9 @@ class EmailManager:
                                 technical_message=str(e),
                                 context={"file_path": file_path},
                             )
-                            logger.error(f"[{error.code.value}] Attachment read failed: {e}")
+                            logger.error(
+                                f"[{error.code.value}] Attachment read failed: {e}"
+                            )
                             return {
                                 "status": "error",
                                 "error_code": error.code.value,
@@ -418,7 +423,11 @@ class EmailManager:
                 "email_send",
                 user_message="Failed to send email. Please check your email settings and try again.",
                 technical_message=str(e),
-                context={"recipients": final_recipients if 'final_recipients' in dir() else recipients},
+                context={
+                    "recipients": (
+                        final_recipients if "final_recipients" in dir() else recipients
+                    )
+                },
             )
             logger.error(f"[{error.code.value}] SMTP error: {e}")
             return {
@@ -549,7 +558,9 @@ class EmailManager:
                                         technical_message=str(e),
                                         context={"file_path": full_path},
                                     )
-                                    logger.error(f"[{error.code.value}] Attachment save failed: {e}")
+                                    logger.error(
+                                        f"[{error.code.value}] Attachment save failed: {e}"
+                                    )
                 else:
                     # Single-part email
                     try:

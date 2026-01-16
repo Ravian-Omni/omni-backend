@@ -92,13 +92,15 @@ def _create_tracked_task(
 async def _notify_error(websocket: WebSocket, error) -> None:
     """Send error notification to client."""
     try:
-        await websocket.send_json({
-            "type": "error",
-            "error_code": error.code.value,
-            "message": error.user_message,
-            "support_reference": f"Contact support with code: {error.code.value}",
-            "timestamp": dt.now_iso(),
-        })
+        await websocket.send_json(
+            {
+                "type": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+                "timestamp": dt.now_iso(),
+            }
+        )
     except Exception:
         pass  # Connection may be closed
 
@@ -112,12 +114,14 @@ async def _send_error(websocket: WebSocket, chat_id: str, message: str) -> None:
         context={"session_id": chat_id},
     )
     logger.warning(f"[{error.code.value}] {message} for session {chat_id}")
-    await websocket.send_json({
-        "type": "error",
-        "error_code": error.code.value,
-        "message": error.user_message,
-        "support_reference": f"Contact support with code: {error.code.value}",
-    })
+    await websocket.send_json(
+        {
+            "type": "error",
+            "error_code": error.code.value,
+            "message": error.user_message,
+            "support_reference": f"Contact support with code: {error.code.value}",
+        }
+    )
 
 
 # =============================================================================
@@ -154,7 +158,11 @@ async def _handle_messages(
                 logger.info(f"Start request for {mode} session {chat_id}")
 
                 if not message.get("task"):
-                    await _send_error(websocket, chat_id, "Invalid request format. Please provide a task.")
+                    await _send_error(
+                        websocket,
+                        chat_id,
+                        "Invalid request format. Please provide a task.",
+                    )
                     continue
 
                 # Determine which coroutine to run based on mode
@@ -232,41 +240,51 @@ async def omni_websocket(
 
     try:
         # Initialize
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "connecting",
-            "message": "Loading chat history...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "connecting",
+                "message": "Loading chat history...",
+            }
+        )
 
         history = await load_omni_chat_history(chat_id, user_id)
         if not history:
             logger.warning(f"Omni session not found: {chat_id}")
-            await websocket.send_json({"type": "error", "error": "Chat session not found"})
+            await websocket.send_json(
+                {"type": "error", "error": "Chat session not found"}
+            )
             await websocket.close(code=4003, reason="Run not found")
             return
 
         chat_dir = history.get("chat_dir", get_default_chat_dir())
         messages = history.get("messages", [])
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "initializing",
-            "message": "Initializing Omni agent and loading tools...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "initializing",
+                "message": "Initializing Omni agent and loading tools...",
+            }
+        )
 
         omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "configuring",
-            "message": "Loading user context...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "configuring",
+                "message": "Loading user context...",
+            }
+        )
 
         # Load user context
         user_details = await get_user_details()
         user_context = extract_user_summary(user_details)
         context = build_user_context(user_context)
-        omni.judge_question.update_system_message(omni.judge_question.system_message + context)
+        omni.judge_question.update_system_message(
+            omni.judge_question.system_message + context
+        )
 
         # Resume history
         if messages:
@@ -279,11 +297,13 @@ async def omni_websocket(
         omni.get_user_acceptance.set_input_function(input_func)
         omni.set_input_function(input_func)
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "ready",
-            "message": "Omni ready",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "ready",
+                "message": "Omni ready",
+            }
+        )
 
         logger.info(f"Omni ready for session {chat_id}")
         await _handle_messages(websocket, chat_id, ws_manager, omni, mode="omni")
@@ -293,7 +313,9 @@ async def omni_websocket(
     except Exception as e:
         logger.error(f"Omni WebSocket error: {e}")
         try:
-            await websocket.send_json({"type": "error", "error": f"Initialization failed: {str(e)}"})
+            await websocket.send_json(
+                {"type": "error", "error": f"Initialization failed: {str(e)}"}
+            )
         except Exception:
             pass
     finally:
@@ -322,35 +344,43 @@ async def chat_websocket(
     logger.info(f"WebSocket connected for chat session {chat_id}")
 
     try:
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "connecting",
-            "message": "Loading chat history...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "connecting",
+                "message": "Loading chat history...",
+            }
+        )
 
         history = await load_chat_mode_history(chat_id, user_id)
         if not history:
             logger.warning(f"Chat session not found: {chat_id}")
-            await websocket.send_json({"type": "error", "error": "Chat session not found"})
+            await websocket.send_json(
+                {"type": "error", "error": "Chat session not found"}
+            )
             await websocket.close(code=4003, reason="Run not found")
             return
 
         chat_dir = history.get("chat_dir", get_default_chat_dir())
         messages = history.get("messages", [])
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "initializing",
-            "message": "Initializing chat agent and loading tools...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "initializing",
+                "message": "Initializing chat agent and loading tools...",
+            }
+        )
 
         chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "configuring",
-            "message": "Loading user context...",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "configuring",
+                "message": "Loading user context...",
+            }
+        )
 
         # Load user context
         user_details = await get_user_details()
@@ -367,11 +397,13 @@ async def chat_websocket(
         chat.agent_executor.set_input_function(input_func)
         chat.set_input_function(input_func)
 
-        await websocket.send_json({
-            "type": "init_status",
-            "status": "ready",
-            "message": "Chat ready",
-        })
+        await websocket.send_json(
+            {
+                "type": "init_status",
+                "status": "ready",
+                "message": "Chat ready",
+            }
+        )
 
         logger.info(f"Chat ready for session {chat_id}")
         await _handle_messages(websocket, chat_id, ws_manager, chat, mode="chat")
@@ -381,7 +413,9 @@ async def chat_websocket(
     except Exception as e:
         logger.error(f"Chat WebSocket error: {e}")
         try:
-            await websocket.send_json({"type": "error", "error": f"Initialization failed: {str(e)}"})
+            await websocket.send_json(
+                {"type": "error", "error": f"Initialization failed: {str(e)}"}
+            )
         except Exception:
             pass
     finally:
@@ -412,7 +446,9 @@ async def capability_websocket(
         raise HTTPException(status_code=400, detail=str(e))
 
     if class_instance is None:
-        raise HTTPException(status_code=400, detail=f"Unsupported capability: {capability_name}")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported capability: {capability_name}"
+        )
 
     # Load chat history
     history = await load_capability_chat_history(chat_id, user_id, collection_name)
@@ -447,7 +483,9 @@ async def capability_websocket(
 
     try:
         logger.info(f"WebSocket connected for capability session {chat_id}")
-        await _handle_messages(websocket, chat_id, ws_manager, capability_instance, mode="capability")
+        await _handle_messages(
+            websocket, chat_id, ws_manager, capability_instance, mode="capability"
+        )
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for capability session {chat_id}")

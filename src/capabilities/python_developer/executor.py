@@ -966,9 +966,7 @@ class InteractiveLocalCommandLineCodeExecutor(LocalCommandLineCodeExecutor):
                     if not task.done():
                         task.cancel()
                         try:
-                            await asyncio.wait_for(
-                                asyncio.shield(task), timeout=1.0
-                            )
+                            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
                         except (asyncio.CancelledError, TimeoutError):
                             pass
                     del self._process_monitor_tasks[process_id]
