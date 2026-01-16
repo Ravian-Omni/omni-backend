@@ -213,6 +213,76 @@ async def _handle_messages(
                     process_id=message.get("process_id"),
                 )
 
+            # === CONNECT_APP: Connect a new Composio app (chat mode only) ===
+            elif msg_type == "connect_app" and mode == "chat":
+                app_name = message.get("app")
+                if not app_name:
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "success": False,
+                            "message": "Missing 'app' field in request",
+                        }
+                    )
+                    continue
+
+                logger.info(f"Connect app request: {app_name} for session {chat_id}")
+                try:
+                    result = await instance.connect_app(app_name)
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "action": "connect",
+                            **result,
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to connect app {app_name}: {e}")
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "action": "connect",
+                            "success": False,
+                            "app": app_name,
+                            "message": f"Failed to connect app: {str(e)}",
+                        }
+                    )
+
+            # === DISCONNECT_APP: Disconnect a Composio app (chat mode only) ===
+            elif msg_type == "disconnect_app" and mode == "chat":
+                app_name = message.get("app")
+                if not app_name:
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "success": False,
+                            "message": "Missing 'app' field in request",
+                        }
+                    )
+                    continue
+
+                logger.info(f"Disconnect app request: {app_name} for session {chat_id}")
+                try:
+                    result = await instance.disconnect_app(app_name)
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "action": "disconnect",
+                            **result,
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to disconnect app {app_name}: {e}")
+                    await websocket.send_json(
+                        {
+                            "type": "app_connection_result",
+                            "action": "disconnect",
+                            "success": False,
+                            "app": app_name,
+                            "message": f"Failed to disconnect app: {str(e)}",
+                        }
+                    )
+
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON received for session {chat_id}")
             await websocket.send_json(create_error_response("Invalid message format"))

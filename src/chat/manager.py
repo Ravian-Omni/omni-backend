@@ -422,6 +422,54 @@ class Chat:
         """
         ComposioToolCache.get_instance().invalidate(user_id)
 
+    async def connect_app(self, app_name: str) -> dict:
+        """Connect a new app and register its tools in the live session.
+
+        This allows adding new app tools without disconnecting and reconnecting
+        the WebSocket session.
+
+        Args:
+            app_name: App name to connect (e.g., 'GMAIL', 'SLACK')
+
+        Returns:
+            Dict with success status, app name, and tool count
+        """
+        logger.info(f"Connecting app {app_name} for chat {self.chat_id}")
+
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.chat_agent,
+            agent_executor=self.agent_executor,
+        )
+
+        result = await composio_tool_manager.connect_app_async(app_name)
+        logger.info(f"Connect app result for {app_name}: {result}")
+        return result
+
+    async def disconnect_app(self, app_name: str) -> dict:
+        """Disconnect an app and remove its tools from cache.
+
+        Note: Due to Autogen limitations, tools remain active in the current
+        session but won't be available in new sessions.
+
+        Args:
+            app_name: App name to disconnect (e.g., 'GMAIL', 'SLACK')
+
+        Returns:
+            Dict with success status and removed tool count
+        """
+        logger.info(f"Disconnecting app {app_name} for chat {self.chat_id}")
+
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.chat_agent,
+            agent_executor=self.agent_executor,
+        )
+
+        result = await composio_tool_manager.disconnect_app_async(app_name)
+        logger.info(f"Disconnect app result for {app_name}: {result}")
+        return result
+
     def set_input_function(self, input_function):
         """Set the custom input function for user interactions."""
         self.input_function = input_function

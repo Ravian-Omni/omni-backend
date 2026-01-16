@@ -64,19 +64,23 @@ class ToolObject:
         slug (str): Unique tool identifier (e.g., 'GMAIL_SEND_EMAIL')
         description (str): Human-readable description of the tool
         input_parameters (dict): JSON schema of tool parameters
+        app_name (str): The app/toolkit this tool belongs to
     """
 
-    def __init__(self, data: dict[str, Any]):
+    def __init__(self, data: dict[str, Any], app_name: str | None = None):
         function_info = data.get("function", {})
         self.slug = function_info.get("name")
         self.description = function_info.get("description", "")
         self.input_parameters = function_info.get("parameters", {})
+        # Extract app name from slug (e.g., 'GMAIL_SEND_EMAIL' -> 'GMAIL')
+        self.app_name = app_name or (self.slug.split("_")[0] if self.slug else None)
 
 
 class ComposioToolCache:
-    """Thread-safe cache for Composio tools with TTL support.
+    """Persistent cache for Composio tools (lasts until server restart).
 
-    Caches tools per user to avoid repeated API calls during the same session.
+    Caches tools per user to avoid repeated API calls. Since this is a local
+    backend, the cache persists for the lifetime of the server process.
     """
 
     _instance = None
@@ -87,7 +91,6 @@ class ComposioToolCache:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._cache = {}
-            cls._instance._cache_ttl = 300  # 5 minutes TTL
             cls._instance._logger = logging.getLogger(__name__)
         return cls._instance
 
@@ -103,17 +106,11 @@ class ComposioToolCache:
         return f"tools:{user_id}"
 
     def get(self, user_id: str) -> dict[str, Any] | None:
-        """Get cached tools for user if not expired."""
+        """Get cached tools for user (no expiry - persists until server restart)."""
         key = self._cache_key(user_id)
         if key in self._cache:
-            cached = self._cache[key]
-            if time.time() - cached["timestamp"] < self._cache_ttl:
-                self._logger.info(f"Cache hit for user {user_id}")
-                return cached["data"]
-            else:
-                # Expired, remove from cache
-                del self._cache[key]
-                self._logger.info(f"Cache expired for user {user_id}")
+            self._logger.info(f"Cache hit for user {user_id}")
+            return self._cache[key]["data"]
         return None
 
     def set(self, user_id: str, data: dict[str, Any]) -> None:
@@ -121,6 +118,137 @@ class ComposioToolCache:
         key = self._cache_key(user_id)
         self._cache[key] = {"data": data, "timestamp": time.time()}
         self._logger.info(f"Cached tools for user {user_id}")
+
+    def add_app(self, user_id: str, app_name: str, app_tools: list[dict]) -> bool:
+        """Add tools for a newly connected app to the cache.
+
+        Args:
+            user_id: User identifier
+            app_name: App name (e.g., 'GMAIL')
+            app_tools: List of raw tool definitions for the app
+
+        Returns:
+            True if app was added, False if cache doesn't exist for user
+        """
+        key = self._cache_key(user_id)
+        if key not in self._cache:
+            self._logger.warning(f"No cache exists for user {user_id}, cannot add app")
+            return False
+
+        cached_data = self._cache[key]["data"]
+        existing_tools = cached_data.get("raw_tools", [])
+        existing_toolkits = cached_data.get("toolkits", [])
+
+        # Add app to toolkits if not already present
+        app_upper = app_name.upper()
+        if app_upper not in existing_toolkits:
+            existing_toolkits.append(app_upper)
+
+        # Add new tools
+        existing_tools.extend(app_tools)
+
+        # Update cache
+        cached_data["raw_tools"] = existing_tools
+        cached_data["toolkits"] = existing_toolkits
+        self._cache[key]["timestamp"] = time.time()
+
+        self._logger.info(
+            f"Added {len(app_tools)} tools for app {app_name} to cache for user {user_id}"
+        )
+        return True
+
+    def remove_app(self, user_id: str, app_name: str) -> list[str]:
+        """Remove tools for a disconnected app from the cache.
+
+        Args:
+            user_id: User identifier
+            app_name: App name to remove (e.g., 'GMAIL')
+
+        Returns:
+            List of tool slugs that were removed
+        """
+        key = self._cache_key(user_id)
+        if key not in self._cache:
+            self._logger.warning(
+                f"No cache exists for user {user_id}, cannot remove app"
+            )
+            return []
+
+        cached_data = self._cache[key]["data"]
+        existing_tools = cached_data.get("raw_tools", [])
+        existing_toolkits = cached_data.get("toolkits", [])
+
+        app_upper = app_name.upper()
+        removed_slugs = []
+
+        # Remove app from toolkits
+        if app_upper in existing_toolkits:
+            existing_toolkits.remove(app_upper)
+
+        # Remove tools belonging to this app
+        filtered_tools = []
+        for tool in existing_tools:
+            func_info = tool.get("function", {})
+            tool_name = func_info.get("name", "")
+            # Tools are named like APP_ACTION (e.g., GMAIL_SEND_EMAIL)
+            if tool_name.startswith(f"{app_upper}_"):
+                removed_slugs.append(tool_name)
+            else:
+                filtered_tools.append(tool)
+
+        cached_data["raw_tools"] = filtered_tools
+        cached_data["toolkits"] = existing_toolkits
+        self._cache[key]["timestamp"] = time.time()
+
+        self._logger.info(
+            f"Removed {len(removed_slugs)} tools for app {app_name} from cache for user {user_id}"
+        )
+        return removed_slugs
+
+    def get_app_tools(self, user_id: str, app_name: str) -> list[dict]:
+        """Get cached tools for a specific app.
+
+        Args:
+            user_id: User identifier
+            app_name: App name (e.g., 'GMAIL')
+
+        Returns:
+            List of raw tool definitions for the app
+        """
+        key = self._cache_key(user_id)
+        if key not in self._cache:
+            return []
+
+        cached_data = self._cache[key]["data"]
+        existing_tools = cached_data.get("raw_tools", [])
+        app_upper = app_name.upper()
+
+        app_tools = []
+        for tool in existing_tools:
+            func_info = tool.get("function", {})
+            tool_name = func_info.get("name", "")
+            if tool_name.startswith(f"{app_upper}_"):
+                app_tools.append(tool)
+
+        return app_tools
+
+    def has_app(self, user_id: str, app_name: str) -> bool:
+        """Check if an app is in the cache for a user.
+
+        Args:
+            user_id: User identifier
+            app_name: App name (e.g., 'GMAIL')
+
+        Returns:
+            True if app is cached
+        """
+        key = self._cache_key(user_id)
+        if key not in self._cache:
+            return False
+
+        cached_data = self._cache[key]["data"]
+        toolkits = cached_data.get("toolkits", [])
+        return app_name.upper() in toolkits
 
     def invalidate(self, user_id: str) -> None:
         """Invalidate cache for user."""
@@ -144,6 +272,7 @@ class ComposioToolManager:
     - Registering tools with chat and executor agents
     - Executing tool actions with proper error handling
     - Caching tools to avoid repeated API calls
+    - Live connection/disconnection of apps without reconnecting
 
     Attributes:
         user_id (str): Unique identifier for the user's Composio session
@@ -352,16 +481,19 @@ class ComposioToolManager:
         )
         return raw_tools
 
-    def create_tool_wrappers(self, raw_tools: list[dict[str, Any]]) -> list[ToolObject]:
+    def create_tool_wrappers(
+        self, raw_tools: list[dict[str, Any]], app_name: str | None = None
+    ) -> list[ToolObject]:
         """Convert raw tool definitions into Autogen-compatible tool objects.
 
         Args:
             raw_tools (List[Dict[str, Any]]): Raw tool definitions from Composio API
+            app_name: Optional app name to associate with tools
 
         Returns:
             List[ToolObject]: List of wrapped tool objects ready for Autogen
         """
-        tools = [ToolObject(tool) for tool in raw_tools]
+        tools = [ToolObject(tool, app_name) for tool in raw_tools]
 
         self.logger.info(f"Created {len(tools)} tool wrappers")
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -516,6 +648,150 @@ class ComposioToolManager:
             )
             raise
 
+    async def connect_app_async(self, app_name: str) -> dict[str, Any]:
+        """Connect a new app and register its tools without full reload.
+
+        This method fetches tools for a single app, updates the cache,
+        and registers the new tools with the agents.
+
+        Args:
+            app_name: App name to connect (e.g., 'GMAIL')
+
+        Returns:
+            Dict with status, app name, and tool count
+        """
+        app_upper = app_name.upper()
+        start_time = time.time()
+
+        try:
+            # Check if app is already connected
+            if self._cache.has_app(self.user_id, app_upper):
+                self.logger.info(
+                    f"App {app_upper} already connected for user {self.user_id}"
+                )
+                return {
+                    "success": True,
+                    "app": app_upper,
+                    "tool_count": len(
+                        self._cache.get_app_tools(self.user_id, app_upper)
+                    ),
+                    "message": "App already connected",
+                    "already_connected": True,
+                }
+
+            # Fetch tools for the new app
+            self.logger.info(f"Connecting app {app_upper} for user {self.user_id}")
+            app_tools = await self._fetch_toolkit_tools(app_upper)
+
+            if not app_tools:
+                self.logger.warning(f"No tools found for app {app_upper}")
+                return {
+                    "success": False,
+                    "app": app_upper,
+                    "tool_count": 0,
+                    "message": f"No tools found for app {app_upper}",
+                }
+
+            # Update cache
+            cache_updated = self._cache.add_app(self.user_id, app_upper, app_tools)
+            if not cache_updated:
+                # Cache doesn't exist, create it
+                self._cache.set(
+                    self.user_id,
+                    {"raw_tools": app_tools, "toolkits": [app_upper]},
+                )
+
+            # Create tool wrappers for new tools
+            tools = self.create_tool_wrappers(app_tools, app_upper)
+
+            # Create executor and register tools
+            execute_tool = self.create_tool_executor()
+            tool_count = self.register_tools_with_agents(tools, execute_tool)
+
+            elapsed = time.time() - start_time
+            self.logger.info(
+                f"Connected app {app_upper}: {tool_count} tools in {elapsed:.2f}s"
+            )
+
+            return {
+                "success": True,
+                "app": app_upper,
+                "tool_count": tool_count,
+                "message": f"Successfully connected {app_upper} with {tool_count} tools",
+                "already_connected": False,
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to connect app {app_upper}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "app": app_upper,
+                "tool_count": 0,
+                "message": f"Failed to connect app: {str(e)}",
+                "error": str(e),
+            }
+
+    async def disconnect_app_async(self, app_name: str) -> dict[str, Any]:
+        """Disconnect an app and remove its tools.
+
+        This method removes tools for an app from the cache.
+        Note: Autogen doesn't support unregistering tools at runtime,
+        so the tools will remain registered until the next session.
+        However, the cache is updated so new sessions won't have the tools.
+
+        Args:
+            app_name: App name to disconnect (e.g., 'GMAIL')
+
+        Returns:
+            Dict with status, app name, and removed tools count
+        """
+        app_upper = app_name.upper()
+
+        try:
+            # Check if app is connected
+            if not self._cache.has_app(self.user_id, app_upper):
+                self.logger.info(
+                    f"App {app_upper} not connected for user {self.user_id}"
+                )
+                return {
+                    "success": True,
+                    "app": app_upper,
+                    "removed_count": 0,
+                    "message": "App was not connected",
+                    "was_connected": False,
+                }
+
+            # Remove from cache
+            removed_slugs = self._cache.remove_app(self.user_id, app_upper)
+
+            self.logger.info(
+                f"Disconnected app {app_upper}: removed {len(removed_slugs)} tools from cache"
+            )
+
+            return {
+                "success": True,
+                "app": app_upper,
+                "removed_count": len(removed_slugs),
+                "removed_tools": removed_slugs,
+                "message": (
+                    f"Disconnected {app_upper}. {len(removed_slugs)} tools removed from cache. "
+                    "Note: Tools remain active until session ends."
+                ),
+                "was_connected": True,
+            }
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to disconnect app {app_upper}: {e}", exc_info=True
+            )
+            return {
+                "success": False,
+                "app": app_upper,
+                "removed_count": 0,
+                "message": f"Failed to disconnect app: {str(e)}",
+                "error": str(e),
+            }
+
     # Legacy synchronous methods for backward compatibility
     def get_user_connected_apps(
         self, user_id: str, status_filter: str | None = None
@@ -598,3 +874,11 @@ if __name__ == "__main__":
     # # Async usage (preferred)
     # tool_count = await manager.register_all_tools_async()
     # print(f"Ready to use {tool_count} Composio tools!")
+    #
+    # # Live app connection
+    # result = await manager.connect_app_async("SLACK")
+    # print(f"Connected: {result}")
+    #
+    # # Live app disconnection
+    # result = await manager.disconnect_app_async("SLACK")
+    # print(f"Disconnected: {result}")
