@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from loguru import logger
 
 from src.chat.manager import Chat
+from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType
 from src.dependencies import get_websocket_manager
@@ -33,8 +34,180 @@ from src.services.websocket_service import (
     load_chat_mode_history,
     load_omni_chat_history,
 )
+from src.utilities.async_errors import AsyncErrorCode, create_error
 
 router = APIRouter()
+
+
+# =============================================================================
+# HELPER UTILITIES
+# =============================================================================
+
+
+def _create_tracked_task(
+    coro,
+    websocket: WebSocket,
+    chat_id: str,
+    operation: str,
+) -> asyncio.Task:
+    """Create an async task with automatic error logging and client notification.
+
+    Args:
+        coro: Coroutine to execute.
+        websocket: WebSocket for error notifications.
+        chat_id: Session identifier.
+        operation: Operation name for error context.
+
+    Returns:
+        Created asyncio.Task with error callback attached.
+    """
+    task = asyncio.create_task(coro)
+
+    def on_task_complete(t: asyncio.Task) -> None:
+        try:
+            if t.cancelled():
+                logger.info(f"Task '{operation}' cancelled for session {chat_id}")
+                return
+
+            exc = t.exception()
+            if exc:
+                error = create_error(
+                    AsyncErrorCode.TASK_EXECUTION_FAILED,
+                    operation,
+                    user_message="An error occurred while processing your request. Please try again.",
+                    technical_message=str(exc),
+                    context={"session_id": chat_id},
+                )
+                logger.error(f"[{error.code.value}] Task '{operation}' failed: {exc}")
+
+                # Send error to client
+                asyncio.create_task(_notify_error(websocket, error))
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
+            pass
+
+    task.add_done_callback(on_task_complete)
+    return task
+
+
+async def _notify_error(websocket: WebSocket, error) -> None:
+    """Send error notification to client."""
+    try:
+        await websocket.send_json({
+            "type": "error",
+            "error_code": error.code.value,
+            "message": error.user_message,
+            "support_reference": f"Contact support with code: {error.code.value}",
+            "timestamp": dt.now_iso(),
+        })
+    except Exception:
+        pass  # Connection may be closed
+
+
+async def _send_error(websocket: WebSocket, chat_id: str, message: str) -> None:
+    """Send a simple error response to client."""
+    error = create_error(
+        AsyncErrorCode.TASK_CREATION_FAILED,
+        "message_handler",
+        user_message=message,
+        context={"session_id": chat_id},
+    )
+    logger.warning(f"[{error.code.value}] {message} for session {chat_id}")
+    await websocket.send_json({
+        "type": "error",
+        "error_code": error.code.value,
+        "message": error.user_message,
+        "support_reference": f"Contact support with code: {error.code.value}",
+    })
+
+
+# =============================================================================
+# UNIFIED MESSAGE HANDLER
+# =============================================================================
+
+
+async def _handle_messages(
+    websocket: WebSocket,
+    chat_id: str,
+    ws_manager: WebSocketManager,
+    instance,
+    mode: str = "omni",
+):
+    """Unified WebSocket message handler for all chat modes.
+
+    Handles: start, stop, ping, input_response, executor_input, executor_stop
+
+    Args:
+        websocket: WebSocket connection.
+        chat_id: Session identifier.
+        ws_manager: WebSocket manager.
+        instance: Chat/Omni/Capability instance.
+        mode: One of "omni", "chat", or "capability".
+    """
+    while True:
+        try:
+            raw_message = await websocket.receive_text()
+            message = json.loads(raw_message)
+            msg_type = message.get("type")
+
+            # === START: Begin chat stream ===
+            if msg_type == "start":
+                logger.info(f"Start request for {mode} session {chat_id}")
+
+                if not message.get("task"):
+                    await _send_error(websocket, chat_id, "Invalid request format. Please provide a task.")
+                    continue
+
+                # Determine which coroutine to run based on mode
+                if mode == "chat":
+                    coro = ws_manager.chat_mode_initiate(
+                        session_id=chat_id, initial_message=message, chat=instance
+                    )
+                else:  # "omni" or "capability"
+                    coro = ws_manager.start_chat_stream(
+                        session_id=chat_id, initial_message=message, omni=instance
+                    )
+
+                _create_tracked_task(coro, websocket, chat_id, f"{mode}_stream")
+
+            # === STOP: Cancel current session ===
+            elif msg_type == "stop":
+                logger.info(f"Stop request for session {chat_id}")
+                LLMConfigManager.clear_cache()
+                reason = message.get("reason", "User requested stop/cancellation")
+                await ws_manager.stop_session(chat_id, reason=reason)
+
+            # === PING: Keep-alive ===
+            elif msg_type == "ping":
+                await websocket.send_json(create_pong_response())
+
+            # === INPUT_RESPONSE: User input for prompts ===
+            elif msg_type == "input_response":
+                response = message.get("response")
+                if response is not None:
+                    await ws_manager.handle_input_response(chat_id, response)
+                else:
+                    logger.warning(f"Invalid input_response for session {chat_id}")
+
+            # === EXECUTOR_INPUT: Terminal input (omni/chat mode only) ===
+            elif msg_type == "executor_input" and mode in ("omni", "chat"):
+                logger.info(f"Executor input for session {chat_id}")
+                await ws_manager.terminal_input(
+                    session_id=chat_id,
+                    process_id=message.get("process_id"),
+                    input_text=message.get("response"),
+                )
+
+            # === EXECUTOR_STOP: Kill terminal process (omni/chat mode only) ===
+            elif msg_type == "executor_stop" and mode in ("omni", "chat"):
+                logger.info(f"Executor stop for session {chat_id}")
+                await ws_manager.terminal_kill(
+                    session_id=chat_id,
+                    process_id=message.get("process_id"),
+                )
+
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid JSON received for session {chat_id}")
+            await websocket.send_json(create_error_response("Invalid message format"))
 
 
 # =============================================================================
@@ -49,87 +222,53 @@ async def omni_websocket(
     user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for Omni multi-capability AI chat.
-
-    Handles real-time communication for Omni conversations with support for
-    multiple AI capabilities, context preservation, and streaming responses.
-
-    Uses early connection pattern: WebSocket is connected first, then heavy
-    initialization happens in background with status updates to the client.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Unique identifier for the chat session.
-        user_id: User identifier. Defaults to test user ID.
-        ws_manager: WebSocket manager dependency for connection handling.
-
-    Raises:
-        WebSocketDisconnect: When connection is closed by client or server.
-    """
-    # STEP 1: Connect WebSocket FIRST (before any heavy initialization)
+    """WebSocket endpoint for Omni multi-capability AI chat."""
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
         await websocket.close(code=4002, reason="Failed to establish connection")
         return
 
-    logger.info(f"WebSocket connection established for run {chat_id}")
+    logger.info(f"WebSocket connected for omni session {chat_id}")
 
     try:
-        # Send initialization status to client
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "connecting",
-                "message": "Loading chat history...",
-            }
-        )
+        # Initialize
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "connecting",
+            "message": "Loading chat history...",
+        })
 
-        # STEP 2: Load chat history (lightweight API call)
         history = await load_omni_chat_history(chat_id, user_id)
         if not history:
-            logger.warning(f"Run not found: {user_id} & {chat_id}")
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": "Chat session not found",
-                }
-            )
+            logger.warning(f"Omni session not found: {chat_id}")
+            await websocket.send_json({"type": "error", "error": "Chat session not found"})
             await websocket.close(code=4003, reason="Run not found")
             return
 
         chat_dir = history.get("chat_dir", get_default_chat_dir())
         messages = history.get("messages", [])
 
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "initializing",
-                "message": "Initializing Omni agent and loading tools...",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "initializing",
+            "message": "Initializing Omni agent and loading tools...",
+        })
 
-        # STEP 3: Initialize Omni instance (heavy - includes tool registration)
         omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "configuring",
-                "message": "Loading user context...",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "configuring",
+            "message": "Loading user context...",
+        })
 
-        # STEP 4: Load user context
+        # Load user context
         user_details = await get_user_details()
         user_context = extract_user_summary(user_details)
         context = build_user_context(user_context)
+        omni.judge_question.update_system_message(omni.judge_question.system_message + context)
 
-        # Update system message with user context
-        omni.judge_question.update_system_message(
-            omni.judge_question.system_message + context
-        )
-
-        # Resume from existing messages if available
+        # Resume history
         if messages:
             omni.manager.resume(messages=messages)
             omni.memory.load_main_messages(messages)
@@ -140,36 +279,21 @@ async def omni_websocket(
         omni.get_user_acceptance.set_input_function(input_func)
         omni.set_input_function(input_func)
 
-        # Send ready status
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "ready",
-                "message": "Omni ready",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "ready",
+            "message": "Omni ready",
+        })
 
-        logger.info(f"Omni initialization complete for {chat_id}")
-
-        # STEP 5: Handle messages
-        await _handle_websocket_messages(
-            websocket, chat_id, ws_manager, omni, is_chat_mode=False
-        )
+        logger.info(f"Omni ready for session {chat_id}")
+        await _handle_messages(websocket, chat_id, ws_manager, omni, mode="omni")
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for run {chat_id}")
-        LLMConfigManager.clear_cache()
+        logger.info(f"WebSocket disconnected for omni session {chat_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
-        LLMConfigManager.clear_cache()
-        # Try to send error to client before closing
+        logger.error(f"Omni WebSocket error: {e}")
         try:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": f"Initialization failed: {str(e)}",
-                }
-            )
+            await websocket.send_json({"type": "error", "error": f"Initialization failed: {str(e)}"})
         except Exception:
             pass
     finally:
@@ -189,87 +313,52 @@ async def chat_websocket(
     user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for Chat mode AI conversations.
-
-    Handles real-time communication for Chat mode conversations with support for
-    multiple AI capabilities, context preservation, and streaming responses.
-
-    Uses early connection pattern: WebSocket is connected first, then heavy
-    initialization happens in background with status updates to the client.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Unique identifier for the chat session.
-        user_id: User identifier. Defaults to test user ID.
-        ws_manager: WebSocket manager dependency for connection handling.
-
-    Raises:
-        WebSocketDisconnect: When connection is closed by client or server.
-    """
-    # STEP 1: Connect WebSocket FIRST (before any heavy initialization)
+    """WebSocket endpoint for Chat mode AI conversations."""
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
         await websocket.close(code=4002, reason="Failed to establish connection")
         return
 
-    logger.info(f"WebSocket connection established for chat {chat_id}")
+    logger.info(f"WebSocket connected for chat session {chat_id}")
 
     try:
-        # Send initialization status to client
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "connecting",
-                "message": "Loading chat history...",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "connecting",
+            "message": "Loading chat history...",
+        })
 
-        # STEP 2: Load chat history (lightweight API call)
         history = await load_chat_mode_history(chat_id, user_id)
         if not history:
-            logger.warning(f"Run not found: {user_id} & {chat_id}")
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": "Chat session not found",
-                }
-            )
+            logger.warning(f"Chat session not found: {chat_id}")
+            await websocket.send_json({"type": "error", "error": "Chat session not found"})
             await websocket.close(code=4003, reason="Run not found")
             return
 
         chat_dir = history.get("chat_dir", get_default_chat_dir())
         messages = history.get("messages", [])
 
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "initializing",
-                "message": "Initializing chat agent and loading tools...",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "initializing",
+            "message": "Initializing chat agent and loading tools...",
+        })
 
-        # STEP 3: Initialize Chat instance (heavy - includes tool registration)
-        # Note: Cannot use run_in_executor because Chat uses async_to_sync internally
-        # which requires access to the same event loop
         chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "configuring",
-                "message": "Loading user context...",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "configuring",
+            "message": "Loading user context...",
+        })
 
-        # STEP 4: Load user context
+        # Load user context
         user_details = await get_user_details()
         user_context = extract_user_summary(user_details)
         context = build_user_context(user_context)
-
-        # Update system message with user context
         chat.chat_agent.update_system_message(chat.chat_agent.system_message + context)
 
-        # Resume from existing messages if available
+        # Resume history
         if messages:
             chat.manager.resume(messages=messages)
 
@@ -278,36 +367,21 @@ async def chat_websocket(
         chat.agent_executor.set_input_function(input_func)
         chat.set_input_function(input_func)
 
-        # Send ready status
-        await websocket.send_json(
-            {
-                "type": "init_status",
-                "status": "ready",
-                "message": "Chat ready",
-            }
-        )
+        await websocket.send_json({
+            "type": "init_status",
+            "status": "ready",
+            "message": "Chat ready",
+        })
 
-        logger.info(f"Chat initialization complete for {chat_id}")
-
-        # STEP 5: Handle messages
-        await _handle_websocket_messages(
-            websocket, chat_id, ws_manager, chat, is_chat_mode=True
-        )
+        logger.info(f"Chat ready for session {chat_id}")
+        await _handle_messages(websocket, chat_id, ws_manager, chat, mode="chat")
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for run {chat_id}")
-        LLMConfigManager.clear_cache()
+        logger.info(f"WebSocket disconnected for chat session {chat_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
-        LLMConfigManager.clear_cache()
-        # Try to send error to client before closing
+        logger.error(f"Chat WebSocket error: {e}")
         try:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": f"Initialization failed: {str(e)}",
-                }
-            )
+            await websocket.send_json({"type": "error", "error": f"Initialization failed: {str(e)}"})
         except Exception:
             pass
     finally:
@@ -328,22 +402,7 @@ async def capability_websocket(
     capability_name: str = "email_sender",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """WebSocket endpoint for single capability-specific chat.
-
-    Handles real-time communication for individual capabilities like email,
-    browser, file finder, image generator, and Python developer.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Unique identifier for the chat session.
-        user_id: User identifier. Defaults to "default_user".
-        capability_name: Name of the capability to use. Defaults to "email_sender".
-        ws_manager: WebSocket manager dependency for connection handling.
-
-    Raises:
-        HTTPException: If capability_name is invalid.
-        WebSocketDisconnect: When connection is closed by client or server.
-    """
+    """WebSocket endpoint for single capability-specific chat."""
     # Validate capability
     try:
         capability = CapabilityType.from_string(capability_name)
@@ -353,14 +412,12 @@ async def capability_websocket(
         raise HTTPException(status_code=400, detail=str(e))
 
     if class_instance is None:
-        raise HTTPException(
-            status_code=400, detail=f"Unsupported capability: {capability_name}"
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported capability: {capability_name}")
 
     # Load chat history
     history = await load_capability_chat_history(chat_id, user_id, collection_name)
     if not history:
-        logger.warning(f"Run not found: {user_id} & {chat_id}")
+        logger.warning(f"Capability session not found: {chat_id}")
         await websocket.close(code=4003, reason="Run not found")
         return
 
@@ -374,194 +431,27 @@ async def capability_websocket(
         capability_name=capability_name,
         collection_name=collection_name,
     )
-
     capability_instance = class_instance(chat_context)
-    messages = history.get("messages", [])
 
-    # Resume from existing messages if available
+    # Resume history
+    messages = history.get("messages", [])
     if messages:
         capability_instance.manager.resume(messages=messages)
 
-    # Set up input function
+    # Set up input function and connect
     ws_manager._create_input_func(chat_id)
-
-    # Connect websocket
     connected = await ws_manager.connect(websocket, chat_id)
     if not connected:
         await websocket.close(code=4002, reason="Failed to establish connection")
         return
 
     try:
-        logger.info(f"WebSocket connection established for run {chat_id}")
-        await _handle_capability_websocket_messages(
-            websocket, chat_id, ws_manager, capability_instance
-        )
+        logger.info(f"WebSocket connected for capability session {chat_id}")
+        await _handle_messages(websocket, chat_id, ws_manager, capability_instance, mode="capability")
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for run {chat_id}")
+        logger.info(f"WebSocket disconnected for capability session {chat_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
+        logger.error(f"Capability WebSocket error: {e}")
     finally:
         await ws_manager.disconnect(chat_id)
-
-
-# =============================================================================
-# WEBSOCKET MESSAGE HANDLERS
-# =============================================================================
-
-
-async def _handle_websocket_messages(
-    websocket: WebSocket,
-    chat_id: str,
-    ws_manager: WebSocketManager,
-    instance,
-    is_chat_mode: bool = False,
-):
-    """Handle incoming WebSocket messages for Omni and Chat modes.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Chat session identifier.
-        ws_manager: WebSocket manager instance.
-        instance: Omni or Chat instance.
-        is_chat_mode: Whether this is chat mode (True) or omni mode (False).
-    """
-    while True:
-        try:
-            raw_message = await websocket.receive_text()
-            message = json.loads(raw_message)
-            message_type = message.get("type")
-
-            if message_type == "start":
-                await _handle_start_message(
-                    websocket, chat_id, ws_manager, instance, message, is_chat_mode
-                )
-
-            elif message_type == "stop":
-                logger.info(f"Received stop request for run {chat_id}")
-                LLMConfigManager.clear_cache()
-                reason = message.get("reason") or "User requested stop/cancellation"
-                await ws_manager.stop_session(chat_id, reason=reason)
-
-            elif message_type == "ping":
-                await websocket.send_json(create_pong_response())
-
-            elif message_type == "executor_input":
-                logger.info(f"Received input request for executor {chat_id}")
-                process_id = message.get("process_id")
-                input_text = message.get("response")
-                await ws_manager.terminal_input(
-                    session_id=chat_id, process_id=process_id, input_text=input_text
-                )
-
-            elif message_type == "executor_stop":
-                logger.info(f"Received stop request for executor {chat_id}")
-                process_id = message.get("process_id")
-                await ws_manager.terminal_kill(
-                    session_id=chat_id, process_id=process_id
-                )
-
-            elif message_type == "input_response":
-                response = message.get("response")
-                if response is not None:
-                    await ws_manager.handle_input_response(chat_id, response)
-                else:
-                    logger.warning(f"Invalid input response format for run {chat_id}")
-
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON received: {raw_message}")
-            await websocket.send_json(create_error_response("Invalid message format"))
-
-
-async def _handle_start_message(
-    websocket: WebSocket,
-    chat_id: str,
-    ws_manager: WebSocketManager,
-    instance,
-    message: dict,
-    is_chat_mode: bool,
-):
-    """Handle start message for Omni and Chat modes.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Chat session identifier.
-        ws_manager: WebSocket manager instance.
-        instance: Omni or Chat instance.
-        message: The start message data.
-        is_chat_mode: Whether this is chat mode (True) or omni mode (False).
-    """
-    logger.info(f"Received start request for run {chat_id}")
-
-    if message.get("task"):
-        if is_chat_mode:
-            asyncio.create_task(
-                ws_manager.chat_mode_initiate(
-                    session_id=chat_id, initial_message=message, chat=instance
-                )
-            )
-        else:
-            asyncio.create_task(
-                ws_manager.start_chat_stream(
-                    session_id=chat_id, initial_message=message, omni=instance
-                )
-            )
-    else:
-        logger.warning(f"Invalid start message format for run {chat_id}")
-        await websocket.send_json(create_error_response("Invalid start message format"))
-
-
-async def _handle_capability_websocket_messages(
-    websocket: WebSocket,
-    chat_id: str,
-    ws_manager: WebSocketManager,
-    capability_instance,
-):
-    """Handle incoming WebSocket messages for capability-specific chats.
-
-    Args:
-        websocket: WebSocket connection instance.
-        chat_id: Chat session identifier.
-        ws_manager: WebSocket manager instance.
-        capability_instance: Capability class instance.
-    """
-    while True:
-        try:
-            raw_message = await websocket.receive_text()
-            message = json.loads(raw_message)
-            message_type = message.get("type")
-
-            if message_type == "start":
-                logger.info(f"Received start request for run {chat_id}")
-                if message.get("task"):
-                    asyncio.create_task(
-                        ws_manager.start_chat_stream(
-                            session_id=chat_id,
-                            initial_message=message,
-                            omni=capability_instance,
-                        )
-                    )
-                else:
-                    logger.warning(f"Invalid start message format for run {chat_id}")
-                    await websocket.send_json(
-                        create_error_response("Invalid start message format")
-                    )
-
-            elif message_type == "stop":
-                logger.info(f"Received stop request for run {chat_id}")
-                reason = message.get("reason") or "User requested stop/cancellation"
-                await ws_manager.stop_session(chat_id, reason=reason)
-
-            elif message_type == "ping":
-                await websocket.send_json(create_pong_response())
-
-            elif message_type == "input_response":
-                response = message.get("response")
-                if response is not None:
-                    await ws_manager.handle_input_response(chat_id, response)
-                else:
-                    logger.warning(f"Invalid input response format for run {chat_id}")
-
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON received: {raw_message}")
-            await websocket.send_json(create_error_response("Invalid message format"))

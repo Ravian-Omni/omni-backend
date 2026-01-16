@@ -15,6 +15,7 @@ from email.mime.text import MIMEText
 from email.utils import parseaddr
 from typing import Any
 
+import aiofiles
 import autogen
 from loguru import logger
 
@@ -27,6 +28,7 @@ from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
+from src.utilities.async_errors import AsyncErrorCode, create_error
 from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
 from src.utilities.storage import ensure_path
 
@@ -330,28 +332,46 @@ class EmailManager:
                 part2 = MIMEText(final_msg_html, "html")
                 msg.attach(part2)
 
-            # Add attachments and collect info
+            # Add attachments and collect info (using async file I/O)
             attachment_info = []
             if final_attachments:
                 for file_path in final_attachments:
                     if os.path.exists(file_path):
-                        with open(file_path, "rb") as attachment_file:
-                            part = MIMEBase("application", "octet-stream")
-                            part.set_payload(attachment_file.read())
+                        try:
+                            # Use async file I/O for non-blocking reads
+                            async with aiofiles.open(file_path, "rb") as attachment_file:
+                                file_content = await attachment_file.read()
 
-                        encoders.encode_base64(part)
-                        filename = os.path.basename(file_path)
-                        part.add_header(
-                            "Content-Disposition", f"attachment; filename= {filename}"
-                        )
-                        msg.attach(part)
-                        attachment_info.append(
-                            {
-                                "filename": filename,
-                                "path": file_path,
-                                "size": os.path.getsize(file_path),
+                            part = MIMEBase("application", "octet-stream")
+                            part.set_payload(file_content)
+                            encoders.encode_base64(part)
+                            filename = os.path.basename(file_path)
+                            part.add_header(
+                                "Content-Disposition", f"attachment; filename= {filename}"
+                            )
+                            msg.attach(part)
+                            attachment_info.append(
+                                {
+                                    "filename": filename,
+                                    "path": file_path,
+                                    "size": os.path.getsize(file_path),
+                                }
+                            )
+                        except OSError as e:
+                            error = create_error(
+                                AsyncErrorCode.FILE_READ_FAILED,
+                                "email_attachment_read",
+                                user_message=f"Could not read attachment: {os.path.basename(file_path)}",
+                                technical_message=str(e),
+                                context={"file_path": file_path},
+                            )
+                            logger.error(f"[{error.code.value}] Attachment read failed: {e}")
+                            return {
+                                "status": "error",
+                                "error_code": error.code.value,
+                                "message": error.user_message,
+                                "support_reference": f"Contact support with code: {error.code.value}",
                             }
-                        )
 
             # Send email
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -392,11 +412,36 @@ class EmailManager:
 
             return success_response
 
-        except Exception as e:
+        except smtplib.SMTPException as e:
+            error = create_error(
+                AsyncErrorCode.EMAIL_SEND_FAILED,
+                "email_send",
+                user_message="Failed to send email. Please check your email settings and try again.",
+                technical_message=str(e),
+                context={"recipients": final_recipients if 'final_recipients' in dir() else recipients},
+            )
+            logger.error(f"[{error.code.value}] SMTP error: {e}")
             return {
                 "status": "error",
-                "message": f"Error sending email: {str(e)}",
-                "error_type": "smtp_error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+                "timestamp": dt.now_iso(),
+            }
+        except Exception as e:
+            error = create_error(
+                AsyncErrorCode.EMAIL_SEND_FAILED,
+                "email_send",
+                user_message="An unexpected error occurred while sending email. Please try again.",
+                technical_message=str(e),
+                context={"error_type": type(e).__name__},
+            )
+            logger.error(f"[{error.code.value}] Email send error: {e}")
+            return {
+                "status": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
                 "timestamp": dt.now_iso(),
             }
 
@@ -492,13 +537,19 @@ class EmailManager:
                                 full_path = os.path.abspath(filepath)
 
                                 try:
-                                    with open(full_path, "wb") as f:
-                                        f.write(part.get_payload(decode=True))
+                                    # Use async file I/O for non-blocking writes
+                                    async with aiofiles.open(full_path, "wb") as f:
+                                        await f.write(part.get_payload(decode=True))
                                     attachment_paths.append(full_path)
-                                except Exception as e:
-                                    print(
-                                        f"Error saving attachment {decoded_filename}: {e}"
+                                except OSError as e:
+                                    error = create_error(
+                                        AsyncErrorCode.FILE_WRITE_FAILED,
+                                        "email_attachment_save",
+                                        user_message=f"Could not save attachment: {decoded_filename}",
+                                        technical_message=str(e),
+                                        context={"file_path": full_path},
                                     )
+                                    logger.error(f"[{error.code.value}] Attachment save failed: {e}")
                 else:
                     # Single-part email
                     try:

@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
+import aiofiles
 import aiohttp
 
 # AutoGen imports
@@ -40,6 +41,7 @@ from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
+from src.utilities.async_errors import AsyncErrorCode, create_error
 from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
 from src.utilities.storage import ensure_path
 
@@ -931,7 +933,15 @@ class BrowserManager:
             return error_msg
 
     async def _save_result(self, task: str, result: str, status: str):
-        """Save results to file if enabled."""
+        """Save results to file if enabled.
+
+        Uses async file I/O for non-blocking operations.
+
+        Args:
+            task: The task description
+            result: The result content
+            status: Status of the operation (success/error)
+        """
         if not self.save_results:
             return
 
@@ -953,10 +963,19 @@ class BrowserManager:
         }
 
         try:
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(result_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Failed to save results: {e}")
+            # Use async file I/O for non-blocking writes
+            json_content = json.dumps(result_data, indent=2, ensure_ascii=False)
+            async with aiofiles.open(filename, "w", encoding="utf-8") as f:
+                await f.write(json_content)
+        except OSError as e:
+            error = create_error(
+                AsyncErrorCode.FILE_WRITE_FAILED,
+                "browser_result_save",
+                user_message="Could not save browser results.",
+                technical_message=str(e),
+                context={"filename": filename},
+            )
+            logger.error(f"[{error.code.value}] Failed to save results: {e}")
 
     def _register_functions(self):
         """Register functions with simplified descriptions."""

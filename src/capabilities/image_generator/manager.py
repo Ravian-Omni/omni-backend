@@ -3,8 +3,9 @@ import os
 import time
 from typing import Annotated, Any
 
+import aiofiles
 import autogen
-import requests
+import httpx
 from autogen import AssistantAgent, UserProxyAgent
 from autogen.agentchat.agent import Agent
 from loguru import logger
@@ -14,6 +15,11 @@ from src.capabilities.image_generator import prompts
 from src.capabilities.image_generator.response_format import ProcessCompletionResponse
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.system_ai_config import GroupchatConfigurationManager
+from src.utilities.async_errors import (
+    AsyncErrorCode,
+    create_error,
+    handle_async_errors,
+)
 from src.utilities.custom_manager import ChatContext, CustomGroupChatManager
 from src.utilities.storage import ensure_path
 
@@ -46,58 +52,131 @@ class ImageGenerator:
                 f"Group chat cancelled for session {self.context.chat_id}"
             )
 
-    def flux_image_generator(
+    @handle_async_errors("image_generation", AsyncErrorCode.HTTP_DOWNLOAD_FAILED)
+    async def flux_image_generator(
         self,
         prompt: Annotated[str, "The image generation prompt"],
         filename: Annotated[str, "The filename to save the image as"],
         width: Annotated[int, "Width of the image"] = 1792,
         height: Annotated[int, "Height of the image"] = 1792,
     ):
-        """Generate an image using the Flux model."""
+        """Generate an image using the Flux model.
+
+        Uses async HTTP client and async file I/O for non-blocking operations.
+
+        Args:
+            prompt: The image generation prompt
+            filename: The filename to save the image as
+            width: Width of the image (default: 1792)
+            height: Height of the image (default: 1792)
+
+        Returns:
+            Success message with file path or error details
+        """
         try:
             client = Together(api_key=self.image_llm_config.get("api_key"))
             response = client.images.generate(
                 prompt=prompt,
                 model=self.image_llm_config.get("model"),
-                width=width,  # 1792
-                height=height,  # 1792
-                steps=40,  # 40 max
-                guidance_scale=18,  # 20 max , guidance is how closely the model should adhere to the prompt guidelines
+                width=width,
+                height=height,
+                steps=40,
+                guidance_scale=18,
             )
 
-            # Download and save the image with the generated filename
+            # Download the image using async HTTP client (non-blocking)
             image_url = response.data[0].url
-            image_response = requests.get(url=image_url, timeout=3600)
+
+            async with httpx.AsyncClient(timeout=300.0) as http_client:
+                image_response = await http_client.get(image_url)
+                image_response.raise_for_status()
 
             filename = (
                 filename
                 if filename
                 else f"{self.context.capability_id}_{int(time.time())}.jpg"
-            )  # Use current timestamp if no filename provided
+            )
 
-            file_name = os.path.join(
-                self.image_dir, filename
-            )  # to be updated with project creation path
-            with open(file_name, "wb") as f:
-                f.write(image_response.content)
+            file_path = os.path.join(self.image_dir, filename)
 
-            return f"Image successfully generated and saved at {file_name}"
+            # Save the image using async file I/O (non-blocking)
+            async with aiofiles.open(file_path, "wb") as f:
+                await f.write(image_response.content)
 
+            return f"Image successfully generated and saved at {file_path}"
+
+        except httpx.TimeoutException as e:
+            error = create_error(
+                AsyncErrorCode.OPERATION_TIMEOUT,
+                "image_download",
+                user_message="Image download timed out. Please try again.",
+                technical_message=str(e),
+                context={"prompt": prompt[:100], "timeout": 300},
+            )
+            logger.error(f"[{error.code.value}] Image download timeout: {e}")
+            return {
+                "status": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+            }
+        except httpx.HTTPStatusError as e:
+            error = create_error(
+                AsyncErrorCode.HTTP_DOWNLOAD_FAILED,
+                "image_download",
+                user_message="Failed to download generated image. Please try again.",
+                technical_message=f"HTTP {e.response.status_code}: {str(e)}",
+                context={"prompt": prompt[:100], "status_code": e.response.status_code},
+            )
+            logger.error(f"[{error.code.value}] Image download failed: {e}")
+            return {
+                "status": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+            }
+        except OSError as e:
+            error = create_error(
+                AsyncErrorCode.FILE_WRITE_FAILED,
+                "image_save",
+                user_message="Failed to save the image. Please check storage permissions.",
+                technical_message=str(e),
+                context={"filename": filename},
+            )
+            logger.error(f"[{error.code.value}] Image save failed: {e}")
+            return {
+                "status": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+            }
         except Exception as e:
-            error_message = f"Error generating image: {str(e)}"
-            return error_message
+            error = create_error(
+                AsyncErrorCode.TASK_EXECUTION_FAILED,
+                "image_generation",
+                user_message="Image generation failed. Please try again.",
+                technical_message=str(e),
+                context={"prompt": prompt[:100] if prompt else "N/A"},
+            )
+            logger.error(f"[{error.code.value}] Image generation error: {e}")
+            return {
+                "status": "error",
+                "error_code": error.code.value,
+                "message": error.user_message,
+                "support_reference": f"Contact support with code: {error.code.value}",
+            }
 
     def _register_functions(self):
         """Register image generation functions with the agents."""
-        # Wrapper functions before registring to agents
+        # Wrapper functions before registering to agents
 
-        def flux_image_generator_wrapper(
+        async def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
             width: Annotated[int, "Width of the image"] = 1792,
             height: Annotated[int, "Height of the image"] = 1792,
         ):
-            return self.flux_image_generator(
+            return await self.flux_image_generator(
                 prompt=query, filename=filename, width=width, height=height
             )
 
