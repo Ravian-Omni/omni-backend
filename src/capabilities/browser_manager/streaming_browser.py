@@ -126,7 +126,10 @@ class StreamingAgent(Agent):
                 # Try to close the browser session gracefully
                 if hasattr(self._browser_session_ref, "close"):
                     await self._browser_session_ref.close()
-                if hasattr(self._browser_session_ref, "browser") and self._browser_session_ref.browser:
+                if (
+                    hasattr(self._browser_session_ref, "browser")
+                    and self._browser_session_ref.browser
+                ):
                     await self._browser_session_ref.browser.close()
         except Exception as e:
             logger.warning(f"Error during browser cleanup on cancel: {e}")

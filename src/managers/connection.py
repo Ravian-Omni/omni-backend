@@ -485,9 +485,9 @@ class WebSocketManager:
                     try:
                         await asyncio.wait_for(
                             self.close_browser_session(browser),
-                            timeout=5.0  # 5 second timeout for browser close
+                            timeout=5.0,  # 5 second timeout for browser close
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning(f"Browser close timed out for {session_id}")
                     except Exception as e:
                         logger.warning(f"Error closing browser for {session_id}: {e}")
@@ -495,7 +495,7 @@ class WebSocketManager:
                     # Wait for browser task to complete
                     try:
                         await asyncio.wait_for(agent_task, timeout=2.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning(f"Browser task wait timed out for {session_id}")
                     except asyncio.CancelledError:
                         pass  # Expected
@@ -512,7 +512,7 @@ class WebSocketManager:
                         task.cancel()
                         try:
                             await asyncio.wait_for(task, timeout=3.0)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             logger.warning(f"Main task wait timed out for {session_id}")
                         except asyncio.CancelledError:
                             pass  # Expected
