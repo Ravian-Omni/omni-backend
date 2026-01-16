@@ -438,6 +438,14 @@ class WebSocketManager:
         Cancels active tasks, cleans up browser and executor resources,
         triggers cancellation token, and notifies the client.
 
+        The cancellation flow:
+        1. Set stop flag to signal all operations to check for cancellation
+        2. Cancel the cancellation token (triggers callbacks in StreamingAgent)
+        3. Cancel asyncio tasks (browser agent, main task)
+        4. Close browser session explicitly
+        5. Cleanup executor resources
+        6. Send completion message to client
+
         Args:
             session_id: Session identifier.
             reason: Reason for stopping. Defaults to "Session stopped".
@@ -447,41 +455,71 @@ class WebSocketManager:
             logger.info(f"Stopping session {session_id}: {reason}")
 
             try:
-                # Set stop flag
+                # Step 1: Set stop flag immediately
                 self._stop_flags[session_id] = True
-                # Cancel the task if it exists
+
+                # Step 2: Cancel the token FIRST to trigger StreamingAgent callbacks
+                # This sets _is_shutting_down flag in the agent, causing it to raise
+                # CancelledError at the next cancellation check point
+                self._cancellation_tokens[session_id].cancel()
+
+                # Step 3: Clean up executor resources
+                if session_id in self.active_executor:
+                    executor = self.active_executor[session_id]
+                    if hasattr(executor, "cleanup"):
+                        try:
+                            await executor.cleanup()
+                        except Exception as e:
+                            logger.warning(f"Error cleaning up executor: {e}")
+                    self.active_executor.pop(session_id, None)
+
+                # Step 4: Handle browser cleanup
+                if session_id in self.active_browser:
+                    agent_task, browser = self.active_browser[session_id]
+
+                    # Cancel the browser agent task
+                    if not agent_task.done():
+                        agent_task.cancel()
+
+                    # Close browser session explicitly (may already be closing via callback)
+                    try:
+                        await asyncio.wait_for(
+                            self.close_browser_session(browser),
+                            timeout=5.0  # 5 second timeout for browser close
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Browser close timed out for {session_id}")
+                    except Exception as e:
+                        logger.warning(f"Error closing browser for {session_id}: {e}")
+
+                    # Wait for browser task to complete
+                    try:
+                        await asyncio.wait_for(agent_task, timeout=2.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Browser task wait timed out for {session_id}")
+                    except asyncio.CancelledError:
+                        pass  # Expected
+                    except Exception as e:
+                        logger.warning(f"Error waiting for browser task: {e}")
+
+                    # Remove from active browser tracking
+                    self.active_browser.pop(session_id, None)
+
+                # Step 5: Cancel the main task if it exists
                 if session_id in self._active_tasks:
                     task = self._active_tasks[session_id]
                     if not task.done():
                         task.cancel()
-                if session_id in self.active_executor:
-                    executor = self.active_executor[session_id]
-                    if hasattr(executor, "cleanup"):
-                        await executor.cleanup()
-                    self.active_executor.pop(session_id, None)
-                if session_id in self.active_browser:
-                    agent, browser = self.active_browser[session_id]
-
-                    if not agent.done():
-                        agent.cancel()
                         try:
-                            await self.close_browser_session(browser)
-                            await agent
+                            await asyncio.wait_for(task, timeout=3.0)
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Main task wait timed out for {session_id}")
                         except asyncio.CancelledError:
-                            pass
+                            pass  # Expected
                         except Exception as e:
-                            logger.error(f"Error cancelling task for {session_id}: {e}")
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error(f"Error cancelling task for {session_id}: {e}")
-                    raise e
+                            logger.warning(f"Error waiting for main task: {e}")
 
-                # Finally cancel the token
-                self._cancellation_tokens[session_id].cancel()
-                # Send completion message if connection is active
+                # Step 6: Send completion message if connection is active
                 if (
                     session_id in self._connections
                     and session_id not in self._closed_connections

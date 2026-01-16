@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from browser_use import Agent
 from browser_use.agent.message_manager.utils import extract_json_from_model_output
@@ -13,10 +13,14 @@ from browser_use.agent.views import (
 from browser_use.exceptions import LLMException
 from browser_use.utils import time_execution_async
 from langchain_core.messages import BaseMessage
+from loguru import logger
 from pydantic import ValidationError
 
 from src.configs.routes import RoutesConfig
 from src.utilities.api_client import api_client
+
+if TYPE_CHECKING:
+    from src.managers.cancellation_token import CancellationToken
 
 
 class StreamingAgent(Agent):
@@ -38,10 +42,11 @@ class StreamingAgent(Agent):
         session_id,
         user_id,
         ws_manager,
+        cancellation_token: "CancellationToken | None" = None,
         *args,
         **kwargs,
     ):
-        """Initialize StreamingAgent with WebSocket support.
+        """Initialize StreamingAgent with WebSocket support and cancellation.
 
         Args:
             task: Task description for the agent.
@@ -58,6 +63,7 @@ class StreamingAgent(Agent):
             session_id: Unique session identifier.
             user_id: User identifier.
             ws_manager: WebSocket manager instance.
+            cancellation_token: Token for cancelling browser operations.
             *args: Additional positional arguments.
             **kwargs: Additional keyword arguments.
         """
@@ -79,7 +85,67 @@ class StreamingAgent(Agent):
         self.session_id = session_id
         self.user_id = user_id
         self.websocket_manager = ws_manager
+        self.cancellation_token = cancellation_token
         self.llm_calls_metadata = []  # Store all LLM call metadata
+        self._is_shutting_down = False  # Flag to prevent duplicate cleanup
+        self._browser_session_ref = browser_session  # Keep reference for cleanup
+
+        # Register browser cleanup callback on cancellation
+        if self.cancellation_token:
+            self.cancellation_token.add_callback(self._on_cancellation)
+
+    def _on_cancellation(self) -> None:
+        """Callback executed when cancellation token is triggered.
+
+        Sets shutdown flag and schedules immediate browser closure.
+        """
+        logger.info(f"Cancellation triggered for session {self.session_id}")
+        self._is_shutting_down = True
+
+        # Schedule immediate browser closure
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._async_cleanup_browser())
+        except RuntimeError:
+            # No running loop, try to get or create one
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._async_cleanup_browser())
+                else:
+                    # Create a new task in a new loop if necessary
+                    asyncio.run(self._async_cleanup_browser())
+            except Exception as e:
+                logger.warning(f"Could not schedule browser cleanup: {e}")
+
+    async def _async_cleanup_browser(self) -> None:
+        """Asynchronously cleanup browser resources on cancellation."""
+        try:
+            if self._browser_session_ref:
+                logger.info(f"Closing browser for cancelled session {self.session_id}")
+                # Try to close the browser session gracefully
+                if hasattr(self._browser_session_ref, "close"):
+                    await self._browser_session_ref.close()
+                if hasattr(self._browser_session_ref, "browser") and self._browser_session_ref.browser:
+                    await self._browser_session_ref.browser.close()
+        except Exception as e:
+            logger.warning(f"Error during browser cleanup on cancel: {e}")
+
+    def _check_cancellation(self) -> None:
+        """Check if the agent should stop due to cancellation.
+
+        Raises:
+            asyncio.CancelledError: If cancellation has been requested.
+        """
+        if self._is_shutting_down:
+            raise asyncio.CancelledError(
+                f"Browser agent cancelled for session {self.session_id}"
+            )
+        if self.cancellation_token and self.cancellation_token.is_cancelled():
+            self._is_shutting_down = True
+            raise asyncio.CancelledError(
+                f"Browser agent cancelled for session {self.session_id}"
+            )
 
     async def _deduct_tokens(
         self, model: str, input_tokens: int, output_tokens: int, total_tokens: int
@@ -364,11 +430,17 @@ class StreamingAgent(Agent):
         )
 
     async def step(self, step_info: AgentStepInfo | None = None) -> None:
-        """Override step method to stream step information.
+        """Override step method to stream step information with cancellation support.
 
         Args:
             step_info: Step information object.
+
+        Raises:
+            asyncio.CancelledError: If cancellation has been requested.
         """
+        # Check for cancellation before starting step
+        self._check_cancellation()
+
         # Stream step start
         await self.stream_action(
             {
@@ -382,6 +454,9 @@ class StreamingAgent(Agent):
         )
 
         try:
+            # Check again before expensive operation
+            self._check_cancellation()
+
             # Call the original step method
             await super().step(step_info)
 
@@ -399,6 +474,18 @@ class StreamingAgent(Agent):
                 }
             )
 
+        except asyncio.CancelledError:
+            # Stream cancellation notification
+            await self.stream_action(
+                {
+                    "type": "step_cancelled",
+                    "step_number": self.state.n_steps,
+                    "agent_id": self.task_id,
+                    "message": "Step cancelled by user",
+                }
+            )
+            raise
+
         except Exception as e:
             # Stream step error
             await self.stream_action(
@@ -414,14 +501,20 @@ class StreamingAgent(Agent):
 
     @time_execution_async("--get_next_action")
     async def get_next_action(self, input_messages: list[BaseMessage]) -> AgentOutput:
-        """Override get_next_action to capture LLM metadata.
+        """Override get_next_action to capture LLM metadata with cancellation support.
 
         Args:
             input_messages: List of input messages.
 
         Returns:
             AgentOutput with parsed action.
+
+        Raises:
+            asyncio.CancelledError: If cancellation has been requested.
         """
+        # Check for cancellation before making LLM call
+        self._check_cancellation()
+
         start_time = time.time()
 
         # Convert input messages
@@ -551,7 +644,7 @@ class StreamingAgent(Agent):
     async def multi_act(
         self, actions: list[ActionModel], check_for_new_elements: bool = True
     ) -> list[ActionResult]:
-        """Override multi_act to stream individual action execution.
+        """Override multi_act to stream individual action execution with cancellation.
 
         Args:
             actions: List of actions to execute.
@@ -559,7 +652,13 @@ class StreamingAgent(Agent):
 
         Returns:
             List of action results.
+
+        Raises:
+            asyncio.CancelledError: If cancellation has been requested.
         """
+        # Check for cancellation before starting multi-action
+        self._check_cancellation()
+
         # Stream multi-action start
         await self.stream_action(
             {
@@ -579,6 +678,9 @@ class StreamingAgent(Agent):
         browser_context = await self._get_browser_context()
 
         for i, action in enumerate(actions):
+            # Check for cancellation before each action
+            self._check_cancellation()
+
             # Stream individual action start
             action_summary = self._get_action_summary(action)
             await self.stream_action(
@@ -642,6 +744,21 @@ class StreamingAgent(Agent):
                     break
 
                 await asyncio.sleep(self.browser_profile.wait_between_actions)
+
+            except asyncio.CancelledError:
+                # Stream cancellation notification
+                await self.stream_action(
+                    {
+                        "type": "action_cancelled",
+                        "step_number": self.state.n_steps,
+                        "action_index": i + 1,
+                        "total_actions": len(actions),
+                        "action_name": action_summary["action_name"],
+                        "agent_id": self.task_id,
+                        "message": "Action cancelled by user",
+                    }
+                )
+                raise
 
             except Exception as e:
                 execution_time = time.time() - start_time
@@ -742,7 +859,7 @@ class StreamingAgent(Agent):
             return {"error": f"Could not get browser context: {str(e)}"}
 
     async def run(self, max_steps: int = 100, on_step_start=None, on_step_end=None):
-        """Override run to stream agent lifecycle events.
+        """Override run to stream agent lifecycle events with cancellation support.
 
         Args:
             max_steps: Maximum number of steps.
@@ -751,7 +868,13 @@ class StreamingAgent(Agent):
 
         Returns:
             Agent execution result.
+
+        Raises:
+            asyncio.CancelledError: If cancellation has been requested.
         """
+        # Check for cancellation before starting
+        self._check_cancellation()
+
         # Stream agent start
         await self.stream_action(
             {
@@ -794,6 +917,20 @@ class StreamingAgent(Agent):
             )
 
             return result
+
+        except asyncio.CancelledError:
+            # Stream agent cancellation
+            logger.info(f"Browser agent cancelled for session {self.session_id}")
+            await self.stream_action(
+                {
+                    "type": "agent_cancelled",
+                    "agent_id": self.task_id,
+                    "task": self.task,
+                    "total_steps": self.state.n_steps,
+                    "message": "Browser agent cancelled by user",
+                }
+            )
+            raise
 
         except Exception as e:
             # Stream agent error

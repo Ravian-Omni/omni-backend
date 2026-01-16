@@ -875,7 +875,7 @@ class BrowserManager:
                 answer = await self.context.manager_kwargs["input_function"](question)
                 return ActionResult(extracted_content=answer, include_in_memory=True)
 
-            # Create agent with minimal configuration
+            # Create agent with minimal configuration and cancellation support
             agent = StreamingAgent(
                 task=task_goal,
                 browser=self._create_browser(),
@@ -893,6 +893,7 @@ class BrowserManager:
                 session_id=self.context.chat_id,
                 user_id=self.context.user_id,
                 ws_manager=ws_manager,
+                cancellation_token=self.context.cancellation_token,
                 # save_conversation_path=None if not self.save_results else self.results_dir,
             )
 
