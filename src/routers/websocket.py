@@ -368,11 +368,12 @@ async def chat_websocket(
             {
                 "type": "init_status",
                 "status": "initializing",
-                "message": "Initializing chat agent and loading tools...",
+                "message": "Initializing chat agent...",
             }
         )
 
-        chat = Chat(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        # Use async factory method for non-blocking tool registration
+        chat = await Chat.create(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
         await websocket.send_json(
             {

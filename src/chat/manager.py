@@ -10,7 +10,7 @@ from loguru import logger
 
 from src.chat import prompts
 from src.chat.tools.brave import BraveSearchClient, BraveSearchTool
-from src.chat.tools.composio import ComposioToolManager
+from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
 from src.chat.tools.together_image import FluxImageGenerator
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
@@ -343,6 +343,7 @@ class Chat:
         self.task_id = None
         self.chat_dir = chat_dir
         self.cancellation_token = None
+        self._initialized = False
         self.llm_config = LLMConfigManager.get_config("default")
         self.groupchat_config = (
             GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
@@ -350,9 +351,76 @@ class Chat:
             )
         )
 
+        # Initialize agents synchronously (fast operation)
         self.agents = self.get_agents()
-        self._register_functions()
+        # Register non-composio tools synchronously (fast operation)
+        self._register_local_functions()
         self.get_chat_manager()
+
+    @classmethod
+    async def create(
+        cls,
+        chat_id: str,
+        user_id: str = "default_user",
+        chat_dir: str = None,
+    ) -> "Chat":
+        """Async factory method for creating a fully initialized Chat instance.
+
+        This is the preferred way to create a Chat instance as it handles
+        async tool registration without blocking.
+
+        Args:
+            chat_id: Unique identifier for the chat session
+            user_id: User identifier for tool access
+            chat_dir: Directory for chat files
+
+        Returns:
+            Fully initialized Chat instance with all tools registered
+        """
+        if chat_dir is None:
+            chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
+
+        instance = cls(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        await instance.initialize_tools_async()
+        return instance
+
+    async def initialize_tools_async(self) -> int:
+        """Initialize Composio tools asynchronously.
+
+        This method registers all Composio tools using async operations
+        with parallel fetching for optimal performance.
+
+        Returns:
+            Number of tools registered
+        """
+        if self._initialized:
+            logger.debug(f"Chat {self.chat_id} already initialized, skipping")
+            return 0
+
+        logger.info(f"Initializing Composio tools for chat {self.chat_id}")
+
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.chat_agent,
+            agent_executor=self.agent_executor,
+        )
+
+        tool_count = await composio_tool_manager.register_all_tools_async()
+        self._initialized = True
+
+        logger.info(f"Registered {tool_count} Composio tools for chat {self.chat_id}")
+        return tool_count
+
+    @staticmethod
+    def invalidate_tool_cache(user_id: str) -> None:
+        """Invalidate cached tools for a user.
+
+        Call this when a user's connected apps change.
+
+        Args:
+            user_id: User identifier to invalidate cache for
+        """
+        ComposioToolCache.get_instance().invalidate(user_id)
 
     def set_input_function(self, input_function):
         """Set the custom input function for user interactions."""
@@ -422,16 +490,9 @@ class Chat:
             # is_termination_msg=lambda x: x.get("content", "").find("TERMINATE") >= 0,
         )
 
-    def _register_functions(self):
-        """Register all tools for the chat manager."""
-        composio_tool_manager = ComposioToolManager(
-            user_id=self.user_id,
-            chat_agent=self.chat_agent,
-            agent_executor=self.agent_executor,
-        )
-        composio_tool_manager.register_all_tools()
+    def _register_local_functions(self):
+        """Register local tools (image generation, web search) for the chat manager."""
 
-        # Image generation
         def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],

@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from inspect import Signature
 from typing import Any
 
@@ -12,7 +15,6 @@ from composio_autogen import AutogenProvider
 from src.configs.llm_configs_manager import LLMConfigManager  # type: ignore
 from src.configs.routes import RoutesConfig
 from src.utilities.api_client import api_client
-from src.utilities.async_helpers import async_to_sync
 
 
 class NuitkaSafeAutogenProvider(AutogenProvider, name="autogen"):
@@ -55,14 +57,93 @@ class NuitkaSafeAutogenProvider(AutogenProvider, name="autogen"):
         )
 
 
+class ToolObject:
+    """Wrapper class for Composio tool definitions.
+
+    Attributes:
+        slug (str): Unique tool identifier (e.g., 'GMAIL_SEND_EMAIL')
+        description (str): Human-readable description of the tool
+        input_parameters (dict): JSON schema of tool parameters
+    """
+
+    def __init__(self, data: dict[str, Any]):
+        function_info = data.get("function", {})
+        self.slug = function_info.get("name")
+        self.description = function_info.get("description", "")
+        self.input_parameters = function_info.get("parameters", {})
+
+
+class ComposioToolCache:
+    """Thread-safe cache for Composio tools with TTL support.
+
+    Caches tools per user to avoid repeated API calls during the same session.
+    """
+
+    _instance = None
+    _lock = asyncio.Lock()
+
+    def __new__(cls):
+        """Create singleton instance of ComposioToolCache."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._cache = {}
+            cls._instance._cache_ttl = 300  # 5 minutes TTL
+            cls._instance._logger = logging.getLogger(__name__)
+        return cls._instance
+
+    @classmethod
+    def get_instance(cls) -> "ComposioToolCache":
+        """Get the singleton cache instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _cache_key(self, user_id: str) -> str:
+        """Generate cache key for user."""
+        return f"tools:{user_id}"
+
+    def get(self, user_id: str) -> dict[str, Any] | None:
+        """Get cached tools for user if not expired."""
+        key = self._cache_key(user_id)
+        if key in self._cache:
+            cached = self._cache[key]
+            if time.time() - cached["timestamp"] < self._cache_ttl:
+                self._logger.info(f"Cache hit for user {user_id}")
+                return cached["data"]
+            else:
+                # Expired, remove from cache
+                del self._cache[key]
+                self._logger.info(f"Cache expired for user {user_id}")
+        return None
+
+    def set(self, user_id: str, data: dict[str, Any]) -> None:
+        """Cache tools for user."""
+        key = self._cache_key(user_id)
+        self._cache[key] = {"data": data, "timestamp": time.time()}
+        self._logger.info(f"Cached tools for user {user_id}")
+
+    def invalidate(self, user_id: str) -> None:
+        """Invalidate cache for user."""
+        key = self._cache_key(user_id)
+        if key in self._cache:
+            del self._cache[key]
+            self._logger.info(f"Invalidated cache for user {user_id}")
+
+    def clear(self) -> None:
+        """Clear entire cache."""
+        self._cache.clear()
+        self._logger.info("Cleared all tool cache")
+
+
 class ComposioToolManager:
     """Manages Composio tool registration and execution for Autogen agents.
 
     This class handles the complete lifecycle of Composio tools:
-    - Fetching tools from multiple toolkits
+    - Fetching tools from multiple toolkits (in parallel)
     - Creating tool wrappers compatible with Autogen
     - Registering tools with chat and executor agents
     - Executing tool actions with proper error handling
+    - Caching tools to avoid repeated API calls
 
     Attributes:
         user_id (str): Unique identifier for the user's Composio session
@@ -72,6 +153,9 @@ class ComposioToolManager:
         toolset (AutogenProvider): Autogen-specific tool provider
         logger (logging.Logger): Logger instance for this class
     """
+
+    # Shared thread pool for running sync Composio API calls
+    _executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="composio_")
 
     def __init__(self, user_id: str, chat_agent, agent_executor):
         """Initialize the Composio Tool Manager.
@@ -93,13 +177,18 @@ class ComposioToolManager:
 
         # Initialize Composio client
         composio_api_key = LLMConfigManager.get_config("composio_api_key")
-        # Initialize Tavily client
         api_key = composio_api_key.get("config_list", [])[0].get("api_key")
 
         self.composio = Composio(api_key=api_key)
         self.toolset = NuitkaSafeAutogenProvider()
+        self._cache = ComposioToolCache.get_instance()
 
         self.logger.info(f"Initialized ComposioToolManager for user: {user_id}")
+
+    async def _run_in_executor(self, func, *args, **kwargs):
+        """Run a synchronous function in the thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, lambda: func(*args, **kwargs))
 
     async def get_no_auth_apps(self) -> dict[str, Any]:
         """Get all no-auth apps from Composio.
@@ -107,7 +196,7 @@ class ComposioToolManager:
         Returns:
             Dictionary with no-auth apps information.
         """
-        print("Fetching no-auth apps")
+        self.logger.debug("Fetching no-auth apps")
 
         try:
             result = await api_client.get(RoutesConfig.API_CHAT_NO_AUTH_APPS)
@@ -116,13 +205,13 @@ class ComposioToolManager:
                 raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
             return result.get("data")
         except Exception as e:
-            print(f"Error loading NO-AUTH Apps: {e}")
-            raise Exception(f"Error loading NO-AUTH Apps: {e}")
+            self.logger.error(f"Error loading NO-AUTH Apps: {e}")
+            return {"apps": []}
 
-    def get_user_connected_apps(
+    async def get_user_connected_apps_async(
         self, user_id: str, status_filter: str | None = None
     ) -> dict[str, Any]:
-        """Get all connected apps for a user from Composio.
+        """Get all connected apps for a user from Composio (async).
 
         Args:
             user_id: User identifier
@@ -131,11 +220,13 @@ class ComposioToolManager:
         Returns:
             Dictionary with user's connected apps information.
         """
-        print(f"Fetching connected apps for user {user_id}")
+        self.logger.debug(f"Fetching connected apps for user {user_id}")
 
         try:
-            # Fetch all connections from Composio
-            connections = self.composio.connected_accounts.list(user_ids=[user_id])
+            # Run sync Composio API call in thread pool
+            connections = await self._run_in_executor(
+                self.composio.connected_accounts.list, user_ids=[user_id]
+            )
 
             apps = []
             app_names = []
@@ -143,25 +234,19 @@ class ComposioToolManager:
 
             for conn in connections.items:
                 try:
-                    # Extract app name from toolkit
                     app_name = conn.toolkit.slug.upper() if conn.toolkit else "UNKNOWN"
                     display_name = (
                         conn.toolkit.slug.title() if conn.toolkit else "Unknown"
                     )
-
-                    # Get status
                     status = conn.status
 
-                    # Apply status filter if provided
                     if status_filter and status != status_filter.upper():
                         continue
 
-                    # Check if active
                     is_active = status == "ACTIVE"
                     if is_active:
                         active_count += 1
 
-                    # Create app info
                     app_info = {
                         "app_name": app_name,
                         "display_name": display_name,
@@ -179,15 +264,17 @@ class ComposioToolManager:
                         app_names.append(app_name)
 
                 except Exception as e:
-                    print(f"Error parsing connection {conn.id}: {e}")
+                    self.logger.warning(f"Error parsing connection {conn.id}: {e}")
                     continue
 
-            print(
+            self.logger.info(
                 f"Found {len(apps)} connected apps for user {user_id} ({active_count} active)"
             )
-            # app_names.append("BROWSER_TOOL")
-            no_auth_apps = async_to_sync(self.get_no_auth_apps())
+
+            # Fetch no-auth apps concurrently
+            no_auth_apps = await self.get_no_auth_apps()
             app_names.extend(no_auth_apps.get("apps", []))
+
             return {
                 "user_id": user_id,
                 "total_apps": len(apps),
@@ -197,105 +284,83 @@ class ComposioToolManager:
             }
 
         except Exception as e:
-            print(f"Failed to fetch connected apps: {e}")
+            self.logger.error(f"Failed to fetch connected apps: {e}")
             raise
 
-    def get_configured_toolkits(self) -> list[str]:
-        """Retrieve the list of toolkits from environment configuration.
-
-        Reads COMPOSIO_TOOLKITS environment variable and parses it into
-        a list of toolkit names. Defaults to GMAIL and GITHUB if not set.
+    async def get_configured_toolkits_async(self) -> list[str]:
+        """Retrieve the list of toolkits for the user (async).
 
         Returns:
             List[str]: List of toolkit names (e.g., ['GMAIL', 'GITHUB'])
-
-        Example:
-            >>> manager.get_configured_toolkits()
-            ['GMAIL', 'GITHUB', 'SLACK']
         """
-        toolkits_user = self.get_user_connected_apps(self.user_id)
-        # toolkits_str = os.environ.get("COMPOSIO_TOOLKITS", "GMAIL,GITHUB")
-        # toolkits = [toolkit.strip() for toolkit in toolkits_str.split(",")]
-        toolkits = toolkits_user.get("app_names")
+        toolkits_user = await self.get_user_connected_apps_async(self.user_id)
+        toolkits = toolkits_user.get("app_names", [])
 
         self.logger.info(f"Configured toolkits: {toolkits}")
         return toolkits
 
-    def fetch_tools_from_toolkits(self, toolkits: list[str]) -> list[dict[str, Any]]:
-        """Fetch tools from multiple Composio toolkits.
+    async def _fetch_toolkit_tools(self, toolkit: str) -> list[dict[str, Any]]:
+        """Fetch tools for a single toolkit (runs in thread pool).
 
-        Due to a Composio limitation, tools must be fetched one toolkit at a time
-        and then combined. This method handles that process with proper error handling.
+        Args:
+            toolkit: Toolkit name to fetch tools from
+
+        Returns:
+            List of tool definitions for the toolkit
+        """
+        try:
+            toolkit_tools = await self._run_in_executor(
+                self.composio.tools.get, user_id=self.user_id, toolkits=[toolkit]
+            )
+            self.logger.info(f"Fetched {len(toolkit_tools)} tools from {toolkit}")
+            return list(toolkit_tools)
+        except Exception as e:
+            self.logger.error(f"Failed to fetch tools from {toolkit}: {str(e)}")
+            return []
+
+    async def fetch_tools_from_toolkits_async(
+        self, toolkits: list[str]
+    ) -> list[dict[str, Any]]:
+        """Fetch tools from multiple Composio toolkits in parallel.
 
         Args:
             toolkits (List[str]): List of toolkit names to fetch tools from
 
         Returns:
             List[Dict[str, Any]]: Combined list of raw tool definitions from all toolkits
-
-        Note:
-            Failed toolkit fetches are logged but don't stop the process.
-            Other toolkits will continue to be processed.
         """
+        if not toolkits:
+            return []
+
+        # Fetch all toolkits in parallel
+        self.logger.info(f"Fetching tools from {len(toolkits)} toolkits in parallel")
+        start_time = time.time()
+
+        tasks = [self._fetch_toolkit_tools(toolkit) for toolkit in toolkits]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
         raw_tools = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Failed to fetch tools from {toolkits[i]}: {result}")
+            elif isinstance(result, list):
+                raw_tools.extend(result)
 
-        for toolkit in toolkits:
-            try:
-                toolkit_tools = self.composio.tools.get(
-                    user_id=self.user_id, toolkits=[toolkit]
-                )
-                raw_tools.extend(toolkit_tools)
-                self.logger.info(
-                    f"Successfully fetched {len(toolkit_tools)} tools from {toolkit}"
-                )
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to fetch tools from {toolkit}: {str(e)}", exc_info=True
-                )
-
+        elapsed = time.time() - start_time
         self.logger.info(
-            f"Total tools fetched: {len(raw_tools)} from {len(toolkits)} toolkits"
+            f"Fetched {len(raw_tools)} tools from {len(toolkits)} toolkits in {elapsed:.2f}s"
         )
         return raw_tools
 
-    def create_tool_wrappers(self, raw_tools: list[dict[str, Any]]) -> list[Any]:
+    def create_tool_wrappers(self, raw_tools: list[dict[str, Any]]) -> list[ToolObject]:
         """Convert raw tool definitions into Autogen-compatible tool objects.
-
-        Creates wrapper objects that extract the necessary metadata from
-        Composio's tool format (slug, description, parameters) into a format
-        that Autogen can work with.
 
         Args:
             raw_tools (List[Dict[str, Any]]): Raw tool definitions from Composio API
 
         Returns:
             List[ToolObject]: List of wrapped tool objects ready for Autogen
-
-        Example tool structure:
-            raw_tool = {
-                'function': {
-                    'name': 'GMAIL_SEND_EMAIL',
-                    'description': 'Send an email via Gmail',
-                    'parameters': {...}
-                }
-            }
         """
-
-        class ToolObject:
-            """Wrapper class for Composio tool definitions.
-
-            Attributes:
-                slug (str): Unique tool identifier (e.g., 'GMAIL_SEND_EMAIL')
-                description (str): Human-readable description of the tool
-                input_parameters (dict): JSON schema of tool parameters
-            """
-
-            def __init__(self, data: dict[str, Any]):
-                function_info = data.get("function", {})
-                self.slug = function_info.get("name")
-                self.description = function_info.get("description", "")
-                self.input_parameters = function_info.get("parameters", {})
-
         tools = [ToolObject(tool) for tool in raw_tools]
 
         self.logger.info(f"Created {len(tools)} tool wrappers")
@@ -308,16 +373,8 @@ class ComposioToolManager:
     def create_tool_executor(self) -> callable:
         """Create the execution function for running Composio tools.
 
-        This function will be called by Autogen when a tool needs to be executed.
-        It uses the Composio API to run the actual tool action and returns results.
-
         Returns:
             callable: Function that executes tools with signature (slug, arguments) -> dict
-
-        The returned function:
-            - Takes a tool slug (str) and arguments (dict)
-            - Executes the tool via Composio API
-            - Returns the result dict or error dict
         """
 
         def execute_tool(slug: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -329,14 +386,6 @@ class ComposioToolManager:
 
             Returns:
                 dict: Tool execution result or error information
-
-            Example:
-                >>> execute_tool('GMAIL_SEND_EMAIL', {
-                ...     'to': 'user@example.com',
-                ...     'subject': 'Hello',
-                ...     'body': 'Test email'
-                ... })
-                {'status': 'success', 'message_id': '...'}
             """
             try:
                 self.logger.info(f"Executing tool: {slug}")
@@ -363,17 +412,12 @@ class ComposioToolManager:
         return execute_tool
 
     def register_tools_with_agents(
-        self, tools: list[Any], execute_tool: callable
+        self, tools: list[ToolObject], execute_tool: callable
     ) -> int:
         """Register wrapped tools with Autogen agents.
 
-        This method:
-        1. Wraps tools using Autogen's provider format
-        2. Registers them with both chat and executor agents
-        3. Returns count of successfully registered tools
-
         Args:
-            tools (List[Any]): List of tool wrapper objects
+            tools (List[ToolObject]): List of tool wrapper objects
             execute_tool (callable): Function to execute tools
 
         Returns:
@@ -404,35 +448,47 @@ class ComposioToolManager:
             self.logger.error(f"Failed to register tools: {str(e)}", exc_info=True)
             raise
 
-    def register_all_tools(self) -> int:
-        """Main orchestration method to register all configured Composio tools.
+    async def register_all_tools_async(self) -> int:
+        """Async method to register all configured Composio tools.
 
         This is the primary entry point that coordinates the entire tool
-        registration workflow:
-        1. Get configured toolkits from environment
-        2. Fetch tools from each toolkit
-        3. Create tool wrappers
-        4. Create executor function
-        5. Register everything with Autogen agents
+        registration workflow with optimized parallel fetching:
+        1. Check cache for existing tools
+        2. Get configured toolkits from user connections
+        3. Fetch tools from each toolkit in parallel
+        4. Create tool wrappers
+        5. Create executor function
+        6. Register everything with Autogen agents
 
         Returns:
             int: Total number of tools registered
 
         Raises:
             Exception: If any critical step fails
-
-        Example:
-            >>> manager = ComposioToolManager('user123', chat_agent, executor)
-            >>> count = manager.register_all_tools()
-            >>> print(f"Registered {count} tools")
-            Registered 42 tools
         """
-        try:
-            # Step 1: Get toolkit configuration
-            toolkits = self.get_configured_toolkits()
+        start_time = time.time()
 
-            # Step 2: Fetch raw tools from Composio
-            raw_tools = self.fetch_tools_from_toolkits(toolkits)
+        try:
+            # Check cache first
+            cached = self._cache.get(self.user_id)
+            if cached is not None:
+                raw_tools = cached.get("raw_tools", [])
+                self.logger.info(
+                    f"Using {len(raw_tools)} cached tools for user {self.user_id}"
+                )
+            else:
+                # Step 1: Get toolkit configuration
+                toolkits = await self.get_configured_toolkits_async()
+
+                # Step 2: Fetch raw tools from Composio in parallel
+                raw_tools = await self.fetch_tools_from_toolkits_async(toolkits)
+
+                # Cache the results
+                if raw_tools:
+                    self._cache.set(
+                        self.user_id,
+                        {"raw_tools": raw_tools, "toolkits": toolkits},
+                    )
 
             if not raw_tools:
                 self.logger.warning("No tools were fetched from any toolkit")
@@ -447,9 +503,9 @@ class ComposioToolManager:
             # Step 5: Register with agents
             tool_count = self.register_tools_with_agents(tools, execute_tool)
 
+            elapsed = time.time() - start_time
             self.logger.info(
-                f"✅ Tool registration complete: {tool_count} tools from "
-                f"{len(toolkits)} toolkits"
+                f"Tool registration complete: {tool_count} tools in {elapsed:.2f}s"
             )
 
             return tool_count
@@ -459,6 +515,69 @@ class ComposioToolManager:
                 f"Critical error during tool registration: {str(e)}", exc_info=True
             )
             raise
+
+    # Legacy synchronous methods for backward compatibility
+    def get_user_connected_apps(
+        self, user_id: str, status_filter: str | None = None
+    ) -> dict[str, Any]:
+        """Synchronous wrapper for get_user_connected_apps_async.
+
+        Deprecated: Use get_user_connected_apps_async instead.
+        """
+        self.logger.warning(
+            "Using synchronous get_user_connected_apps - consider using async version"
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self.get_user_connected_apps_async(user_id, status_filter)
+            )
+        finally:
+            loop.close()
+
+    def get_configured_toolkits(self) -> list[str]:
+        """Synchronous wrapper for get_configured_toolkits_async.
+
+        Deprecated: Use get_configured_toolkits_async instead.
+        """
+        self.logger.warning(
+            "Using synchronous get_configured_toolkits - consider using async version"
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self.get_configured_toolkits_async())
+        finally:
+            loop.close()
+
+    def fetch_tools_from_toolkits(self, toolkits: list[str]) -> list[dict[str, Any]]:
+        """Synchronous wrapper for fetch_tools_from_toolkits_async.
+
+        Deprecated: Use fetch_tools_from_toolkits_async instead.
+        """
+        self.logger.warning(
+            "Using synchronous fetch_tools_from_toolkits - consider using async version"
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self.fetch_tools_from_toolkits_async(toolkits)
+            )
+        finally:
+            loop.close()
+
+    def register_all_tools(self) -> int:
+        """Synchronous wrapper for register_all_tools_async.
+
+        Deprecated: Use register_all_tools_async instead.
+        """
+        self.logger.warning(
+            "Using synchronous register_all_tools - consider using async version"
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self.register_all_tools_async())
+        finally:
+            loop.close()
 
 
 # Usage Example
@@ -476,5 +595,6 @@ if __name__ == "__main__":
     #     agent_executor=my_executor_agent
     # )
     #
-    # tool_count = manager.register_all_tools()
+    # # Async usage (preferred)
+    # tool_count = await manager.register_all_tools_async()
     # print(f"Ready to use {tool_count} Composio tools!")
