@@ -8,6 +8,7 @@ langchain==0.3.25
 langchain-openai>=0.3.30  # ADD THIS LINE - supports openai 2.x
 loguru==0.7.3
 nest_asyncio==1.6.0
+numpy>=1.24.0
 openai==2.3.0
 playwright==1.52.0
 Pillow==11.3.0

@@ -169,8 +169,8 @@ class ImageGenerator:
         async def flux_image_generator_wrapper(
             query: Annotated[str, "The image generation prompt"],
             filename: Annotated[str, "The filename to save the image as"],
-            width: Annotated[int, "Width of the image"] = 1792,
-            height: Annotated[int, "Height of the image"] = 1792,
+            width: Annotated[int, "Width of the image between 64 to 1792"] = 1792,
+            height: Annotated[int, "Height of the image between 64 to 1792"] = 1792,
         ):
             return await self.flux_image_generator(
                 prompt=query, filename=filename, width=width, height=height

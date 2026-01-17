@@ -5,6 +5,7 @@ from typing import Any
 from loguru import logger
 
 from src.managers.cancellation_token import CancellationToken
+from src.memory.integration import mem
 from src.utilities.custom_manager import ChatContext, create_capability_chat
 
 
@@ -51,6 +52,11 @@ class CapabilityManager:
     ) -> dict[str, Any]:
         """Execute a capability with the given configuration.
 
+        Includes SimpleMem integration for:
+        - Context injection from prior runs
+        - Capability run tracking
+        - Result extraction and storage
+
         Args:
             query: The complete user query.
             config: Configuration for the capability.
@@ -59,6 +65,8 @@ class CapabilityManager:
         Returns:
             Dict containing the result or error message.
         """
+        capability_run = None
+
         try:
             # Validate call_id
             if not call_id:
@@ -68,13 +76,19 @@ class CapabilityManager:
                     "query": query,
                 }
 
+            # Start SimpleMem capability run tracking
+            capability_run = await mem.start_run(
+                self.chat_id, config.task_id, config.name, query
+            )
+
             # Create chat context with manager kwargs
+            capability_id = str(uuid.uuid4())
             context = ChatContext(
                 user_id=self.user_id,
                 chat_id=self.chat_id,
                 chat_dir=self.chat_dir,
                 call_id=call_id,
-                capability_id=str(uuid.uuid4()),
+                capability_id=capability_id,
                 capability_name=config.name,
                 collection_name=config.collection,
                 omni_memory=self.memory,
@@ -89,14 +103,24 @@ class CapabilityManager:
             # Create capability manager instance
             capability_instance = config.manager_class(context)
 
-            # Prepare and execute chat
+            # Get SimpleMem context for injection
+            simplemem_context = await mem.get_context(
+                self.chat_id, config.task_id, config.name, query
+            )
+
+            # Prepare and execute chat with context injection
             if config.use_chat_messages:
                 messages = self._prepare_chat_messages() or []
+
+                # Inject SimpleMem context at the beginning
+                if simplemem_context:
+                    messages = simplemem_context + messages
+
                 if messages:
                     last_agent, last_message = capability_instance.manager.resume(
                         messages=messages
                     )
-            capability_instance.groupchat.max_round = 15
+
             await capability_instance.manager.a_initiate_chat(
                 capability_instance.manager, message=query, clear_history=False
             )
@@ -104,6 +128,13 @@ class CapabilityManager:
             # Extract result from messages
             result = self._extract_completion_result(
                 capability_instance.groupchat.messages, config.completion_agent_name
+            )
+
+            # Complete SimpleMem capability run with result
+            await mem.complete_run(
+                capability_run,
+                self.chat_id,
+                result if isinstance(result, str) else str(result),
             )
 
             return (
@@ -114,6 +145,10 @@ class CapabilityManager:
 
         except Exception as e:
             logger.error(f"{config.name} process failed for query '{query}': {e}")
+
+            # Record error in SimpleMem run
+            await mem.complete_run(capability_run, self.chat_id, f"Error: {e}")
+
             return {"error": f"{config.name} process failed: {str(e)}", "query": query}
 
     def _prepare_chat_messages(self) -> list[dict[str, Any]]:

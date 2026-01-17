@@ -2,7 +2,7 @@
 
 This module provides a custom GroupChatManager implementation that extends AutoGen's
 standard manager with chat context tracking, usage monitoring, database persistence,
-and real-time WebSocket communication capabilities.
+real-time WebSocket communication, and SimpleMem memory integration.
 """
 
 import asyncio
@@ -17,6 +17,7 @@ from src.configs.datetime_utils import dt
 from src.configs.routes import RoutesConfig
 from src.dependencies import get_websocket_manager
 from src.managers.cancellation_token import CancellationToken
+from src.memory.integration import mem
 from src.omni.memory import OmniMemory
 from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
@@ -441,7 +442,7 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             "capability_id": self.context.capability_id,
             "task_id": self.context.task_id,
         }
-        # Store in memory (synchronous)
+        # Store in memory (synchronous - OmniMemory for backward compatibility)
         memory_data = {k: message_data[k] for k in ["role", "name", "content"]}
         self.omni_memory.push_capability_message(
             memory_data, self.context.capability_name, self.context.capability_id
@@ -450,6 +451,17 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         # Process background tasks (async)
         async_to_sync(update_chat_history(self.context, message_data))
         async_to_sync(self._send_websocket_message(websocket_message))
+
+        # Feed to SimpleMem (non-blocking, fire-and-forget)
+        mem.fire(mem.add_message(
+            chat_id=self.context.chat_id,
+            speaker=sender.name,
+            content=content,
+            task_id=self.context.task_id,
+            capability=self.context.capability_name,
+            capability_run_id=self.context.capability_id,
+            raw_message=message,
+        ))
 
     # Additional utility methods for comprehensive usage tracking
 

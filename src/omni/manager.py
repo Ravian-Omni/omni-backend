@@ -35,6 +35,7 @@ from src.omni.response_format import (
     PlannerResponse,
     QuestionClassification,
 )
+from src.memory.integration import mem
 from src.utilities.async_helpers import async_to_sync
 from src.utilities.storage import a_speak, update_chat_history
 
@@ -344,6 +345,9 @@ class Omni:
         """Set the current task ID for tracking."""
         self.task_id = task_id
         self.manager.task_id = task_id
+
+        # Initialize SimpleMem task state (non-blocking)
+        mem.fire(mem.init_task(self.chat_id, task_id))
 
     def _check_cancellation(self):
         """Check if operations should be cancelled."""
@@ -762,7 +766,15 @@ class Omni:
             messages = groupchat.messages
             try:
                 if last_speaker.name in ["planner_agent"]:
-                    status = json.loads(messages[-1]["content"]).get("overall_status")
+                    planner_data = json.loads(messages[-1]["content"])
+                    status = planner_data.get("overall_status")
+
+                    # Update SimpleMem with plan (non-blocking)
+                    if planner_data.get("breakdown"):
+                        mem.fire(mem.set_plan(
+                            self.chat_id, self.task_id, planner_data.get("breakdown", [])
+                        ))
+
                     if status == "completed":
                         return groupchat.agent_by_name("process_completion_agent")
             except Exception as e:
@@ -773,6 +785,12 @@ class Omni:
                 return groupchat.agent_by_name("judge_question")
             if last_speaker.name in ["judge_question"]:
                 if "task_oriented" in messages[-1]["content"]:
+                    # Capture user's goal in SimpleMem (non-blocking)
+                    if len(messages) >= 1:
+                        user_goal = messages[0].get("content", "")
+                        if user_goal:
+                            mem.fire(mem.set_goal(self.chat_id, self.task_id, user_goal))
+
                     # if it is a task oriented question then route to planner agent
                     return groupchat.agent_by_name("planner_agent")
                 # if it is a general conversation then route to conversation agent
