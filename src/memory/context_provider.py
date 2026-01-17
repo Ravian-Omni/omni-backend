@@ -72,7 +72,7 @@ class ContextProvider:
     ) -> list[dict[str, Any]]:
         """Get context messages for a capability call.
 
-        Builds context including:
+        Builds a single combined context message including:
         1. Current goal and plan status
         2. Previous runs of this capability (if any)
         3. Relevant memory from other capabilities
@@ -86,9 +86,9 @@ class ContextProvider:
             task_state: Optional task state for structured context.
 
         Returns:
-            List of AutoGen-formatted context messages.
+            List with single AutoGen-formatted context message, or empty list.
         """
-        messages = []
+        context_sections = []
 
         logger.debug(
             f"Building context for {capability_name}: "
@@ -97,9 +97,9 @@ class ContextProvider:
 
         # 1. Goal and plan context (if available)
         if task_state:
-            goal_context = self._build_goal_context(task_state)
-            if goal_context:
-                messages.append(goal_context)
+            goal_section = self._build_goal_section(task_state)
+            if goal_section:
+                context_sections.append(goal_section)
                 logger.debug(f"Added goal context (goal={bool(task_state.goal)})")
 
         # 2. Check for previous runs of this capability
@@ -112,11 +112,11 @@ class ContextProvider:
         logger.debug(f"Found {len(previous_runs)} previous runs of {capability_name}")
 
         if previous_runs:
-            runs_context = self._build_previous_runs_context(
+            runs_section = self._build_previous_runs_section(
                 capability_name, previous_runs
             )
-            if runs_context:
-                messages.append(runs_context)
+            if runs_section:
+                context_sections.append(runs_section)
 
         # 3. Get relevant memory through adaptive retrieval
         relevant_memory = await self._retrieve_relevant_context(
@@ -129,9 +129,9 @@ class ContextProvider:
         logger.debug(f"Retrieved {len(relevant_memory)} relevant memory units")
 
         if relevant_memory:
-            memory_context = self._build_memory_context(relevant_memory)
-            if memory_context:
-                messages.append(memory_context)
+            memory_section = self._build_memory_section(relevant_memory)
+            if memory_section:
+                context_sections.append(memory_section)
 
         # 4. Cross-capability context (what other capabilities did)
         if task_id:
@@ -144,24 +144,36 @@ class ContextProvider:
             logger.debug(f"Found {len(other_runs)} cross-capability runs")
 
             if other_runs:
-                cross_context = self._build_cross_capability_context(other_runs)
-                if cross_context:
-                    messages.append(cross_context)
+                cross_section = self._build_cross_capability_section(other_runs)
+                if cross_section:
+                    context_sections.append(cross_section)
+
+        # Combine all sections into a single message
+        if not context_sections:
+            logger.info(f"ContextProvider: No context available for {capability_name}")
+            return []
+
+        combined_content = "\n\n---\n\n".join(context_sections)
 
         logger.info(
-            f"ContextProvider: Generated {len(messages)} context messages for {capability_name}"
+            f"ContextProvider: Generated combined context with {len(context_sections)} sections "
+            f"for {capability_name}"
         )
 
-        return messages
+        return [{
+            "role": "user",
+            "name": "context_keeper",
+            "content": f"# Context for {capability_name}\n\n{combined_content}",
+        }]
 
-    def _build_goal_context(self, task_state: TaskState) -> dict[str, Any] | None:
-        """Build goal and plan status context.
+    def _build_goal_section(self, task_state: TaskState) -> str | None:
+        """Build goal and plan status section.
 
         Args:
             task_state: Task state with goal and plan.
 
         Returns:
-            Context message or None.
+            Context section string or None.
         """
         parts = []
 
@@ -182,25 +194,21 @@ class ContextProvider:
         if not parts:
             return None
 
-        return {
-            "role": "user",
-            "name": "context_keeper",
-            "content": "\n\n".join(parts),
-        }
+        return "\n\n".join(parts)
 
-    def _build_previous_runs_context(
+    def _build_previous_runs_section(
         self,
         capability_name: str,
         runs: list[CapabilityRun],
-    ) -> dict[str, Any] | None:
-        """Build context for previous capability runs.
+    ) -> str | None:
+        """Build context section for previous capability runs.
 
         Args:
             capability_name: Capability name.
             runs: Previous runs of this capability.
 
         Returns:
-            Context message or None.
+            Context section string or None.
         """
         if not runs:
             return None
@@ -225,23 +233,19 @@ class ContextProvider:
 
             parts.append("\n".join(run_parts))
 
-        return {
-            "role": "user",
-            "name": "context_keeper",
-            "content": "\n\n".join(parts),
-        }
+        return "\n\n".join(parts)
 
-    def _build_memory_context(
+    def _build_memory_section(
         self,
         units: list[MemoryUnit],
-    ) -> dict[str, Any] | None:
-        """Build context from retrieved memory units.
+    ) -> str | None:
+        """Build context section from retrieved memory units.
 
         Args:
             units: Retrieved memory units.
 
         Returns:
-            Context message or None.
+            Context section string or None.
         """
         if not units:
             return None
@@ -251,23 +255,19 @@ class ContextProvider:
         for unit in units:
             parts.append(f"- {unit.to_context_string()}")
 
-        return {
-            "role": "user",
-            "name": "context_keeper",
-            "content": "\n".join(parts),
-        }
+        return "\n".join(parts)
 
-    def _build_cross_capability_context(
+    def _build_cross_capability_section(
         self,
         runs: list[CapabilityRun],
-    ) -> dict[str, Any] | None:
-        """Build context from other capabilities' runs.
+    ) -> str | None:
+        """Build context section from other capabilities' runs.
 
         Args:
             runs: Capability runs from other capabilities.
 
         Returns:
-            Context message or None.
+            Context section string or None.
         """
         if not runs:
             return None
@@ -280,11 +280,7 @@ class ContextProvider:
                 run_text += f" (files: {', '.join(run.files_affected[:3])})"
             parts.append(run_text)
 
-        return {
-            "role": "user",
-            "name": "context_keeper",
-            "content": "\n".join(parts),
-        }
+        return "\n".join(parts)
 
     async def _retrieve_relevant_context(
         self,
@@ -388,6 +384,7 @@ class ContextProvider:
         """Get context for handoff between capabilities.
 
         Used when one capability needs to continue work from another.
+        Returns a single combined context message.
 
         Args:
             from_capability: Source capability name.
@@ -397,15 +394,12 @@ class ContextProvider:
             task_id: Task identifier.
 
         Returns:
-            List of context messages.
+            List with single context message.
         """
-        messages = []
+        sections = []
 
         # Handoff summary
-        handoff = {
-            "role": "user",
-            "name": "context_keeper",
-            "content": f"""## Handoff from {from_capability}
+        handoff_section = f"""## Handoff from {from_capability}
 
 **What was done:** {from_run.result_summary or from_run.query}
 
@@ -413,10 +407,8 @@ class ContextProvider:
 
 **Decisions made:** {'; '.join(from_run.decisions_made) if from_run.decisions_made else 'None'}
 
-**Continue with:** {to_capability}
-""",
-        }
-        messages.append(handoff)
+**Continue with:** {to_capability}"""
+        sections.append(handoff_section)
 
         # Get recent memory from source capability
         retrieval_query = RetrievalQuery(
@@ -434,11 +426,15 @@ class ContextProvider:
         )
 
         if recent_memory:
-            memory_msg = self._build_memory_context(recent_memory)
-            if memory_msg:
-                messages.append(memory_msg)
+            memory_section = self._build_memory_section(recent_memory)
+            if memory_section:
+                sections.append(memory_section)
 
-        return messages
+        return [{
+            "role": "user",
+            "name": "context_keeper",
+            "content": f"# Handoff Context\n\n" + "\n\n---\n\n".join(sections),
+        }]
 
     async def get_continuation_context(
         self,
@@ -449,6 +445,7 @@ class ContextProvider:
         """Get full context for continuing a task after interruption.
 
         Reconstructs the complete state for resuming work.
+        Returns a single combined context message.
 
         Args:
             chat_id: Chat identifier.
@@ -456,23 +453,24 @@ class ContextProvider:
             capability_name: Capability to continue in.
 
         Returns:
-            List of context messages.
+            List with single context message.
         """
-        messages = []
+        sections = []
 
         # Get task state
         task_state = await self.store.get_task_state(task_id)
 
         if task_state:
             # Full goal and plan context
-            goal_context = self._build_goal_context(task_state)
-            if goal_context:
-                messages.append(goal_context)
+            goal_section = self._build_goal_section(task_state)
+            if goal_section:
+                sections.append(goal_section)
 
             # All previous runs summary
             if task_state.capability_runs:
-                runs_summary = self._build_runs_summary(task_state.capability_runs)
-                messages.append(runs_summary)
+                runs_section = self._build_runs_summary_section(task_state.capability_runs)
+                if runs_section:
+                    sections.append(runs_section)
 
         # Get all recent memory for this task
         retrieval_query = RetrievalQuery(
@@ -489,24 +487,34 @@ class ContextProvider:
         )
 
         if all_memory:
-            memory_context = self._build_memory_context(all_memory)
-            if memory_context:
-                messages.append(memory_context)
+            memory_section = self._build_memory_section(all_memory)
+            if memory_section:
+                sections.append(memory_section)
 
-        return messages
+        if not sections:
+            return []
 
-    def _build_runs_summary(
+        return [{
+            "role": "user",
+            "name": "context_keeper",
+            "content": f"# Continuation Context for {capability_name}\n\n" + "\n\n---\n\n".join(sections),
+        }]
+
+    def _build_runs_summary_section(
         self,
         runs: list[CapabilityRun],
-    ) -> dict[str, Any]:
-        """Build summary of all capability runs.
+    ) -> str | None:
+        """Build summary section of all capability runs.
 
         Args:
             runs: All capability runs.
 
         Returns:
-            Summary context message.
+            Summary section string or None.
         """
+        if not runs:
+            return None
+
         parts = ["## Execution History"]
 
         # Group by capability
@@ -524,11 +532,7 @@ class ContextProvider:
                     f"- Run #{run.sequence}: {run.result_summary or run.query} [{status}]"
                 )
 
-        return {
-            "role": "user",
-            "name": "context_keeper",
-            "content": "\n".join(parts),
-        }
+        return "\n".join(parts)
 
     async def get_quick_context(
         self,
@@ -558,4 +562,12 @@ class ContextProvider:
         if not recent:
             return []
 
-        return [self._build_memory_context(recent)]
+        memory_section = self._build_memory_section(recent)
+        if not memory_section:
+            return []
+
+        return [{
+            "role": "user",
+            "name": "context_keeper",
+            "content": f"# Recent Context\n\n{memory_section}",
+        }]
