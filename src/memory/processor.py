@@ -15,10 +15,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger
 
@@ -26,11 +26,11 @@ from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.memory.models import (
     AgentMessage,
+    CapabilityRun,
     CompressionResult,
     MemoryConfig,
     MemoryUnit,
     SalienceLevel,
-    CapabilityRun,
 )
 from src.memory.store import SimpleMemStore
 
@@ -113,7 +113,7 @@ class MemoryProcessor:
 
             try:
                 await asyncio.wait_for(self._processing_task, timeout=10.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._processing_task.cancel()
                 try:
                     await self._processing_task
@@ -138,7 +138,9 @@ class MemoryProcessor:
 
         # Trigger processing if buffer threshold reached
         if buffer_size >= self.config.buffer_size:
-            await self._processing_queue.put((message.chat_id, message.task_id or "default"))
+            await self._processing_queue.put(
+                (message.chat_id, message.task_id or "default")
+            )
 
     async def flush(self, chat_id: str, task_id: str | None = None) -> None:
         """Force flush buffer for a chat/task.
@@ -165,7 +167,7 @@ class MemoryProcessor:
                 # Process the buffer
                 await self._process_buffer(chat_id, task_id)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Check for any stale buffers to process
                 await self._process_stale_buffers()
 
@@ -339,9 +341,21 @@ class MemoryProcessor:
             Filtered messages.
         """
         low_value_patterns = {
-            "ok", "okay", "yes", "no", "sure", "got it", "understood",
-            "thanks", "thank you", "done", "completed", "finished",
-            "starting", "processing", "working on it",
+            "ok",
+            "okay",
+            "yes",
+            "no",
+            "sure",
+            "got it",
+            "understood",
+            "thanks",
+            "thank you",
+            "done",
+            "completed",
+            "finished",
+            "starting",
+            "processing",
+            "working on it",
         }
 
         filtered = []
@@ -432,6 +446,7 @@ Return ONLY the JSON array, no other text."""
             config_data = llm_config["config_list"][0]
 
             import openai
+
             client = openai.AsyncOpenAI(
                 api_key=config_data.get("api_key"),
                 base_url=config_data.get("base_url"),
@@ -459,7 +474,9 @@ Return ONLY the JSON array, no other text."""
             logger.error(f"LLM fact extraction failed: {e}")
             raise
 
-    def _fallback_extraction(self, messages: list[AgentMessage]) -> list[dict[str, Any]]:
+    def _fallback_extraction(
+        self, messages: list[AgentMessage]
+    ) -> list[dict[str, Any]]:
         """Fallback fact extraction without LLM.
 
         Used when LLM extraction fails. Creates simple memory units
@@ -476,7 +493,8 @@ Return ONLY the JSON array, no other text."""
             # Extract basic entities (words starting with capital letters)
             words = msg.content.split()
             entities = [
-                w.strip(".,!?:;\"'()[]{}") for w in words
+                w.strip(".,!?:;\"'()[]{}")
+                for w in words
                 if w and w[0].isupper() and len(w) > 2
             ]
 
@@ -486,28 +504,37 @@ Return ONLY the JSON array, no other text."""
                 topic = "file"
             elif any(kw in content_lower for kw in ["error", "failed", "exception"]):
                 topic = "error"
-            elif any(kw in content_lower for kw in ["code", "function", "class", "def "]):
+            elif any(
+                kw in content_lower for kw in ["code", "function", "class", "def "]
+            ):
                 topic = "code"
             elif any(kw in content_lower for kw in ["email", "sent", "message"]):
                 topic = "email"
-            elif any(kw in content_lower for kw in ["decided", "will", "should", "plan"]):
+            elif any(
+                kw in content_lower for kw in ["decided", "will", "should", "plan"]
+            ):
                 topic = "decision"
             else:
                 topic = "general"
 
             # Determine salience
             salience = "medium"
-            if any(kw in content_lower for kw in ["error", "failed", "important", "critical"]):
+            if any(
+                kw in content_lower
+                for kw in ["error", "failed", "important", "critical"]
+            ):
                 salience = "high"
             elif any(kw in content_lower for kw in ["note", "fyi", "minor"]):
                 salience = "low"
 
-            facts.append({
-                "content": f"{msg.speaker}: {msg.content[:500]}",
-                "entities": entities[:10],  # Limit entities
-                "topic": topic,
-                "salience": salience,
-            })
+            facts.append(
+                {
+                    "content": f"{msg.speaker}: {msg.content[:500]}",
+                    "entities": entities[:10],  # Limit entities
+                    "topic": topic,
+                    "salience": salience,
+                }
+            )
 
         return facts
 
@@ -526,13 +553,13 @@ Return ONLY the JSON array, no other text."""
             Source message if found.
         """
         # Simple heuristic: find message with most entity overlap
-        fact_entities = set(e.lower() for e in fact.get("entities", []))
+        fact_entities = {e.lower() for e in fact.get("entities", [])}
 
         best_match = None
         best_score = 0
 
         for msg in messages:
-            msg_words = set(w.lower() for w in msg.content.split())
+            msg_words = {w.lower() for w in msg.content.split()}
             overlap = len(fact_entities & msg_words)
             if overlap > best_score:
                 best_score = overlap
@@ -568,6 +595,7 @@ Return ONLY the JSON array, no other text."""
             config_data = llm_config["config_list"][0]
 
             import openai
+
             client = openai.AsyncOpenAI(
                 api_key=config_data.get("api_key"),
                 base_url=config_data.get("base_url"),
@@ -694,6 +722,7 @@ Return ONLY the JSON, no other text."""
         config_data = llm_config["config_list"][0]
 
         import openai
+
         client = openai.AsyncOpenAI(
             api_key=config_data.get("api_key"),
             base_url=config_data.get("base_url"),
@@ -727,14 +756,16 @@ Return ONLY the JSON, no other text."""
         """
         # Extract file paths (simple pattern matching)
         import re
-        file_patterns = re.findall(r'[\w./\\]+\.\w{1,5}', raw_result)
-        files = list(set(f for f in file_patterns if len(f) > 5))[:10]
+
+        file_patterns = re.findall(r"[\w./\\]+\.\w{1,5}", raw_result)
+        files = list({f for f in file_patterns if len(f) > 5})[:10]
 
         # Check for error indicators
         errors = []
         if "error" in raw_result.lower() or "failed" in raw_result.lower():
             error_lines = [
-                line.strip() for line in raw_result.split("\n")
+                line.strip()
+                for line in raw_result.split("\n")
                 if "error" in line.lower() or "failed" in line.lower()
             ]
             errors = error_lines[:5]
@@ -772,6 +803,7 @@ Return ONLY the JSON, no other text."""
             config_data = llm_config["config_list"][0]
 
             import openai
+
             client = openai.AsyncOpenAI(
                 api_key=config_data.get("api_key"),
                 base_url=config_data.get("base_url"),

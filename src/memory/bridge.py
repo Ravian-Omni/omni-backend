@@ -32,7 +32,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger
 
@@ -76,14 +76,10 @@ class SimpleMemBridge:
         Args:
             config: Memory configuration. Uses defaults if not provided.
         """
-        self.config = config or MemoryConfig(
-            db_path=Path(settings.ROOT_DIR) / "memory"
-        )
+        self.config = config or MemoryConfig(db_path=Path(settings.ROOT_DIR) / "memory")
         self.store = SimpleMemStore(self.config)
         self.processor = MemoryProcessor(self.config, self.store)
-        self.context_provider = ContextProvider(
-            self.store, self.processor, self.config
-        )
+        self.context_provider = ContextProvider(self.store, self.processor, self.config)
 
         # Task state cache (in-memory for fast access)
         self._task_states: dict[str, TaskState] = {}

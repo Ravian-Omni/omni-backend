@@ -19,6 +19,7 @@ from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
+from src.memory.integration import mem
 from src.omni import prompts
 from src.omni.capabilities_descriptions import (
     email_manager_description,
@@ -35,7 +36,6 @@ from src.omni.response_format import (
     PlannerResponse,
     QuestionClassification,
 )
-from src.memory.integration import mem
 from src.utilities.async_helpers import async_to_sync
 from src.utilities.storage import a_speak, update_chat_history
 
@@ -771,9 +771,13 @@ class Omni:
 
                     # Update SimpleMem with plan (non-blocking)
                     if planner_data.get("breakdown"):
-                        mem.fire(mem.set_plan(
-                            self.chat_id, self.task_id, planner_data.get("breakdown", [])
-                        ))
+                        mem.fire(
+                            mem.set_plan(
+                                self.chat_id,
+                                self.task_id,
+                                planner_data.get("breakdown", []),
+                            )
+                        )
 
                     if status == "completed":
                         return groupchat.agent_by_name("process_completion_agent")
@@ -789,7 +793,9 @@ class Omni:
                     if len(messages) >= 1:
                         user_goal = messages[0].get("content", "")
                         if user_goal:
-                            mem.fire(mem.set_goal(self.chat_id, self.task_id, user_goal))
+                            mem.fire(
+                                mem.set_goal(self.chat_id, self.task_id, user_goal)
+                            )
 
                     # if it is a task oriented question then route to planner agent
                     return groupchat.agent_by_name("planner_agent")

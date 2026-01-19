@@ -122,15 +122,18 @@ await mem.complete_run(
 ### `mem.get_context(chat_id, task_id, capability, query)`
 Get context messages for capability injection.
 
+Performs **chat-wide** semantic + lexical search to find facts relevant to the query.
+The `task_id` parameter is kept for API compatibility but is not used for filtering.
+
 ```python
 context = await mem.get_context(
     "chat_123",
-    "task_456",
+    "task_456",        # Optional - not used for filtering
     "python_coder",
     "Add authentication"
 )
-# Returns list of AutoGen message dicts:
-# [{"role": "user", "name": "context_keeper", "content": "## Goal\n..."}]
+# Returns list of AutoGen message dicts with compact factual bullet points:
+# [{"role": "user", "name": "context_keeper", "content": "- User requested JWT auth\n- Database uses PostgreSQL"}]
 ```
 
 ### `mem.flush(chat_id, task_id)`
@@ -138,6 +141,34 @@ Force flush pending messages.
 
 ```python
 await mem.flush("chat_123", "task_456")
+```
+
+## Context Retrieval Behavior
+
+The context retrieval system follows the SimpleMem paper (arxiv:2601.02553) approach:
+
+### Search Scope
+- **Chat-wide**: Searches all memory units in the chat, not just the current task
+- **Query-relevant**: Only returns facts semantically relevant to the current query
+
+### Adaptive Retrieval
+The number of facts retrieved adapts to query complexity:
+- **Simple queries** (create, add, fix, etc.): k=5 facts
+- **Medium queries**: k=10 facts
+- **Complex queries** (multiple, integrate, summarize, etc.): k=15 facts
+
+### Hybrid Search
+Combines multiple signals for relevance:
+1. **Semantic similarity** - Embedding-based vector search
+2. **Lexical matching** - Full-text search (FTS5)
+3. **Recency weighting** - Recent facts score higher
+
+### Output Format
+Returns compact factual bullet points without any headers or metadata:
+```
+- User wants to build a REST API with authentication
+- Database is PostgreSQL with SQLAlchemy ORM
+- Frontend is React with TypeScript
 ```
 
 ## Integration Points
@@ -256,9 +287,9 @@ mem.fire(mem.set_goal(...)) # Runs in background, errors logged
 
 ### Context not being injected?
 
-1. Ensure `task_id` is set before capability execution
-2. Check that messages are being added (query the database)
-3. Verify the capability name matches
+1. Check that messages are being added (query the database)
+2. Verify the query has semantic relevance to stored facts
+3. Check logs for "Retrieved X relevant facts" or "No relevant context found"
 
 ### LLM compression failing?
 

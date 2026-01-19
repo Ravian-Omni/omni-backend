@@ -89,7 +89,11 @@ class MemoryUnit:
                 if isinstance(self.timestamp, datetime)
                 else self.timestamp
             ),
-            "salience": self.salience.value if isinstance(self.salience, SalienceLevel) else self.salience,
+            "salience": (
+                self.salience.value
+                if isinstance(self.salience, SalienceLevel)
+                else self.salience
+            ),
             "chat_id": self.chat_id,
             "task_id": self.task_id,
             "capability_name": self.capability_name,
@@ -218,7 +222,9 @@ class CapabilityRun:
             "decisions_made": self.decisions_made,
             "errors": self.errors,
             "started_at": self.started_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": (
+                self.completed_at.isoformat() if self.completed_at else None
+            ),
         }
 
     def to_context_message(self) -> dict[str, Any]:
@@ -294,7 +300,9 @@ class TaskState:
 
     def get_capability_run_count(self, capability_name: str) -> int:
         """Get number of times a capability has been run."""
-        return sum(1 for run in self.capability_runs if run.capability_name == capability_name)
+        return sum(
+            1 for run in self.capability_runs if run.capability_name == capability_name
+        )
 
     def get_last_capability_run(self, capability_name: str) -> CapabilityRun | None:
         """Get the most recent run of a capability."""

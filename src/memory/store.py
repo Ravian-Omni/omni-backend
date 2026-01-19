@@ -21,18 +21,17 @@ import threading
 from collections.abc import Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 from loguru import logger
 
 from src.memory.models import (
+    CapabilityRun,
     MemoryConfig,
     MemoryUnit,
     RetrievalQuery,
     TaskState,
-    CapabilityRun,
 )
 
 
@@ -105,7 +104,8 @@ class SimpleMemStore:
             cursor = conn.cursor()
 
             # Memory units table
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS memory_units (
                     id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
@@ -125,10 +125,12 @@ class SimpleMemStore:
                     consolidated_into TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """
+            )
 
             # Task state table
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS task_states (
                     task_id TEXT PRIMARY KEY,
                     chat_id TEXT NOT NULL,
@@ -140,10 +142,12 @@ class SimpleMemStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-            """)
+            """
+            )
 
             # Capability runs table (for quick lookup)
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS capability_runs (
                     id TEXT PRIMARY KEY,
                     capability_name TEXT NOT NULL,
@@ -158,47 +162,66 @@ class SimpleMemStore:
                     started_at TEXT NOT NULL,
                     completed_at TEXT
                 )
-            """)
+            """
+            )
 
             # Indexes for fast filtering
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_memory_chat_id
                 ON memory_units(chat_id)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_memory_task_id
                 ON memory_units(task_id)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_memory_capability
                 ON memory_units(capability_name)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_memory_timestamp
                 ON memory_units(timestamp)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_memory_consolidated
                 ON memory_units(consolidated)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_task_chat_id
                 ON task_states(chat_id)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_capruns_task_id
                 ON capability_runs(task_id)
-            """)
-            cursor.execute("""
+            """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_capruns_capability
                 ON capability_runs(capability_name, task_id)
-            """)
+            """
+            )
 
             # Full-text search on content
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
                 USING fts5(id, content, entities, topic)
-            """)
+            """
+            )
 
             conn.commit()
 
@@ -223,7 +246,9 @@ class SimpleMemStore:
                 # Serialize embedding as bytes
                 embedding_bytes = None
                 if unit.embedding:
-                    embedding_bytes = np.array(unit.embedding, dtype=np.float32).tobytes()
+                    embedding_bytes = np.array(
+                        unit.embedding, dtype=np.float32
+                    ).tobytes()
 
                 cursor.execute(
                     """
@@ -238,8 +263,16 @@ class SimpleMemStore:
                         unit.content,
                         json.dumps(unit.entities),
                         unit.topic,
-                        unit.timestamp.isoformat() if isinstance(unit.timestamp, datetime) else unit.timestamp,
-                        unit.salience.value if hasattr(unit.salience, "value") else unit.salience,
+                        (
+                            unit.timestamp.isoformat()
+                            if isinstance(unit.timestamp, datetime)
+                            else unit.timestamp
+                        ),
+                        (
+                            unit.salience.value
+                            if hasattr(unit.salience, "value")
+                            else unit.salience
+                        ),
                         unit.chat_id,
                         unit.task_id,
                         unit.capability_name,
@@ -290,7 +323,9 @@ class SimpleMemStore:
                 for unit in units:
                     embedding_bytes = None
                     if unit.embedding:
-                        embedding_bytes = np.array(unit.embedding, dtype=np.float32).tobytes()
+                        embedding_bytes = np.array(
+                            unit.embedding, dtype=np.float32
+                        ).tobytes()
 
                     cursor.execute(
                         """
@@ -305,8 +340,16 @@ class SimpleMemStore:
                             unit.content,
                             json.dumps(unit.entities),
                             unit.topic,
-                            unit.timestamp.isoformat() if isinstance(unit.timestamp, datetime) else unit.timestamp,
-                            unit.salience.value if hasattr(unit.salience, "value") else unit.salience,
+                            (
+                                unit.timestamp.isoformat()
+                                if isinstance(unit.timestamp, datetime)
+                                else unit.timestamp
+                            ),
+                            (
+                                unit.salience.value
+                                if hasattr(unit.salience, "value")
+                                else unit.salience
+                            ),
                             unit.chat_id,
                             unit.task_id,
                             unit.capability_name,
@@ -353,9 +396,7 @@ class SimpleMemStore:
         Returns:
             List of relevant memory units, ranked by combined score.
         """
-        return await asyncio.to_thread(
-            self._search_sync, query, query_embedding
-        )
+        return await asyncio.to_thread(self._search_sync, query, query_embedding)
 
     def _search_sync(
         self,
@@ -386,7 +427,9 @@ class SimpleMemStore:
                 conditions.append("consolidated = 0")
 
             if query.time_range_hours:
-                cutoff = (datetime.now() - timedelta(hours=query.time_range_hours)).isoformat()
+                cutoff = (
+                    datetime.now() - timedelta(hours=query.time_range_hours)
+                ).isoformat()
                 conditions.append("timestamp >= ?")
                 params.append(cutoff)
 
@@ -396,6 +439,7 @@ class SimpleMemStore:
             fts_query = self._sanitize_fts_query(query.query)
 
             # Build SQL - only use FTS if we have valid search terms
+            # where_clause is built from hardcoded conditions, not user input
             if fts_query:
                 sql = f"""
                     SELECT m.*,
@@ -409,7 +453,7 @@ class SimpleMemStore:
                     WHERE {where_clause}
                     ORDER BY m.sequence DESC
                     LIMIT ?
-                """
+                """  # nosec B608
                 params.insert(0, fts_query)  # FTS query param first
             else:
                 # Skip FTS if query can't be sanitized
@@ -419,7 +463,7 @@ class SimpleMemStore:
                     WHERE {where_clause}
                     ORDER BY m.sequence DESC
                     LIMIT ?
-                """
+                """  # nosec B608
 
             params.append(query.k * 3)  # Get more candidates for reranking
 
@@ -499,10 +543,27 @@ class SimpleMemStore:
         import re
 
         # Extract alphanumeric words (letters, numbers, underscores)
-        words = re.findall(r'\b[a-zA-Z0-9_]+\b', query_text)
+        words = re.findall(r"\b[a-zA-Z0-9_]+\b", query_text)
 
         # Filter out very short words and common stop words
-        stop_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'to', 'of', 'and', 'or', 'in', 'on', 'at', 'for'}
+        stop_words = {
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "to",
+            "of",
+            "and",
+            "or",
+            "in",
+            "on",
+            "at",
+            "for",
+        }
         words = [w for w in words if len(w) > 2 and w.lower() not in stop_words]
 
         if not words:
@@ -513,7 +574,7 @@ class SimpleMemStore:
 
         # Create an OR query with each word quoted for safety
         # Format: "word1" OR "word2" OR "word3"
-        fts_terms = ' OR '.join(f'"{w}"' for w in words)
+        fts_terms = " OR ".join(f'"{w}"' for w in words)
 
         return fts_terms
 
@@ -610,7 +671,9 @@ class SimpleMemStore:
                 for item in plan_data
             ]
 
-            runs_data = json.loads(row["capability_runs"]) if row["capability_runs"] else []
+            runs_data = (
+                json.loads(row["capability_runs"]) if row["capability_runs"] else []
+            )
             capability_runs = []
             for run_data in runs_data:
                 run = CapabilityRun(
@@ -758,12 +821,13 @@ class SimpleMemStore:
 
             where_clause = " AND ".join(conditions)
 
+            # where_clause is built from hardcoded conditions, not user input
             cursor.execute(
                 f"""
                 SELECT * FROM capability_runs
                 WHERE {where_clause}
                 ORDER BY started_at DESC
-                """,
+                """,  # nosec B608
                 params,
             )
             rows = cursor.fetchall()
@@ -777,11 +841,23 @@ class SimpleMemStore:
                     sequence=row["sequence"],
                     task_id=row["task_id"],
                     result_summary=row["result_summary"],
-                    files_affected=json.loads(row["files_affected"]) if row["files_affected"] else [],
-                    decisions_made=json.loads(row["decisions_made"]) if row["decisions_made"] else [],
+                    files_affected=(
+                        json.loads(row["files_affected"])
+                        if row["files_affected"]
+                        else []
+                    ),
+                    decisions_made=(
+                        json.loads(row["decisions_made"])
+                        if row["decisions_made"]
+                        else []
+                    ),
                     errors=json.loads(row["errors"]) if row["errors"] else [],
                     started_at=datetime.fromisoformat(row["started_at"]),
-                    completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+                    completed_at=(
+                        datetime.fromisoformat(row["completed_at"])
+                        if row["completed_at"]
+                        else None
+                    ),
                 )
                 runs.append(run)
 
@@ -803,9 +879,7 @@ class SimpleMemStore:
         Returns:
             Number of memory units matching filters.
         """
-        return await asyncio.to_thread(
-            self._get_memory_count_sync, chat_id, task_id
-        )
+        return await asyncio.to_thread(self._get_memory_count_sync, chat_id, task_id)
 
     def _get_memory_count_sync(
         self,
@@ -829,8 +903,9 @@ class SimpleMemStore:
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 
+            # where_clause is built from hardcoded conditions, not user input
             cursor.execute(
-                f"SELECT COUNT(*) FROM memory_units WHERE {where_clause}",
+                f"SELECT COUNT(*) FROM memory_units WHERE {where_clause}",  # nosec B608
                 params,
             )
 
@@ -884,6 +959,78 @@ class SimpleMemStore:
 
                 conn.commit()
                 return deleted
+
+    async def get_capability_memory_units(
+        self,
+        chat_id: str,
+        task_id: str | None,
+        capability_name: str,
+        capability_run_id: str | None = None,
+        limit: int = 50,
+    ) -> list[MemoryUnit]:
+        """Get all memory units from a specific capability.
+
+        Used for dependency-aware context retrieval - getting all facts
+        produced by a predecessor capability.
+
+        Args:
+            chat_id: Chat identifier.
+            task_id: Task identifier.
+            capability_name: Name of the capability.
+            capability_run_id: Optional specific run ID.
+            limit: Maximum units to return.
+
+        Returns:
+            List of memory units from the capability, ordered by sequence.
+        """
+        return await asyncio.to_thread(
+            self._get_capability_memory_units_sync,
+            chat_id,
+            task_id,
+            capability_name,
+            capability_run_id,
+            limit,
+        )
+
+    def _get_capability_memory_units_sync(
+        self,
+        chat_id: str,
+        task_id: str | None,
+        capability_name: str,
+        capability_run_id: str | None = None,
+        limit: int = 50,
+    ) -> list[MemoryUnit]:
+        """Synchronous capability memory units retrieval."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            conditions = ["chat_id = ?", "capability_name = ?", "consolidated = 0"]
+            params: list[Any] = [chat_id, capability_name]
+
+            if task_id:
+                conditions.append("task_id = ?")
+                params.append(task_id)
+
+            if capability_run_id:
+                conditions.append("capability_run_id = ?")
+                params.append(capability_run_id)
+
+            where_clause = " AND ".join(conditions)
+            params.append(limit)
+
+            # where_clause is built from hardcoded conditions, not user input
+            cursor.execute(
+                f"""
+                SELECT * FROM memory_units
+                WHERE {where_clause}
+                ORDER BY sequence ASC
+                LIMIT ?
+                """,  # nosec B608
+                params,
+            )
+
+            rows = cursor.fetchall()
+            return [self._row_to_memory_unit(row) for row in rows]
 
     async def get_recent_units(
         self,

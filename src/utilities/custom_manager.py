@@ -453,15 +453,17 @@ class CustomGroupChatManager(autogen.GroupChatManager):
         async_to_sync(self._send_websocket_message(websocket_message))
 
         # Feed to SimpleMem (non-blocking, fire-and-forget)
-        mem.fire(mem.add_message(
-            chat_id=self.context.chat_id,
-            speaker=sender.name,
-            content=content,
-            task_id=self.context.task_id,
-            capability=self.context.capability_name,
-            capability_run_id=self.context.capability_id,
-            raw_message=message,
-        ))
+        mem.fire(
+            mem.add_message(
+                chat_id=self.context.chat_id,
+                speaker=sender.name,
+                content=content,
+                task_id=self.context.task_id,
+                capability=self.context.capability_name,
+                capability_run_id=self.context.capability_id,
+                raw_message=message,
+            )
+        )
 
     # Additional utility methods for comprehensive usage tracking
 

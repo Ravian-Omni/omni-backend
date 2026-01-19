@@ -20,7 +20,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from loguru import logger
@@ -45,6 +44,7 @@ class MemoryIntegration:
         cls._init_attempted = True
         try:
             from src.memory.bridge import get_memory_bridge
+
             cls._bridge = await get_memory_bridge()
             logger.info("SimpleMem bridge initialized successfully")
         except Exception as e:
@@ -66,6 +66,7 @@ class MemoryIntegration:
         """
         try:
             from src.utilities.async_helpers import async_to_sync
+
             async_to_sync(coro)
         except Exception as e:
             # Log at debug to avoid spamming logs

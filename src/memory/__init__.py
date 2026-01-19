@@ -29,19 +29,19 @@ Quick Start:
     context = await mem.get_context(chat_id, task_id, capability, query)
 """
 
+from src.memory.bridge import SimpleMemBridge
+from src.memory.context_provider import ContextProvider
+from src.memory.integration import mem
 from src.memory.models import (
-    MemoryUnit,
-    TaskState,
     CapabilityRun,
     CompressionResult,
-    RetrievalQuery,
     MemoryConfig,
+    MemoryUnit,
+    RetrievalQuery,
+    TaskState,
 )
-from src.memory.store import SimpleMemStore
 from src.memory.processor import MemoryProcessor
-from src.memory.context_provider import ContextProvider
-from src.memory.bridge import SimpleMemBridge
-from src.memory.integration import mem
+from src.memory.store import SimpleMemStore
 
 __all__ = [
     # Integration helper (recommended for most uses)
