@@ -17,6 +17,7 @@ from src.capabilities.email_manager.manager import EmailManager
 from src.capabilities.file_finder.manager import FileFinder
 from src.capabilities.image_generator.manager import ImageGenerator
 from src.capabilities.python_developer.manager import PythonDeveloper
+from src.capabilities.software_developer.manager import SoftwareDeveloper
 from src.configs.datetime_utils import dt
 from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
@@ -33,6 +34,7 @@ CAPABILITY_CLASS_MAP = {
     "python_coder": PythonDeveloper,
     "file_finder": FileFinder,
     "image_generator": ImageGenerator,
+    "software_developer": SoftwareDeveloper,
 }
 
 

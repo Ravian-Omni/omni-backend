@@ -83,6 +83,9 @@ class Settings:
         self.IMAGE_GENERATOR_COLLECTION = os.getenv(
             "IMAGE_GENERATOR_COLLECTION", "image_generator"
         )
+        self.SOFTWARE_DEV_COLLECTION = os.getenv(
+            "SOFTWARE_DEV_COLLECTION", "software_developer"
+        )
 
     def get_date_time_now(self) -> datetime:
         """Get the current date and time in UTC timezone.
@@ -184,6 +187,7 @@ class CapabilityType(Enum):
     PYTHON_DEVELOPER = "python_coder"
     FILE_FINDER = "file_finder"
     IMAGE_GENERATOR = "image_generator"
+    SOFTWARE_DEVELOPER = "software_developer"
 
     @classmethod
     def from_string(cls, capability_name: str):
@@ -223,6 +227,7 @@ class CapabilityType(Enum):
             CapabilityType.PYTHON_DEVELOPER: settings.PYTHON_DEV_COLLECTION,
             CapabilityType.FILE_FINDER: settings.FILE_FINDER_COLLECTION,
             CapabilityType.IMAGE_GENERATOR: settings.IMAGE_GENERATOR_COLLECTION,
+            CapabilityType.SOFTWARE_DEVELOPER: settings.SOFTWARE_DEV_COLLECTION,
         }[self]
 
     @classmethod

@@ -26,7 +26,7 @@ from src.configs.settings import settings
 from src.dependencies import init_managers
 from src.routers import chat
 from src.routers import settings as settings_router
-from src.routers import websocket
+from src.routers import software_developer, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -113,6 +113,12 @@ app.include_router(
     settings_router.router,
     prefix="/settings",
     tags=["Settings Management"],
+    responses={404: {"description": "Not found"}},
+)
+app.include_router(
+    software_developer.router,
+    prefix="/software-developer",
+    tags=["Software Developer"],
     responses={404: {"description": "Not found"}},
 )
 
@@ -208,6 +214,22 @@ async def serve_capability_html(request: Request):
     """
     return templates.TemplateResponse(
         "capability.html",
+        {"request": request, "backend_url": RoutesConfig.BACKEND_URL_FALLBACK},
+    )
+
+
+@app.get("/software-developer", response_class=HTMLResponse)
+async def serve_software_developer_html(request: Request):
+    """Serve the Software Developer AI coding assistant HTML page.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        HTMLResponse: The software_developer.html page content with template variables.
+    """
+    return templates.TemplateResponse(
+        "software_developer.html",
         {"request": request, "backend_url": RoutesConfig.BACKEND_URL_FALLBACK},
     )
 
