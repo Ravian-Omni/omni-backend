@@ -191,7 +191,7 @@ class BrowserManager:
         # Setup directories
         self.browser_data_dir = (
             ensure_path(browser_data_dir) if browser_data_dir else None
-        ) or str(Path.home() / "browser_data")
+        ) or str(Path.home() / "browser_data" / self.context.capability_id)
 
         if self.save_results:
             self.results_dir = ensure_path(
