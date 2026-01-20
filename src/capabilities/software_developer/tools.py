@@ -7,10 +7,14 @@ git operations, code analysis, and command execution with interactive input supp
 import ast
 import asyncio
 import os
+import pty
 import re
 import shutil
 import signal
 import stat
+import struct
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -23,25 +27,34 @@ from loguru import logger
 if TYPE_CHECKING:
     from src.managers.connection import WebSocketManager
 
+# Platform detection
+IS_WINDOWS = sys.platform == "win32"
+
+# Platform-specific imports for Unix PTY
+if not IS_WINDOWS:
+    import fcntl
+    import select
+    import termios
+
 
 class InteractiveCommandExecutor:
-    """Async command executor with interactive input support.
+    """Async command executor with PTY-based interactive terminal support.
 
     This class handles command execution with:
-    - Real-time output streaming to WebSocket
-    - Input prompt detection
-    - Interactive input from frontend via WebSocket
-    - Proper process lifecycle management
+    - PTY-based execution for true terminal emulation
+    - Real-time output streaming to WebSocket/xterm.js
+    - Full interactive input support (keyboard, Ctrl+C, etc.)
+    - Automatic terminal display on frontend when commands execute
     """
 
     # Configuration constants
     STDIN_DRAIN_TIMEOUT = 5.0
-    READ_CHUNK_SIZE = 256
+    READ_CHUNK_SIZE = 4096
     READ_TIMEOUT = 0.05
     TERMINATION_GRACE_PERIOD = 5.0
-    # Stall detection: if no output for this long, assume process might need input
-    STALL_DETECTION_TIMEOUT = 1.5
-    WIN32 = os.name == "nt"
+    OUTPUT_READ_INTERVAL = 0.01
+    DEFAULT_COLS = 120
+    DEFAULT_ROWS = 30
 
     def __init__(
         self,
@@ -63,25 +76,28 @@ class InteractiveCommandExecutor:
         self.websocket_manager = websocket_manager
         self.default_timeout = timeout
 
-        # Process management
-        self.active_processes: dict[str, asyncio.subprocess.Process] = {}
+        # PTY process management
+        self._active_pty: dict[str, dict[str, Any]] = {}  # process_id -> {master_fd, process, ...}
         self._execution_futures: dict[str, asyncio.Future] = {}
-        self._process_monitor_tasks: dict[str, asyncio.Task] = {}
-        self._output_tasks: dict[str, list[asyncio.Task]] = {}
+        self._output_tasks: dict[str, asyncio.Task] = {}
         self._cleanup_lock = asyncio.Lock()
 
-        # Input handling
-        self._pending_input_futures: dict[str, asyncio.Future] = {}
+        # Input handling - pending writes to PTY
+        self._pending_input: dict[str, asyncio.Queue] = {}
         self._current_process_id: str | None = None
 
-        # Stall detection - track last output time per process
-        self._last_output_time: dict[str, float] = {}
-        self._stall_detection_tasks: dict[str, asyncio.Task] = {}
-        self._stall_notified: dict[str, bool] = {}
+        # Terminal dimensions
+        self.cols = self.DEFAULT_COLS
+        self.rows = self.DEFAULT_ROWS
 
     def set_websocket_manager(self, manager: "WebSocketManager") -> None:
         """Set the WebSocket manager for streaming."""
         self.websocket_manager = manager
+
+    def set_terminal_size(self, cols: int, rows: int) -> None:
+        """Set terminal dimensions for new commands."""
+        self.cols = cols
+        self.rows = rows
 
     async def stream_action(self, action_data: dict[str, Any]) -> None:
         """Stream action to WebSocket clients."""
@@ -97,13 +113,26 @@ class InteractiveCommandExecutor:
         except Exception as e:
             logger.debug(f"Error streaming action: {e}")
 
+    def _set_pty_size(self, fd: int, cols: int, rows: int) -> None:
+        """Set terminal size on a PTY file descriptor."""
+        if IS_WINDOWS:
+            return
+        try:
+            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+        except Exception as e:
+            logger.debug(f"Failed to set PTY size: {e}")
+
     async def execute_command(
         self,
         command: str,
         working_dir: str | None = None,
         timeout: int | None = None,
     ) -> str:
-        """Execute a shell command with interactive input support.
+        """Execute a shell command with PTY-based interactive terminal support.
+
+        The command runs in a pseudo-terminal, and the frontend terminal
+        is automatically shown so users can interact with it live.
 
         Args:
             command: The shell command to execute.
@@ -113,6 +142,357 @@ class InteractiveCommandExecutor:
         Returns:
             Command output as string.
         """
+        if IS_WINDOWS:
+            # Fall back to subprocess on Windows
+            return await self._execute_command_subprocess(command, working_dir, timeout)
+
+        process_id = f"cmd_{int(time.time() * 1000)}_{id(command) % 10000}"
+        self._current_process_id = process_id
+        cwd = working_dir if working_dir else self.working_directory
+        exec_timeout = timeout if timeout else self.default_timeout
+
+        master_fd = None
+        slave_fd = None
+        process = None
+        collected_output: list[str] = []
+
+        try:
+            # Create PTY master/slave pair
+            master_fd, slave_fd = pty.openpty()
+
+            # Set terminal size
+            self._set_pty_size(slave_fd, self.cols, self.rows)
+
+            # Set master to non-blocking
+            flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+            fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+            # Set up environment
+            env = os.environ.copy()
+            env["TERM"] = "xterm-256color"
+            env["COLORTERM"] = "truecolor"
+            env["PYTHONUNBUFFERED"] = "1"
+            env["COLUMNS"] = str(self.cols)
+            env["LINES"] = str(self.rows)
+
+            # Get shell
+            shell = os.environ.get("SHELL", "/bin/bash")
+
+            # Start process with PTY
+            import subprocess
+            process = subprocess.Popen(
+                [shell, "-c", command],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=cwd,
+                env=env,
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+
+            # Close slave FD in parent - child has it
+            os.close(slave_fd)
+            slave_fd = None
+
+            # Store PTY info
+            self._active_pty[process_id] = {
+                "master_fd": master_fd,
+                "process": process,
+                "command": command,
+            }
+
+            # Create input queue for this process
+            self._pending_input[process_id] = asyncio.Queue()
+
+            # Notify frontend to show terminal
+            await self.stream_action(
+                {
+                    "type": "command_terminal_start",
+                    "process_id": process_id,
+                    "pid": process.pid,
+                    "command": command,
+                    "working_dir": cwd,
+                    "cols": self.cols,
+                    "rows": self.rows,
+                    "timestamp": time.time(),
+                }
+            )
+
+            logger.info(f"PTY command started: {command[:50]}... (pid={process.pid})")
+
+            # Create execution future
+            execution_future: asyncio.Future[int] = asyncio.Future()
+            self._execution_futures[process_id] = execution_future
+
+            # Start output monitoring task
+            output_task = asyncio.create_task(
+                self._monitor_pty_output(
+                    master_fd, process, process_id, collected_output, execution_future
+                )
+            )
+            self._output_tasks[process_id] = output_task
+
+            # Start input handling task
+            input_task = asyncio.create_task(
+                self._handle_pty_input(master_fd, process_id)
+            )
+
+            # Wait for completion with timeout
+            try:
+                if exec_timeout > 0:
+                    return_code = await asyncio.wait_for(
+                        execution_future, timeout=float(exec_timeout)
+                    )
+                else:
+                    return_code = await execution_future
+
+            except TimeoutError:
+                await self.stream_action(
+                    {
+                        "type": "command_timeout",
+                        "process_id": process_id,
+                        "timeout": exec_timeout,
+                        "timestamp": time.time(),
+                    }
+                )
+                await self._terminate_pty_process(process_id)
+                return_code = 124
+
+            except asyncio.CancelledError:
+                await self.stream_action(
+                    {
+                        "type": "command_cancelled",
+                        "process_id": process_id,
+                        "timestamp": time.time(),
+                    }
+                )
+                await self._terminate_pty_process(process_id)
+                return_code = 130
+
+            # Cancel tasks
+            input_task.cancel()
+            try:
+                await input_task
+            except asyncio.CancelledError:
+                pass
+
+            if not output_task.done():
+                output_task.cancel()
+                try:
+                    await output_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Notify frontend that command terminal is done
+            await self.stream_action(
+                {
+                    "type": "command_terminal_end",
+                    "process_id": process_id,
+                    "exit_code": return_code,
+                    "timestamp": time.time(),
+                }
+            )
+
+            # Clean up
+            await self._cleanup_pty(process_id)
+
+            # Combine collected output
+            output = "".join(collected_output)
+            return f"Exit code: {return_code}\n{output.strip()}"
+
+        except Exception as e:
+            error_msg = f"Error executing command: {str(e)}"
+            logger.error(error_msg)
+            await self.stream_action(
+                {
+                    "type": "command_error",
+                    "process_id": process_id,
+                    "error": str(e),
+                    "timestamp": time.time(),
+                }
+            )
+            await self._cleanup_pty(process_id)
+            return error_msg
+
+        finally:
+            self._current_process_id = None
+            # Ensure FDs are closed
+            if slave_fd is not None:
+                try:
+                    os.close(slave_fd)
+                except OSError:
+                    pass
+
+    async def _monitor_pty_output(
+        self,
+        master_fd: int,
+        process: "subprocess.Popen",
+        process_id: str,
+        collector: list[str],
+        future: asyncio.Future,
+    ) -> None:
+        """Monitor PTY output and stream to WebSocket."""
+        loop = asyncio.get_event_loop()
+
+        while True:
+            try:
+                # Check for readable data using select
+                readable, _, _ = await loop.run_in_executor(
+                    None,
+                    lambda: select.select([master_fd], [], [], 0.1),
+                )
+
+                if master_fd in readable:
+                    try:
+                        data = os.read(master_fd, self.READ_CHUNK_SIZE)
+
+                        if data:
+                            decoded = data.decode("utf-8", errors="replace")
+                            collector.append(decoded)
+
+                            # Stream to frontend terminal
+                            await self.stream_action(
+                                {
+                                    "type": "terminal_output",
+                                    "process_id": process_id,
+                                    "data": decoded,
+                                    "timestamp": time.time(),
+                                }
+                            )
+                        else:
+                            # EOF
+                            break
+
+                    except OSError as e:
+                        if e.errno == 5:  # I/O error - terminal closed
+                            break
+                        elif e.errno != 11:  # Ignore EAGAIN
+                            logger.debug(f"Error reading from PTY: {e}")
+
+                # Check if process exited
+                retcode = process.poll()
+                if retcode is not None:
+                    # Read any remaining output
+                    try:
+                        while True:
+                            readable, _, _ = select.select([master_fd], [], [], 0.01)
+                            if master_fd not in readable:
+                                break
+                            data = os.read(master_fd, self.READ_CHUNK_SIZE)
+                            if not data:
+                                break
+                            decoded = data.decode("utf-8", errors="replace")
+                            collector.append(decoded)
+                            await self.stream_action(
+                                {
+                                    "type": "terminal_output",
+                                    "process_id": process_id,
+                                    "data": decoded,
+                                    "timestamp": time.time(),
+                                }
+                            )
+                    except OSError:
+                        pass
+
+                    if not future.done():
+                        future.set_result(retcode)
+                    break
+
+                await asyncio.sleep(self.OUTPUT_READ_INTERVAL)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error in PTY output monitor: {e}")
+                await asyncio.sleep(0.1)
+
+        # Ensure future is resolved
+        if not future.done():
+            retcode = process.poll()
+            future.set_result(retcode if retcode is not None else -1)
+
+    async def _handle_pty_input(self, master_fd: int, process_id: str) -> None:
+        """Handle input from WebSocket and write to PTY."""
+        queue = self._pending_input.get(process_id)
+        if not queue:
+            return
+
+        while True:
+            try:
+                # Wait for input from queue
+                data = await queue.get()
+
+                if data is None:  # Sentinel to stop
+                    break
+
+                # Write to PTY
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+
+                try:
+                    os.write(master_fd, data)
+                except OSError as e:
+                    if e.errno == 5:  # I/O error
+                        break
+                    logger.debug(f"Error writing to PTY: {e}")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error in PTY input handler: {e}")
+
+    async def _terminate_pty_process(self, process_id: str) -> None:
+        """Terminate a PTY process."""
+        pty_info = self._active_pty.get(process_id)
+        if not pty_info:
+            return
+
+        process = pty_info.get("process")
+        if process and process.poll() is None:
+            try:
+                # Send SIGTERM to process group
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    process.terminate()
+
+                # Wait briefly
+                try:
+                    process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    # Force kill
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        process.kill()
+                    process.wait(timeout=1.0)
+            except Exception as e:
+                logger.debug(f"Error terminating PTY process: {e}")
+
+    async def _cleanup_pty(self, process_id: str) -> None:
+        """Clean up PTY resources."""
+        async with self._cleanup_lock:
+            pty_info = self._active_pty.pop(process_id, None)
+            if pty_info:
+                master_fd = pty_info.get("master_fd")
+                if master_fd is not None:
+                    try:
+                        os.close(master_fd)
+                    except OSError:
+                        pass
+
+            self._pending_input.pop(process_id, None)
+            self._execution_futures.pop(process_id, None)
+            self._output_tasks.pop(process_id, None)
+
+    async def _execute_command_subprocess(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
+        """Fallback subprocess execution for Windows."""
         process_id = f"cmd_{int(time.time() * 1000)}_{id(command) % 10000}"
         self._current_process_id = process_id
         cwd = working_dir if working_dir else self.working_directory
@@ -129,447 +509,120 @@ class InteractiveCommandExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
                 env=env,
-                start_new_session=not self.WIN32,
             )
-
-            self.active_processes[process_id] = process
-            execution_future: asyncio.Future[int] = asyncio.Future()
-            self._execution_futures[process_id] = execution_future
-
-            monitor_task = asyncio.create_task(
-                self._monitor_process_lifecycle(process, process_id, execution_future)
-            )
-            self._process_monitor_tasks[process_id] = monitor_task
 
             await self.stream_action(
                 {
-                    "type": "process_started",
+                    "type": "command_terminal_start",
                     "process_id": process_id,
                     "pid": process.pid,
                     "command": command,
                     "working_dir": cwd,
+                    "cols": self.cols,
+                    "rows": self.rows,
                     "timestamp": time.time(),
                 }
             )
 
-            collected_stdout: list[str] = []
-            collected_stderr: list[str] = []
-
-            stdout_task = asyncio.create_task(
-                self._monitor_output_stream(
-                    process.stdout, process, process_id, "stdout", collected_stdout
-                )
-            )
-            stderr_task = asyncio.create_task(
-                self._monitor_output_stream(
-                    process.stderr, process, process_id, "stderr", collected_stderr
-                )
-            )
-
-            self._output_tasks[process_id] = [stdout_task, stderr_task]
-
-            # Initialize stall detection tracking
-            self._last_output_time[process_id] = time.time()
-            self._stall_notified[process_id] = False
-
-            # Start stall detection monitor
-            stall_task = asyncio.create_task(
-                self._monitor_stall_detection(process, process_id)
-            )
-            self._stall_detection_tasks[process_id] = stall_task
-
             try:
-                if exec_timeout > 0:
-                    return_code = await asyncio.wait_for(
-                        execution_future, timeout=float(exec_timeout)
-                    )
-                else:
-                    return_code = await execution_future
-
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=float(exec_timeout)
+                )
+                return_code = process.returncode
             except TimeoutError:
-                await self._handle_process_timeout(process_id)
+                process.kill()
+                await process.wait()
                 return_code = 124
-                await self._wait_for_output_tasks(process_id)
+                stdout, stderr = b"", b"Command timed out"
 
-            except asyncio.CancelledError:
+            # Stream output
+            if stdout:
                 await self.stream_action(
                     {
-                        "type": "process_cancelled",
+                        "type": "terminal_output",
                         "process_id": process_id,
+                        "data": stdout.decode("utf-8", errors="replace"),
                         "timestamp": time.time(),
                     }
                 )
-                await self._terminate_process_group(process)
-                await self._wait_for_output_tasks(process_id)
-                return_code = 130
+            if stderr:
+                await self.stream_action(
+                    {
+                        "type": "terminal_output",
+                        "process_id": process_id,
+                        "data": stderr.decode("utf-8", errors="replace"),
+                        "timestamp": time.time(),
+                    }
+                )
 
-            await self._wait_for_output_tasks(process_id)
-
-            stdout_output = "\n".join(collected_stdout) if collected_stdout else ""
-            stderr_output = "\n".join(collected_stderr) if collected_stderr else ""
+            await self.stream_action(
+                {
+                    "type": "command_terminal_end",
+                    "process_id": process_id,
+                    "exit_code": return_code,
+                    "timestamp": time.time(),
+                }
+            )
 
             output = ""
-            if stderr_output:
-                output += stderr_output + "\n"
-            if stdout_output:
-                output += stdout_output
-
-            await self._cleanup_single_process(process_id)
+            if stderr:
+                output += stderr.decode("utf-8", errors="replace") + "\n"
+            if stdout:
+                output += stdout.decode("utf-8", errors="replace")
 
             return f"Exit code: {return_code}\n{output.strip()}"
 
         except Exception as e:
-            error_msg = f"Error executing command: {str(e)}"
-            await self.stream_action(
-                {
-                    "type": "terminal_error",
-                    "process_id": process_id,
-                    "content": error_msg,
-                    "timestamp": time.time(),
-                }
-            )
-            await self._cleanup_single_process(process_id)
-            return error_msg
-
+            return f"Error executing command: {str(e)}"
         finally:
             self._current_process_id = None
 
-    async def _wait_for_output_tasks(self, process_id: str, timeout: float = 2.0):
-        """Wait for output tasks to complete with timeout."""
-        if process_id not in self._output_tasks:
-            return
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*self._output_tasks[process_id], return_exceptions=True),
-                timeout=timeout,
-            )
-        except TimeoutError:
-            for task in self._output_tasks[process_id]:
-                if not task.done():
-                    task.cancel()
-
-    async def _monitor_output_stream(
-        self,
-        stream: asyncio.StreamReader,
-        process: asyncio.subprocess.Process,
-        process_id: str,
-        stream_name: str,
-        collector: list[str],
-    ):
-        """Monitor output stream with real-time prompt detection."""
-        buffer = ""
-        try:
-            while True:
-                if process.returncode is not None and not buffer:
-                    try:
-                        remaining = await asyncio.wait_for(
-                            stream.read(self.READ_CHUNK_SIZE), timeout=0.1
-                        )
-                        if remaining:
-                            buffer += remaining.decode("utf-8", errors="replace")
-                        else:
-                            break
-                    except (TimeoutError, asyncio.CancelledError):
-                        break
-
-                try:
-                    chunk = await asyncio.wait_for(
-                        stream.read(self.READ_CHUNK_SIZE), timeout=self.READ_TIMEOUT
-                    )
-
-                    if not chunk:
-                        if buffer:
-                            await self._process_output_buffer(
-                                buffer, process_id, stream_name, collector
-                            )
-                        break
-
-                    buffer += chunk.decode("utf-8", errors="replace")
-                    buffer = await self._process_output_buffer(
-                        buffer, process_id, stream_name, collector
-                    )
-
-                except TimeoutError:
-                    if buffer and self._looks_like_input_prompt(buffer):
-                        await self._emit_output(
-                            buffer.rstrip("\n"),
-                            process_id,
-                            stream_name,
-                            collector,
-                            is_partial=True,
-                        )
-                        user_input = await self._wait_for_user_input(process_id, buffer)
-                        if user_input is not None:
-                            await self.send_input_to_process(process_id, user_input)
-                        buffer = ""
-                    continue
-
-                except asyncio.CancelledError:
-                    if buffer:
-                        await self._process_output_buffer(
-                            buffer, process_id, stream_name, collector, force_emit=True
-                        )
-                    raise
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            await self.stream_action(
-                {
-                    "type": "terminal_error",
-                    "process_id": process_id,
-                    "content": f"Error reading {stream_name}: {str(e)}",
-                    "timestamp": time.time(),
-                }
-            )
-
-    async def _process_output_buffer(
-        self,
-        buffer: str,
-        process_id: str,
-        stream_name: str,
-        collector: list[str],
-        force_emit: bool = False,
-    ) -> str:
-        """Process output buffer, emitting complete lines."""
-        lines = buffer.split("\n")
-
-        for line in lines[:-1]:
-            if line:
-                await self._emit_output(line, process_id, stream_name, collector)
-
-        remaining = lines[-1]
-
-        if force_emit and remaining:
-            await self._emit_output(remaining, process_id, stream_name, collector)
-            return ""
-
-        return remaining
-
-    async def _emit_output(
-        self,
-        content: str,
-        process_id: str,
-        stream_name: str,
-        collector: list[str],
-        is_partial: bool = False,
-    ):
-        """Emit output to WebSocket and collector."""
-        collector.append(content)
-        is_input_prompt = self._looks_like_input_prompt(content)
-
-        # Update last output time for stall detection
-        self._last_output_time[process_id] = time.time()
-        # Reset stall notification since we got output
-        self._stall_notified[process_id] = False
-
-        await self.stream_action(
-            {
-                "type": "terminal_output",
-                "stream": stream_name,
-                "process_id": process_id,
-                "content": content,
-                "is_input_prompt": is_input_prompt,
-                "is_partial": is_partial,
-                "timestamp": time.time(),
-            }
-        )
-
-        if is_input_prompt:
-            await self.stream_action(
-                {
-                    "type": "input_prompt_detected",
-                    "process_id": process_id,
-                    "prompt_text": content,
-                    "message": f"The command is waiting for input: {content}",
-                    "timestamp": time.time(),
-                }
-            )
-
-    def _looks_like_input_prompt(self, text: str) -> bool:
-        """Determine if text looks like an input prompt."""
-        text_stripped = text.strip()
-        text_lower = text_stripped.lower()
-
-        if not text_stripped:
-            return False
-
-        strong_indicators = [
-            "input(",
-            ">>> ",
-            "... ",
-            "password:",
-            "password: ",
-            "[y/n]",
-            "[yes/no]",
-            "(y/n)",
-            "(yes/no)",
-            "enter your",
-            "type your",
-            "please enter",
-            "please type",
-            "confirm",
-        ]
-
-        if any(ind in text_lower for ind in strong_indicators):
-            return True
-
-        prompt_endings = ["?", ": ", ":"]
-        question_words = [
-            "enter",
-            "input",
-            "type",
-            "provide",
-            "specify",
-            "choose",
-            "select",
-            "please",
-            "what",
-            "which",
-            "name",
-            "value",
-            "continue",
-            "proceed",
-            "overwrite",
-        ]
-
-        for ending in prompt_endings:
-            if text_stripped.endswith(ending):
-                if any(word in text_lower for word in question_words):
-                    return True
-
-        if text_stripped.endswith(":") and len(text_stripped) < 50:
-            non_prompt_patterns = [
-                "error:",
-                "warning:",
-                "info:",
-                "debug:",
-                "note:",
-                "traceback",
-                "file ",
-                "line ",
-                "exception",
-            ]
-            if not any(pat in text_lower for pat in non_prompt_patterns):
-                return True
-
-        return False
-
-    async def _wait_for_user_input(
-        self, process_id: str, prompt_text: str, timeout: float = 300.0
-    ) -> str | None:
-        """Wait for user input from WebSocket."""
-        input_future: asyncio.Future[str] = asyncio.Future()
-        self._pending_input_futures[process_id] = input_future
-
-        try:
-            user_input = await asyncio.wait_for(input_future, timeout=timeout)
-            return user_input
-        except TimeoutError:
-            await self.stream_action(
-                {
-                    "type": "input_timeout",
-                    "process_id": process_id,
-                    "message": "Input prompt timed out waiting for user response",
-                    "timestamp": time.time(),
-                }
-            )
-            return None
-        except asyncio.CancelledError:
-            return None
-        finally:
-            self._pending_input_futures.pop(process_id, None)
-
-    async def _monitor_stall_detection(
-        self, process: asyncio.subprocess.Process, process_id: str
-    ):
-        """Monitor for stalled processes that might be waiting for input.
-
-        This handles cases like bash's `read -p` which writes prompts
-        directly to /dev/tty instead of stdout/stderr, so we can't
-        detect the prompt through normal output monitoring.
-
-        Args:
-            process: The subprocess to monitor.
-            process_id: Process identifier.
-        """
-        try:
-            # Wait a bit before starting stall detection to allow initial output
-            await asyncio.sleep(self.STALL_DETECTION_TIMEOUT)
-
-            while process.returncode is None:
-                # Check if process is stalled (no output recently)
-                last_output = self._last_output_time.get(process_id, time.time())
-                time_since_output = time.time() - last_output
-
-                # If stalled and not already notified and no pending input future
-                if (
-                    time_since_output >= self.STALL_DETECTION_TIMEOUT
-                    and not self._stall_notified.get(process_id, False)
-                    and process_id not in self._pending_input_futures
-                ):
-                    # Mark as notified to avoid spamming
-                    self._stall_notified[process_id] = True
-
-                    # Notify frontend that input might be needed
-                    await self.stream_action(
-                        {
-                            "type": "input_might_be_needed",
-                            "process_id": process_id,
-                            "message": (
-                                "Process appears to be waiting for input. "
-                                "If prompted, please provide input."
-                            ),
-                            "stall_duration": time_since_output,
-                            "timestamp": time.time(),
-                        }
-                    )
-
-                    # Wait for user input
-                    user_input = await self._wait_for_user_input(
-                        process_id, "(possible hidden prompt)"
-                    )
-                    if user_input is not None:
-                        await self.send_input_to_process(process_id, user_input)
-
-                # Sleep before next check
-                await asyncio.sleep(0.5)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.debug(f"Stall detection error for {process_id}: {e}")
-
     def provide_input(self, process_id: str | None, user_input: str) -> bool:
-        """Provide input to a waiting process.
+        """Provide input to a running PTY process.
+
+        This queues input to be written to the PTY, enabling real-time
+        interaction with the running command.
 
         Args:
             process_id: Process identifier (or None to use current).
-            user_input: The input to provide.
+            user_input: The input to provide (raw keystrokes or text).
 
         Returns:
-            True if input was accepted.
+            True if input was queued successfully.
         """
         target_id = process_id or self._current_process_id
 
-        if target_id and target_id in self._pending_input_futures:
-            future = self._pending_input_futures[target_id]
-            if not future.done():
-                future.set_result(user_input)
+        if target_id and target_id in self._pending_input:
+            queue = self._pending_input[target_id]
+            try:
+                queue.put_nowait(user_input)
                 return True
+            except asyncio.QueueFull:
+                logger.warning(f"Input queue full for process {target_id}")
+                return False
 
+        # Try any active process if no specific target
         if not target_id:
-            for pid, future in self._pending_input_futures.items():
-                if not future.done():
-                    future.set_result(user_input)
+            for pid, queue in self._pending_input.items():
+                try:
+                    queue.put_nowait(user_input)
                     return True
+                except asyncio.QueueFull:
+                    continue
 
         return False
 
     async def send_input_to_process(self, process_id: str, input_text: str) -> bool:
-        """Send input directly to a running process stdin."""
-        if process_id not in self.active_processes:
+        """Send input directly to a running PTY process.
+
+        Args:
+            process_id: Process identifier.
+            input_text: The input text to send.
+
+        Returns:
+            True if input was sent successfully.
+        """
+        if process_id not in self._active_pty:
             await self.stream_action(
                 {
                     "type": "input_error",
@@ -580,46 +633,40 @@ class InteractiveCommandExecutor:
             )
             return False
 
+        pty_info = self._active_pty[process_id]
+        master_fd = pty_info.get("master_fd")
+        process = pty_info.get("process")
+
+        if not master_fd:
+            await self.stream_action(
+                {
+                    "type": "input_error",
+                    "process_id": process_id,
+                    "content": "PTY not available",
+                    "timestamp": time.time(),
+                }
+            )
+            return False
+
+        if process and process.poll() is not None:
+            await self.stream_action(
+                {
+                    "type": "input_error",
+                    "process_id": process_id,
+                    "content": f"Process has finished (exit code: {process.poll()})",
+                    "timestamp": time.time(),
+                }
+            )
+            return False
+
         try:
-            process = self.active_processes[process_id]
-
-            if process.returncode is not None:
-                await self.stream_action(
-                    {
-                        "type": "input_error",
-                        "process_id": process_id,
-                        "content": f"Process has finished (exit code: {process.returncode})",
-                        "timestamp": time.time(),
-                    }
-                )
-                return False
-
-            if not process.stdin or process.stdin.is_closing():
-                await self.stream_action(
-                    {
-                        "type": "input_error",
-                        "process_id": process_id,
-                        "content": "Process stdin is not available",
-                        "timestamp": time.time(),
-                    }
-                )
-                return False
-
-            input_bytes = input_text.encode("utf-8") + b"\n"
-            process.stdin.write(input_bytes)
-
-            try:
-                await asyncio.wait_for(
-                    process.stdin.drain(), timeout=self.STDIN_DRAIN_TIMEOUT
-                )
-            except TimeoutError:
-                pass  # Continue anyway
+            input_bytes = input_text.encode("utf-8")
+            os.write(master_fd, input_bytes)
 
             await self.stream_action(
                 {
                     "type": "input_sent",
                     "process_id": process_id,
-                    "content": input_text,
                     "bytes_written": len(input_bytes),
                     "timestamp": time.time(),
                 }
@@ -627,17 +674,7 @@ class InteractiveCommandExecutor:
 
             return True
 
-        except BrokenPipeError:
-            await self.stream_action(
-                {
-                    "type": "input_error",
-                    "process_id": process_id,
-                    "content": "stdin pipe is broken (process ended)",
-                    "timestamp": time.time(),
-                }
-            )
-            return False
-        except Exception as e:
+        except OSError as e:
             await self.stream_action(
                 {
                     "type": "input_error",
@@ -647,48 +684,6 @@ class InteractiveCommandExecutor:
                 }
             )
             return False
-
-    async def _monitor_process_lifecycle(
-        self,
-        process: asyncio.subprocess.Process,
-        process_id: str,
-        future: asyncio.Future,
-    ):
-        """Monitor process lifecycle and handle completion."""
-        try:
-            return_code = await process.wait()
-
-            if return_code < 0:
-                signal_name = self._get_signal_name(-return_code)
-                await self.stream_action(
-                    {
-                        "type": "process_terminated_by_signal",
-                        "process_id": process_id,
-                        "signal": signal_name,
-                        "return_code": return_code,
-                        "timestamp": time.time(),
-                    }
-                )
-            else:
-                await self.stream_action(
-                    {
-                        "type": "process_completed",
-                        "process_id": process_id,
-                        "exit_code": return_code,
-                        "timestamp": time.time(),
-                    }
-                )
-
-            if not future.done():
-                future.set_result(return_code)
-
-        except asyncio.CancelledError:
-            if not future.done():
-                future.cancel()
-            raise
-        except Exception as e:
-            if not future.done():
-                future.set_exception(e)
 
     def _get_signal_name(self, signal_num: int) -> str:
         """Get human-readable signal name."""
@@ -703,137 +698,80 @@ class InteractiveCommandExecutor:
             signal_names[signal.SIGQUIT] = "SIGQUIT"
         return signal_names.get(signal_num, f"SIGNAL_{signal_num}")
 
-    async def _terminate_process_group(self, process: asyncio.subprocess.Process):
-        """Terminate process and all its children."""
-        if process.returncode is not None:
-            return
-
-        try:
-            if self.WIN32:
-                process.terminate()
-            else:
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    process.terminate()
-
-            try:
-                await asyncio.wait_for(
-                    process.wait(), timeout=self.TERMINATION_GRACE_PERIOD
-                )
-            except TimeoutError:
-                if self.WIN32:
-                    process.kill()
-                else:
-                    try:
-                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        process.kill()
-                await process.wait()
-        except Exception:
-            try:
-                process.kill()
-                await process.wait()
-            except Exception:
-                pass
-
-    async def _handle_process_timeout(self, process_id: str):
-        """Handle process timeout."""
-        if process_id not in self.active_processes:
-            return
-
-        process = self.active_processes[process_id]
-        await self.stream_action(
-            {
-                "type": "process_timeout",
-                "process_id": process_id,
-                "timestamp": time.time(),
-            }
-        )
-        await self._terminate_process_group(process)
-
     async def terminate_process(self, process_id: str) -> bool:
-        """Terminate a specific process."""
-        if process_id not in self.active_processes:
+        """Terminate a specific PTY process."""
+        if process_id not in self._active_pty:
             return False
 
         try:
-            process = self.active_processes[process_id]
-
+            # Cancel execution future
             if process_id in self._execution_futures:
                 future = self._execution_futures[process_id]
                 if not future.done():
                     future.cancel()
 
-            if process_id in self._pending_input_futures:
-                future = self._pending_input_futures[process_id]
-                if not future.done():
-                    future.cancel()
-
-            await self._terminate_process_group(process)
-            await self._cleanup_single_process(process_id)
+            # Terminate the PTY process
+            await self._terminate_pty_process(process_id)
+            await self._cleanup_pty(process_id)
             return True
 
         except Exception:
             return False
 
-    async def _cleanup_single_process(self, process_id: str):
-        """Clean up a single process and all its resources."""
-        async with self._cleanup_lock:
-            try:
-                if process_id in self._process_monitor_tasks:
-                    task = self._process_monitor_tasks[process_id]
-                    if not task.done():
-                        task.cancel()
-                        try:
-                            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
-                        except (asyncio.CancelledError, TimeoutError):
-                            pass
-                    del self._process_monitor_tasks[process_id]
-
-                # Cancel stall detection task
-                if process_id in self._stall_detection_tasks:
-                    task = self._stall_detection_tasks[process_id]
-                    if not task.done():
-                        task.cancel()
-                    del self._stall_detection_tasks[process_id]
-
-                if process_id in self._output_tasks:
-                    for task in self._output_tasks[process_id]:
-                        if not task.done():
-                            task.cancel()
-                    del self._output_tasks[process_id]
-
-                self.active_processes.pop(process_id, None)
-                # Clean up stall detection tracking
-                self._last_output_time.pop(process_id, None)
-                self._stall_notified.pop(process_id, None)
-                if process_id in self._execution_futures:
-                    future = self._execution_futures[process_id]
-                    if not future.done():
-                        future.cancel()
-                    del self._execution_futures[process_id]
-                self._pending_input_futures.pop(process_id, None)
-
-            except Exception as e:
-                logger.debug(f"Cleanup error for {process_id}: {e}")
-
     async def cleanup_all(self):
-        """Clean up all processes."""
-        for process_id in list(self.active_processes.keys()):
-            await self._cleanup_single_process(process_id)
+        """Clean up all PTY processes."""
+        for process_id in list(self._active_pty.keys()):
+            await self.terminate_process(process_id)
 
     def get_active_processes(self) -> list[str]:
-        """Get list of active process IDs."""
-        return list(self.active_processes.keys())
+        """Get list of active PTY process IDs."""
+        return list(self._active_pty.keys())
 
     def has_pending_input(self) -> bool:
-        """Check if any process is waiting for input."""
-        return any(not f.done() for f in self._pending_input_futures.values())
+        """Check if any process has a pending input queue."""
+        return len(self._pending_input) > 0
 
     def get_current_process_id(self) -> str | None:
         """Get the currently executing process ID."""
         return self._current_process_id
+
+    def resize_pty(self, process_id: str, cols: int, rows: int) -> bool:
+        """Resize a PTY terminal.
+
+        Args:
+            process_id: Process identifier.
+            cols: New column count.
+            rows: New row count.
+
+        Returns:
+            True if resize was successful.
+        """
+        if IS_WINDOWS:
+            return False
+
+        pty_info = self._active_pty.get(process_id)
+        if not pty_info:
+            return False
+
+        master_fd = pty_info.get("master_fd")
+        if not master_fd:
+            return False
+
+        try:
+            self._set_pty_size(master_fd, cols, rows)
+
+            # Send SIGWINCH to process group
+            process = pty_info.get("process")
+            if process and process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGWINCH)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+            return True
+        except Exception as e:
+            logger.debug(f"Error resizing PTY: {e}")
+            return False
 
 
 class AsyncToolRegistry:

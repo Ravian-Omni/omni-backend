@@ -236,6 +236,137 @@ async def _handle_software_dev_messages(
                         }
                     )
 
+            # =================================================================
+            # COMMAND TERMINAL INPUT (for AI-executed commands)
+            # =================================================================
+
+            # === COMMAND_TERMINAL_INPUT: Input for running command's PTY ===
+            elif msg_type == "command_terminal_input":
+                data = message.get("data", "")
+                process_id = message.get("process_id")
+
+                if data:
+                    # Handle base64-encoded binary data if present
+                    if message.get("encoding") == "base64":
+                        import base64
+
+                        data = base64.b64decode(data)
+
+                    # Route to command executor's PTY
+                    success = software_dev.provide_input(process_id, data)
+
+                    if not success:
+                        await websocket.send_json(
+                            {
+                                "type": "command_input_error",
+                                "error": "No active command to receive input",
+                                "process_id": process_id,
+                                "timestamp": dt.now_iso(),
+                            }
+                        )
+
+            # === COMMAND_TERMINAL_RESIZE: Resize command's PTY ===
+            elif msg_type == "command_terminal_resize":
+                cols = message.get("cols")
+                rows = message.get("rows")
+                process_id = message.get("process_id")
+
+                if cols and rows:
+                    software_dev.resize_command_pty(
+                        process_id=process_id, cols=cols, rows=rows
+                    )
+                    logger.debug(
+                        f"Command PTY resized to {cols}x{rows} for session {chat_id}"
+                    )
+
+            # =================================================================
+            # STANDALONE PTY TERMINAL MESSAGES
+            # =================================================================
+
+            # === TERMINAL_START: Start a PTY terminal session ===
+            elif msg_type == "terminal_start":
+                cols = message.get("cols", 120)
+                rows = message.get("rows", 30)
+                shell = message.get("shell")  # Optional, uses system default
+
+                logger.info(
+                    f"Starting PTY terminal for session {chat_id} ({cols}x{rows})"
+                )
+
+                success = await software_dev.start_terminal(
+                    cols=cols,
+                    rows=rows,
+                    shell=shell,
+                )
+
+                if not success:
+                    await websocket.send_json(
+                        {
+                            "type": "terminal_error",
+                            "error": "Failed to start terminal",
+                            "timestamp": dt.now_iso(),
+                        }
+                    )
+
+            # === TERMINAL_INPUT: Raw keystroke input to terminal ===
+            elif msg_type == "terminal_input":
+                data = message.get("data", "")
+
+                if data:
+                    # Handle base64-encoded binary data if present
+                    if message.get("encoding") == "base64":
+                        import base64
+
+                        data = base64.b64decode(data)
+
+                    success = await software_dev.write_to_terminal(data)
+
+                    if not success and not software_dev.is_terminal_running():
+                        await websocket.send_json(
+                            {
+                                "type": "terminal_error",
+                                "error": "Terminal not running",
+                                "timestamp": dt.now_iso(),
+                            }
+                        )
+
+            # === TERMINAL_RESIZE: Resize terminal dimensions ===
+            elif msg_type == "terminal_resize":
+                cols = message.get("cols")
+                rows = message.get("rows")
+
+                if cols and rows:
+                    await software_dev.resize_terminal(cols=cols, rows=rows)
+                    logger.debug(
+                        f"Terminal resized to {cols}x{rows} for session {chat_id}"
+                    )
+
+            # === TERMINAL_STOP: Terminate the terminal session ===
+            elif msg_type == "terminal_stop":
+                force = message.get("force", False)
+                logger.info(f"Stopping terminal for session {chat_id}")
+
+                terminated = await software_dev.terminate_terminal(force=force)
+                await websocket.send_json(
+                    {
+                        "type": "terminal_stopped",
+                        "success": terminated,
+                        "timestamp": dt.now_iso(),
+                    }
+                )
+
+            # === TERMINAL_STATUS: Get terminal status ===
+            elif msg_type == "terminal_status":
+                status_info = software_dev.get_terminal_status()
+                await websocket.send_json(
+                    {
+                        "type": "terminal_status_response",
+                        "running": software_dev.is_terminal_running(),
+                        "status": status_info,
+                        "timestamp": dt.now_iso(),
+                    }
+                )
+
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON received for session {chat_id}")
             await websocket.send_json(

@@ -13,6 +13,7 @@ import anthropic
 from loguru import logger
 
 from src.capabilities.software_developer.prompts import SYSTEM_PROMPT
+from src.capabilities.software_developer.pty_terminal import PtyTerminalManager
 from src.capabilities.software_developer.tools import (
     TOOL_DEFINITIONS,
     AsyncToolRegistry,
@@ -125,6 +126,11 @@ class SoftwareDeveloper:
             websocket_manager=self.websocket_manager,
         )
 
+        # Initialize PTY terminal manager for native terminal support
+        self.terminal_manager = PtyTerminalManager(
+            websocket_manager=self.websocket_manager,
+        )
+
         # Create manager wrapper for compatibility
         self.manager = SoftwareDeveloperManager(self)
 
@@ -194,12 +200,121 @@ class SoftwareDeveloper:
         """
         return self.tool_registry.has_pending_input()
 
+    def resize_command_pty(
+        self, process_id: str | None, cols: int, rows: int
+    ) -> bool:
+        """Resize a command's PTY terminal.
+
+        This is called when the frontend terminal is resized while a
+        command is executing.
+
+        Args:
+            process_id: Process identifier (or None to use current).
+            cols: New width in columns.
+            rows: New height in rows.
+
+        Returns:
+            True if resize was successful.
+        """
+        target_id = process_id or self.tool_registry.command_executor.get_current_process_id()
+        if target_id:
+            return self.tool_registry.command_executor.resize_pty(target_id, cols, rows)
+        return False
+
     async def cleanup(self) -> None:
-        """Clean up all resources including running processes.
+        """Clean up all resources including running processes and terminals.
 
         Should be called when the session ends or is disconnected.
         """
         await self.tool_registry.cleanup()
+        await self.terminal_manager.cleanup_all()
+
+    # =========================================================================
+    # PTY Terminal Methods
+    # =========================================================================
+
+    async def start_terminal(
+        self,
+        cols: int | None = None,
+        rows: int | None = None,
+        shell: str | None = None,
+    ) -> bool:
+        """Start a PTY terminal session.
+
+        Args:
+            cols: Terminal width in columns.
+            rows: Terminal height in rows.
+            shell: Shell to use (defaults to system shell).
+
+        Returns:
+            True if terminal started successfully.
+        """
+        terminal = await self.terminal_manager.create_terminal(
+            session_id=self.context.chat_id,
+            working_directory=self.working_directory,
+            cols=cols,
+            rows=rows,
+            shell=shell,
+        )
+        return terminal is not None
+
+    async def write_to_terminal(self, data: str | bytes) -> bool:
+        """Write data to the terminal (keyboard input).
+
+        Args:
+            data: Data to write (raw keystrokes).
+
+        Returns:
+            True if data was written successfully.
+        """
+        terminal = self.terminal_manager.get_terminal(self.context.chat_id)
+        if terminal:
+            return await terminal.write(data)
+        return False
+
+    async def resize_terminal(self, cols: int, rows: int) -> None:
+        """Resize the terminal.
+
+        Args:
+            cols: New width in columns.
+            rows: New height in rows.
+        """
+        terminal = self.terminal_manager.get_terminal(self.context.chat_id)
+        if terminal:
+            await terminal.resize(cols, rows)
+
+    async def terminate_terminal(self, force: bool = False) -> bool:
+        """Terminate the terminal session.
+
+        Args:
+            force: If True, force kill the terminal.
+
+        Returns:
+            True if terminal was terminated.
+        """
+        return await self.terminal_manager.terminate_terminal(
+            self.context.chat_id, force=force
+        )
+
+    def is_terminal_running(self) -> bool:
+        """Check if the terminal is running.
+
+        Returns:
+            True if terminal is active.
+        """
+        terminal = self.terminal_manager.get_terminal(self.context.chat_id)
+        return terminal is not None and terminal.is_running
+
+    def get_terminal_status(self) -> dict[str, Any] | None:
+        """Get terminal status information.
+
+        Returns:
+            Status dict or None if no terminal.
+        """
+        terminal = self.terminal_manager.get_terminal(self.context.chat_id)
+        if terminal:
+            return terminal.get_status()
+        return None
 
     def load_custom_instructions(self, instructions: str) -> None:
         """Load custom instructions for the agent.

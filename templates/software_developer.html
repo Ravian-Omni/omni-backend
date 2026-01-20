@@ -4,6 +4,11 @@
     <title>Ravian AI - Software Developer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- xterm.js for native terminal support -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -103,6 +108,40 @@
             right: 10px;
             top: 50%;
             transform: translateY(-50%);
+        }
+
+        /* Terminal panel styles */
+        .terminal-panel {
+            transition: height 0.3s ease;
+        }
+        .terminal-panel.collapsed {
+            height: 40px !important;
+        }
+        .terminal-panel.collapsed .terminal-content {
+            display: none;
+        }
+        #terminal-container {
+            background: #1e1e1e;
+        }
+        #terminal-container .xterm {
+            padding: 8px;
+        }
+        .terminal-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .terminal-status-dot.running {
+            background: #22c55e;
+            box-shadow: 0 0 6px #22c55e;
+        }
+        .terminal-status-dot.stopped {
+            background: #ef4444;
+        }
+        .terminal-status-dot.connecting {
+            background: #eab308;
+            animation: pulse-dot 1s infinite;
         }
     </style>
 </head>
@@ -445,6 +484,13 @@
                             </div>
 
                             <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Terminal:</label>
+                                <button id="toggleTerminalBtn" class="w-full bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 text-white font-medium py-2 px-3 rounded text-sm transition-all flex items-center justify-center gap-2" onclick="showTerminalPanel(); startTerminal();">
+                                    <span>💻</span> Open Terminal
+                                </button>
+                            </div>
+
+                            <div>
                                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">JSON Message:</label>
                                 <div class="relative">
                                     <textarea id="jsonInput" placeholder='{"type": "start","task": "Your Query Here!","files": []}'
@@ -559,6 +605,33 @@
                         <div class="text-sm text-gray-600 dark:text-gray-400">Quality</div>
                     </div>
                 </div>
+
+                <!-- Terminal Panel -->
+                <div id="terminalPanel" class="terminal-panel border-t-2 border-gray-300 dark:border-gray-600 flex-shrink-0 hidden" style="height: 300px;">
+                    <!-- Terminal Header -->
+                    <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 cursor-pointer" onclick="toggleTerminalPanel()">
+                        <div class="flex items-center gap-3">
+                            <span class="terminal-status-dot stopped" id="terminalStatusDot"></span>
+                            <span class="text-sm font-semibold text-gray-200">Terminal</span>
+                            <span class="text-xs text-gray-500" id="terminalStatusText">Not started</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="terminalStartBtn" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors" onclick="event.stopPropagation(); startTerminal()">
+                                ▶ Start
+                            </button>
+                            <button id="terminalStopBtn" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors hidden" onclick="event.stopPropagation(); stopTerminal()">
+                                ■ Stop
+                            </button>
+                            <button class="px-2 py-1 text-gray-400 hover:text-white text-xs transition-colors" onclick="event.stopPropagation(); toggleTerminalPanel()">
+                                <span id="terminalCollapseIcon">▼</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Terminal Content -->
+                    <div class="terminal-content" style="height: calc(100% - 40px);">
+                        <div id="terminal-container" style="width: 100%; height: 100%;"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -583,6 +656,16 @@
         let leftPanelCollapsed = localStorage.getItem('leftPanelCollapsed') === 'true';
         let rightPanelCollapsed = localStorage.getItem('rightPanelCollapsed') === 'true';
         let leftPanelWidth = parseInt(localStorage.getItem('leftPanelWidth')) || 384;
+
+        // Terminal state
+        let terminal = null;
+        let fitAddon = null;
+        let terminalRunning = false;
+        let terminalPanelCollapsed = false;
+
+        // Command terminal state (for AI-executed commands)
+        let commandTerminalActive = false;
+        let commandTerminalProcessId = null;
 
         // Performance tracking
         let performanceMetrics = {
@@ -1048,6 +1131,367 @@
             showToast(`Auto-scroll ${autoScroll ? 'enabled' : 'disabled'}`, 'info', 2000);
         }
 
+        // =================================================================
+        // TERMINAL FUNCTIONS
+        // =================================================================
+
+        function initTerminal() {
+            if (terminal) return; // Already initialized
+
+            const terminalContainer = document.getElementById('terminal-container');
+            if (!terminalContainer) return;
+
+            // Create terminal with xterm.js
+            terminal = new Terminal({
+                cursorBlink: true,
+                cursorStyle: 'block',
+                fontSize: 14,
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#d4d4d4',
+                    cursor: '#ffffff',
+                    cursorAccent: '#1e1e1e',
+                    selection: 'rgba(255, 255, 255, 0.3)',
+                    black: '#000000',
+                    red: '#cd3131',
+                    green: '#0dbc79',
+                    yellow: '#e5e510',
+                    blue: '#2472c8',
+                    magenta: '#bc3fbc',
+                    cyan: '#11a8cd',
+                    white: '#e5e5e5',
+                    brightBlack: '#666666',
+                    brightRed: '#f14c4c',
+                    brightGreen: '#23d18b',
+                    brightYellow: '#f5f543',
+                    brightBlue: '#3b8eea',
+                    brightMagenta: '#d670d6',
+                    brightCyan: '#29b8db',
+                    brightWhite: '#ffffff'
+                },
+                allowProposedApi: true,
+                scrollback: 10000
+            });
+
+            // Add fit addon for responsive sizing
+            fitAddon = new FitAddon.FitAddon();
+            terminal.loadAddon(fitAddon);
+
+            // Add web links addon
+            const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+            terminal.loadAddon(webLinksAddon);
+
+            // Open terminal in container
+            terminal.open(terminalContainer);
+            fitAddon.fit();
+
+            // Handle terminal input - send to backend
+            // Route to command PTY if a command is running, otherwise to standalone terminal
+            terminal.onData(data => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    if (commandTerminalActive) {
+                        // Send to command's PTY
+                        ws.send(JSON.stringify({
+                            type: 'command_terminal_input',
+                            data: data,
+                            process_id: commandTerminalProcessId
+                        }));
+                    } else if (terminalRunning) {
+                        // Send to standalone terminal
+                        ws.send(JSON.stringify({
+                            type: 'terminal_input',
+                            data: data
+                        }));
+                    }
+                }
+            });
+
+            // Handle resize
+            const resizeObserver = new ResizeObserver(() => {
+                if (fitAddon && terminal) {
+                    fitAddon.fit();
+                    // Send resize to backend
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        if (commandTerminalActive) {
+                            // Resize command's PTY
+                            ws.send(JSON.stringify({
+                                type: 'command_terminal_resize',
+                                cols: terminal.cols,
+                                rows: terminal.rows,
+                                process_id: commandTerminalProcessId
+                            }));
+                        } else if (terminalRunning) {
+                            // Resize standalone terminal
+                            ws.send(JSON.stringify({
+                                type: 'terminal_resize',
+                                cols: terminal.cols,
+                                rows: terminal.rows
+                            }));
+                        }
+                    }
+                }
+            });
+            resizeObserver.observe(terminalContainer);
+
+            console.log('Terminal initialized');
+        }
+
+        function startTerminal() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showToast('Please connect to WebSocket first', 'warning');
+                return;
+            }
+
+            // Show terminal panel and ensure it's not collapsed
+            const terminalPanel = document.getElementById('terminalPanel');
+            terminalPanel.classList.remove('hidden', 'collapsed');
+            terminalPanelCollapsed = false;
+            document.getElementById('terminalCollapseIcon').textContent = '▼';
+
+            // Initialize terminal if not already done
+            initTerminal();
+
+            // Fit terminal after a small delay to ensure container is visible
+            setTimeout(() => {
+                if (fitAddon && terminal) {
+                    fitAddon.fit();
+                }
+            }, 100);
+
+            // Update UI
+            updateTerminalStatus('connecting', 'Starting...');
+
+            // Get terminal dimensions
+            const cols = terminal ? terminal.cols : 120;
+            const rows = terminal ? terminal.rows : 30;
+
+            console.log('Starting terminal with dimensions:', cols, 'x', rows);
+
+            // Send start command
+            ws.send(JSON.stringify({
+                type: 'terminal_start',
+                cols: cols,
+                rows: rows
+            }));
+        }
+
+        function stopTerminal() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                type: 'terminal_stop',
+                force: false
+            }));
+
+            updateTerminalStatus('stopped', 'Stopped');
+        }
+
+        function toggleTerminalPanel() {
+            const terminalPanel = document.getElementById('terminalPanel');
+            const collapseIcon = document.getElementById('terminalCollapseIcon');
+
+            terminalPanelCollapsed = !terminalPanelCollapsed;
+
+            if (terminalPanelCollapsed) {
+                terminalPanel.classList.add('collapsed');
+                collapseIcon.textContent = '▲';
+            } else {
+                terminalPanel.classList.remove('collapsed');
+                collapseIcon.textContent = '▼';
+                // Refit terminal after expanding
+                if (fitAddon && terminal) {
+                    setTimeout(() => fitAddon.fit(), 100);
+                }
+            }
+        }
+
+        function showTerminalPanel() {
+            const terminalPanel = document.getElementById('terminalPanel');
+            terminalPanel.classList.remove('hidden');
+            initTerminal();
+        }
+
+        function hideTerminalPanel() {
+            const terminalPanel = document.getElementById('terminalPanel');
+            terminalPanel.classList.add('hidden');
+        }
+
+        function updateTerminalStatus(status, text) {
+            const statusDot = document.getElementById('terminalStatusDot');
+            const statusText = document.getElementById('terminalStatusText');
+            const startBtn = document.getElementById('terminalStartBtn');
+            const stopBtn = document.getElementById('terminalStopBtn');
+
+            statusDot.className = 'terminal-status-dot ' + status;
+            statusText.textContent = text;
+
+            if (status === 'running') {
+                terminalRunning = true;
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+            } else if (status === 'stopped') {
+                terminalRunning = false;
+                startBtn.classList.remove('hidden');
+                stopBtn.classList.add('hidden');
+            } else if (status === 'connecting') {
+                terminalRunning = false;
+                startBtn.classList.add('hidden');
+                stopBtn.classList.add('hidden');
+            }
+        }
+
+        function handleTerminalMessage(data) {
+            console.log('Terminal message received:', data.type, data);
+
+            switch (data.type) {
+                case 'terminal_started':
+                    updateTerminalStatus('running', `Running (PID: ${data.pid})`);
+                    if (terminal) {
+                        terminal.clear();
+                        terminal.focus();
+                    }
+                    showToast('Terminal started', 'success', 2000);
+                    break;
+
+                case 'terminal_output':
+                    // If we receive output, terminal is definitely running
+                    if (!terminalRunning) {
+                        updateTerminalStatus('running', 'Running');
+                    }
+                    // Make sure terminal is initialized
+                    if (!terminal) {
+                        initTerminal();
+                    }
+                    if (terminal && data.data) {
+                        terminal.write(data.data);
+                    }
+                    break;
+
+                case 'terminal_exited':
+                    updateTerminalStatus('stopped', `Exited (code: ${data.exit_code})`);
+                    if (terminal) {
+                        terminal.write(`\r\n\x1b[33m[Terminal exited with code ${data.exit_code}]\x1b[0m\r\n`);
+                    }
+                    showToast(`Terminal exited (code: ${data.exit_code})`, 'info', 3000);
+                    break;
+
+                case 'terminal_resized':
+                    console.log(`Terminal resized to ${data.cols}x${data.rows}`);
+                    break;
+
+                case 'terminal_stopped':
+                    updateTerminalStatus('stopped', 'Stopped');
+                    showToast('Terminal stopped', 'info', 2000);
+                    break;
+
+                case 'terminal_error':
+                    showToast(`Terminal error: ${data.error}`, 'error');
+                    updateTerminalStatus('stopped', 'Error');
+                    break;
+
+                case 'terminal_status_response':
+                    if (data.running) {
+                        updateTerminalStatus('running', 'Running');
+                    } else {
+                        updateTerminalStatus('stopped', 'Not running');
+                    }
+                    break;
+
+                // =============================================================
+                // COMMAND TERMINAL EVENTS (for AI-executed commands)
+                // =============================================================
+
+                case 'command_terminal_start':
+                    // AI agent is executing a command - auto-show terminal
+                    console.log('Command terminal starting:', data.command);
+                    commandTerminalActive = true;
+                    commandTerminalProcessId = data.process_id;
+
+                    // Show and initialize terminal
+                    showTerminalPanel();
+                    initTerminal();
+
+                    // Clear and show command info
+                    if (terminal) {
+                        terminal.clear();
+                        terminal.write(`\x1b[36m$ ${data.command}\x1b[0m\r\n`);
+                        terminal.focus();
+                    }
+
+                    // Update status to show it's a command execution
+                    updateTerminalStatus('running', `Command (PID: ${data.pid})`);
+
+                    // Fit terminal after showing
+                    setTimeout(() => {
+                        if (fitAddon && terminal) {
+                            fitAddon.fit();
+                        }
+                    }, 100);
+                    break;
+
+                case 'command_terminal_end':
+                    // Command execution finished
+                    console.log('Command terminal ended:', data.exit_code);
+                    commandTerminalActive = false;
+                    commandTerminalProcessId = null;
+
+                    if (terminal) {
+                        const exitColor = data.exit_code === 0 ? '\x1b[32m' : '\x1b[31m';
+                        terminal.write(`\r\n${exitColor}[Command exited with code ${data.exit_code}]\x1b[0m\r\n`);
+                    }
+
+                    updateTerminalStatus('stopped', `Finished (code: ${data.exit_code})`);
+                    break;
+
+                case 'command_timeout':
+                    // Command timed out
+                    console.log('Command timed out:', data.timeout);
+                    commandTerminalActive = false;
+                    commandTerminalProcessId = null;
+
+                    if (terminal) {
+                        terminal.write(`\r\n\x1b[33m[Command timed out after ${data.timeout}s]\x1b[0m\r\n`);
+                    }
+
+                    updateTerminalStatus('stopped', 'Timed out');
+                    break;
+
+                case 'command_cancelled':
+                    // Command was cancelled
+                    console.log('Command cancelled');
+                    commandTerminalActive = false;
+                    commandTerminalProcessId = null;
+
+                    if (terminal) {
+                        terminal.write(`\r\n\x1b[33m[Command cancelled]\x1b[0m\r\n`);
+                    }
+
+                    updateTerminalStatus('stopped', 'Cancelled');
+                    break;
+
+                case 'command_error':
+                    // Command execution error
+                    console.log('Command error:', data.error);
+                    commandTerminalActive = false;
+                    commandTerminalProcessId = null;
+
+                    if (terminal) {
+                        terminal.write(`\r\n\x1b[31m[Error: ${data.error}]\x1b[0m\r\n`);
+                    }
+
+                    updateTerminalStatus('stopped', 'Error');
+                    showToast(`Command error: ${data.error}`, 'error');
+                    break;
+            }
+        }
+
+        // =================================================================
+        // CONNECTION FUNCTIONS
+        // =================================================================
+
         // Connection functions
         function connect() {
             const clientId = document.getElementById("clientId").value.trim();
@@ -1077,6 +1521,33 @@
                     // Handle ping/pong
                     if (data.type === 'pong') {
                         handlePong(data.timestamp);
+                        return;
+                    }
+
+                    // Handle terminal messages - check multiple wrapper formats
+                    // Includes both standalone terminal (terminal_*) and command terminal (command_*)
+                    let terminalData = null;
+
+                    // Helper to check if type is a terminal-related message
+                    const isTerminalMessage = (type) => {
+                        return type && (type.startsWith('terminal_') || type.startsWith('command_'));
+                    };
+
+                    // Direct terminal message
+                    if (isTerminalMessage(data.type)) {
+                        terminalData = data;
+                    }
+                    // Wrapped in data.content (from WebSocket manager)
+                    else if (data.data && data.data.content && isTerminalMessage(data.data.content.type)) {
+                        terminalData = data.data.content;
+                    }
+                    // Wrapped in content only
+                    else if (data.content && isTerminalMessage(data.content.type)) {
+                        terminalData = data.content;
+                    }
+
+                    if (terminalData) {
+                        handleTerminalMessage(terminalData);
                         return;
                     }
 
