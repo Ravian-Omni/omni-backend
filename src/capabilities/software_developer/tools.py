@@ -6,18 +6,19 @@ git operations, code analysis, and command execution with interactive input supp
 
 import ast
 import asyncio
+import errno
 import os
-import pty
 import re
 import shutil
 import signal
 import stat
-import struct
 import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,28 +34,102 @@ IS_WINDOWS = sys.platform == "win32"
 # Platform-specific imports for Unix PTY
 if not IS_WINDOWS:
     import fcntl
+    import pty
     import select
+    import struct
     import termios
 
 
-class InteractiveCommandExecutor:
-    """Async command executor with PTY-based interactive terminal support.
+# =============================================================================
+# EXCEPTIONS
+# =============================================================================
 
-    This class handles command execution with:
-    - PTY-based execution for true terminal emulation
+
+class CommandExecutorError(Exception):
+    """Base exception for command executor errors."""
+
+
+class PTYCreationError(CommandExecutorError):
+    """Failed to create PTY."""
+
+
+class ProcessStartError(CommandExecutorError):
+    """Failed to start process."""
+
+
+class ProcessNotFoundError(CommandExecutorError):
+    """Process not found."""
+
+
+class InputError(CommandExecutorError):
+    """Error sending input to process."""
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+
+class ProcessState(Enum):
+    """Process execution states."""
+
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class PTYProcess:
+    """Container for PTY process information."""
+
+    process_id: str
+    command: str
+    working_dir: str
+    master_fd: int
+    process: subprocess.Popen
+    state: ProcessState = ProcessState.STARTING
+    input_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    output_buffer: list[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    exit_code: int | None = None
+
+    def __post_init__(self):
+        """Initialize queue if not provided."""
+        if self.input_queue is None:
+            self.input_queue = asyncio.Queue()
+        if self.output_buffer is None:
+            self.output_buffer = []
+
+
+# =============================================================================
+# COMMAND EXECUTOR
+# =============================================================================
+
+
+class InteractiveCommandExecutor:
+    """Production-ready async command executor with PTY-based terminal support.
+
+    Features:
+    - PTY-based execution for true terminal emulation (Unix) with subprocess fallback (Windows)
     - Real-time output streaming to WebSocket/xterm.js
-    - Full interactive input support (keyboard, Ctrl+C, etc.)
+    - Full interactive input support (keyboard shortcuts, Ctrl+C, etc.)
     - Automatic terminal display on frontend when commands execute
+    - Proper resource cleanup and error handling
+    - Thread-safe async operations
     """
 
     # Configuration constants
-    STDIN_DRAIN_TIMEOUT = 5.0
     READ_CHUNK_SIZE = 4096
-    READ_TIMEOUT = 0.05
-    TERMINATION_GRACE_PERIOD = 5.0
     OUTPUT_READ_INTERVAL = 0.01
+    TERMINATION_TIMEOUT = 5.0
+    FORCE_KILL_TIMEOUT = 2.0
     DEFAULT_COLS = 120
     DEFAULT_ROWS = 30
+    MAX_INPUT_QUEUE_SIZE = 1000
 
     def __init__(
         self,
@@ -70,58 +145,228 @@ class InteractiveCommandExecutor:
             working_directory: Base directory for command execution.
             websocket_manager: Optional WebSocket manager for streaming output.
             timeout: Default command timeout in seconds.
+
+        Raises:
+            ValueError: If session_id is empty or working_directory doesn't exist.
         """
+        if not session_id:
+            raise ValueError("session_id cannot be empty")
+
         self.session_id = session_id
         self.working_directory = os.path.abspath(working_directory)
         self.websocket_manager = websocket_manager
-        self.default_timeout = timeout
+        self.default_timeout = max(1, timeout)  # Minimum 1 second
 
-        # PTY process management
-        self._active_pty: dict[str, dict[str, Any]] = {}  # process_id -> {master_fd, process, ...}
-        self._execution_futures: dict[str, asyncio.Future] = {}
-        self._output_tasks: dict[str, asyncio.Task] = {}
-        self._cleanup_lock = asyncio.Lock()
+        # Ensure working directory exists
+        os.makedirs(self.working_directory, exist_ok=True)
 
-        # Input handling - pending writes to PTY
-        self._pending_input: dict[str, asyncio.Queue] = {}
+        # Process management with thread-safe lock
+        self._processes: dict[str, PTYProcess] = {}
+        self._tasks: dict[str, list[asyncio.Task]] = {}
+        self._futures: dict[str, asyncio.Future] = {}
+        self._lock = asyncio.Lock()
+
+        # Current process tracking
         self._current_process_id: str | None = None
 
         # Terminal dimensions
         self.cols = self.DEFAULT_COLS
         self.rows = self.DEFAULT_ROWS
 
+        logger.debug(
+            f"CommandExecutor initialized: session={session_id}, "
+            f"working_dir={self.working_directory}"
+        )
+
     def set_websocket_manager(self, manager: "WebSocketManager") -> None:
-        """Set the WebSocket manager for streaming."""
+        """Set the WebSocket manager for streaming.
+
+        Args:
+            manager: WebSocket manager instance.
+        """
         self.websocket_manager = manager
+        logger.debug(f"WebSocket manager set for session {self.session_id}")
 
     def set_terminal_size(self, cols: int, rows: int) -> None:
-        """Set terminal dimensions for new commands."""
-        self.cols = cols
-        self.rows = rows
+        """Set terminal dimensions for new commands.
 
-    async def stream_action(self, action_data: dict[str, Any]) -> None:
-        """Stream action to WebSocket clients."""
+        Args:
+            cols: Terminal width in columns (min: 10, max: 500).
+            rows: Terminal height in rows (min: 5, max: 200).
+        """
+        self.cols = max(10, min(500, cols))
+        self.rows = max(5, min(200, rows))
+
+    # =========================================================================
+    # WEBSOCKET STREAMING
+    # =========================================================================
+
+    async def _stream_message(self, message: dict[str, Any]) -> None:
+        """Stream a message to WebSocket clients.
+
+        Args:
+            message: Message dictionary to send.
+        """
         if self.websocket_manager is None:
             return
 
         try:
             await self.websocket_manager.send_chat_message(
                 session_id=self.session_id,
-                content=action_data,
+                content=message,
                 source="command_executor",
             )
         except Exception as e:
-            logger.debug(f"Error streaming action: {e}")
+            logger.warning(f"Failed to stream message: {e}")
 
-    def _set_pty_size(self, fd: int, cols: int, rows: int) -> None:
-        """Set terminal size on a PTY file descriptor."""
+    async def _notify_terminal_start(
+        self, proc: PTYProcess, cols: int, rows: int
+    ) -> None:
+        """Notify frontend that command terminal is starting."""
+        await self._stream_message(
+            {
+                "type": "command_terminal_start",
+                "process_id": proc.process_id,
+                "pid": proc.process.pid,
+                "command": proc.command,
+                "working_dir": proc.working_dir,
+                "cols": cols,
+                "rows": rows,
+                "timestamp": time.time(),
+            }
+        )
+
+    async def _notify_terminal_output(self, process_id: str, data: str) -> None:
+        """Stream terminal output to frontend."""
+        await self._stream_message(
+            {
+                "type": "terminal_output",
+                "process_id": process_id,
+                "data": data,
+                "timestamp": time.time(),
+            }
+        )
+
+    async def _notify_terminal_end(
+        self, process_id: str, exit_code: int, state: ProcessState
+    ) -> None:
+        """Notify frontend that command terminal has ended."""
+        await self._stream_message(
+            {
+                "type": "command_terminal_end",
+                "process_id": process_id,
+                "exit_code": exit_code,
+                "state": state.value,
+                "timestamp": time.time(),
+            }
+        )
+
+    async def _notify_error(self, process_id: str, error: str) -> None:
+        """Notify frontend of an error."""
+        await self._stream_message(
+            {
+                "type": "command_error",
+                "process_id": process_id,
+                "error": error,
+                "timestamp": time.time(),
+            }
+        )
+
+    # =========================================================================
+    # PTY MANAGEMENT (Unix)
+    # =========================================================================
+
+    def _set_pty_size(self, fd: int, cols: int, rows: int) -> bool:
+        """Set terminal size on a PTY file descriptor.
+
+        Args:
+            fd: File descriptor.
+            cols: Column count.
+            rows: Row count.
+
+        Returns:
+            True if successful, False otherwise.
+        """
         if IS_WINDOWS:
-            return
+            return False
+
         try:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
             fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-        except Exception as e:
+            return True
+        except OSError as e:
             logger.debug(f"Failed to set PTY size: {e}")
+            return False
+
+    def _create_pty_pair(self) -> tuple[int, int]:
+        """Create a PTY master/slave pair.
+
+        Returns:
+            Tuple of (master_fd, slave_fd).
+
+        Raises:
+            PTYCreationError: If PTY creation fails.
+        """
+        try:
+            master_fd, slave_fd = pty.openpty()
+            return master_fd, slave_fd
+        except OSError as e:
+            raise PTYCreationError(f"Failed to create PTY: {e}") from e
+
+    def _configure_master_fd(self, master_fd: int) -> None:
+        """Configure master FD for non-blocking I/O.
+
+        Args:
+            master_fd: Master file descriptor.
+
+        Raises:
+            PTYCreationError: If configuration fails.
+        """
+        try:
+            flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+            fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        except OSError as e:
+            raise PTYCreationError(f"Failed to configure PTY: {e}") from e
+
+    def _build_environment(self, cols: int, rows: int) -> dict[str, str]:
+        """Build environment variables for PTY process.
+
+        Args:
+            cols: Terminal columns.
+            rows: Terminal rows.
+
+        Returns:
+            Environment dictionary.
+        """
+        env = os.environ.copy()
+        env.update(
+            {
+                "TERM": "xterm-256color",
+                "COLORTERM": "truecolor",
+                "PYTHONUNBUFFERED": "1",
+                "COLUMNS": str(cols),
+                "LINES": str(rows),
+                "LANG": env.get("LANG", "en_US.UTF-8"),
+                "LC_ALL": env.get("LC_ALL", "en_US.UTF-8"),
+            }
+        )
+        return env
+
+    def _close_fd_safe(self, fd: int | None) -> None:
+        """Safely close a file descriptor.
+
+        Args:
+            fd: File descriptor to close.
+        """
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    # =========================================================================
+    # COMMAND EXECUTION
+    # =========================================================================
 
     async def execute_command(
         self,
@@ -140,363 +385,223 @@ class InteractiveCommandExecutor:
             timeout: Optional timeout override in seconds.
 
         Returns:
-            Command output as string.
+            Command output as string with exit code.
+
+        Raises:
+            ValueError: If command is empty.
         """
+        # Validate input
+        if not command or not command.strip():
+            return "Error: Command cannot be empty"
+
+        # Use Windows fallback if needed
         if IS_WINDOWS:
-            # Fall back to subprocess on Windows
-            return await self._execute_command_subprocess(command, working_dir, timeout)
+            return await self._execute_windows(command, working_dir, timeout)
 
-        process_id = f"cmd_{int(time.time() * 1000)}_{id(command) % 10000}"
-        self._current_process_id = process_id
-        cwd = working_dir if working_dir else self.working_directory
-        exec_timeout = timeout if timeout else self.default_timeout
+        return await self._execute_pty(command, working_dir, timeout)
 
-        master_fd = None
-        slave_fd = None
-        process = None
-        collected_output: list[str] = []
-
-        try:
-            # Create PTY master/slave pair
-            master_fd, slave_fd = pty.openpty()
-
-            # Set terminal size
-            self._set_pty_size(slave_fd, self.cols, self.rows)
-
-            # Set master to non-blocking
-            flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-            fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-            # Set up environment
-            env = os.environ.copy()
-            env["TERM"] = "xterm-256color"
-            env["COLORTERM"] = "truecolor"
-            env["PYTHONUNBUFFERED"] = "1"
-            env["COLUMNS"] = str(self.cols)
-            env["LINES"] = str(self.rows)
-
-            # Get shell
-            shell = os.environ.get("SHELL", "/bin/bash")
-
-            # Start process with PTY
-            import subprocess
-            process = subprocess.Popen(
-                [shell, "-c", command],
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=cwd,
-                env=env,
-                preexec_fn=os.setsid,
-                close_fds=True,
-            )
-
-            # Close slave FD in parent - child has it
-            os.close(slave_fd)
-            slave_fd = None
-
-            # Store PTY info
-            self._active_pty[process_id] = {
-                "master_fd": master_fd,
-                "process": process,
-                "command": command,
-            }
-
-            # Create input queue for this process
-            self._pending_input[process_id] = asyncio.Queue()
-
-            # Notify frontend to show terminal
-            await self.stream_action(
-                {
-                    "type": "command_terminal_start",
-                    "process_id": process_id,
-                    "pid": process.pid,
-                    "command": command,
-                    "working_dir": cwd,
-                    "cols": self.cols,
-                    "rows": self.rows,
-                    "timestamp": time.time(),
-                }
-            )
-
-            logger.info(f"PTY command started: {command[:50]}... (pid={process.pid})")
-
-            # Create execution future
-            execution_future: asyncio.Future[int] = asyncio.Future()
-            self._execution_futures[process_id] = execution_future
-
-            # Start output monitoring task
-            output_task = asyncio.create_task(
-                self._monitor_pty_output(
-                    master_fd, process, process_id, collected_output, execution_future
-                )
-            )
-            self._output_tasks[process_id] = output_task
-
-            # Start input handling task
-            input_task = asyncio.create_task(
-                self._handle_pty_input(master_fd, process_id)
-            )
-
-            # Wait for completion with timeout
-            try:
-                if exec_timeout > 0:
-                    return_code = await asyncio.wait_for(
-                        execution_future, timeout=float(exec_timeout)
-                    )
-                else:
-                    return_code = await execution_future
-
-            except TimeoutError:
-                await self.stream_action(
-                    {
-                        "type": "command_timeout",
-                        "process_id": process_id,
-                        "timeout": exec_timeout,
-                        "timestamp": time.time(),
-                    }
-                )
-                await self._terminate_pty_process(process_id)
-                return_code = 124
-
-            except asyncio.CancelledError:
-                await self.stream_action(
-                    {
-                        "type": "command_cancelled",
-                        "process_id": process_id,
-                        "timestamp": time.time(),
-                    }
-                )
-                await self._terminate_pty_process(process_id)
-                return_code = 130
-
-            # Cancel tasks
-            input_task.cancel()
-            try:
-                await input_task
-            except asyncio.CancelledError:
-                pass
-
-            if not output_task.done():
-                output_task.cancel()
-                try:
-                    await output_task
-                except asyncio.CancelledError:
-                    pass
-
-            # Notify frontend that command terminal is done
-            await self.stream_action(
-                {
-                    "type": "command_terminal_end",
-                    "process_id": process_id,
-                    "exit_code": return_code,
-                    "timestamp": time.time(),
-                }
-            )
-
-            # Clean up
-            await self._cleanup_pty(process_id)
-
-            # Combine collected output
-            output = "".join(collected_output)
-            return f"Exit code: {return_code}\n{output.strip()}"
-
-        except Exception as e:
-            error_msg = f"Error executing command: {str(e)}"
-            logger.error(error_msg)
-            await self.stream_action(
-                {
-                    "type": "command_error",
-                    "process_id": process_id,
-                    "error": str(e),
-                    "timestamp": time.time(),
-                }
-            )
-            await self._cleanup_pty(process_id)
-            return error_msg
-
-        finally:
-            self._current_process_id = None
-            # Ensure FDs are closed
-            if slave_fd is not None:
-                try:
-                    os.close(slave_fd)
-                except OSError:
-                    pass
-
-    async def _monitor_pty_output(
-        self,
-        master_fd: int,
-        process: "subprocess.Popen",
-        process_id: str,
-        collector: list[str],
-        future: asyncio.Future,
-    ) -> None:
-        """Monitor PTY output and stream to WebSocket."""
-        loop = asyncio.get_event_loop()
-
-        while True:
-            try:
-                # Check for readable data using select
-                readable, _, _ = await loop.run_in_executor(
-                    None,
-                    lambda: select.select([master_fd], [], [], 0.1),
-                )
-
-                if master_fd in readable:
-                    try:
-                        data = os.read(master_fd, self.READ_CHUNK_SIZE)
-
-                        if data:
-                            decoded = data.decode("utf-8", errors="replace")
-                            collector.append(decoded)
-
-                            # Stream to frontend terminal
-                            await self.stream_action(
-                                {
-                                    "type": "terminal_output",
-                                    "process_id": process_id,
-                                    "data": decoded,
-                                    "timestamp": time.time(),
-                                }
-                            )
-                        else:
-                            # EOF
-                            break
-
-                    except OSError as e:
-                        if e.errno == 5:  # I/O error - terminal closed
-                            break
-                        elif e.errno != 11:  # Ignore EAGAIN
-                            logger.debug(f"Error reading from PTY: {e}")
-
-                # Check if process exited
-                retcode = process.poll()
-                if retcode is not None:
-                    # Read any remaining output
-                    try:
-                        while True:
-                            readable, _, _ = select.select([master_fd], [], [], 0.01)
-                            if master_fd not in readable:
-                                break
-                            data = os.read(master_fd, self.READ_CHUNK_SIZE)
-                            if not data:
-                                break
-                            decoded = data.decode("utf-8", errors="replace")
-                            collector.append(decoded)
-                            await self.stream_action(
-                                {
-                                    "type": "terminal_output",
-                                    "process_id": process_id,
-                                    "data": decoded,
-                                    "timestamp": time.time(),
-                                }
-                            )
-                    except OSError:
-                        pass
-
-                    if not future.done():
-                        future.set_result(retcode)
-                    break
-
-                await asyncio.sleep(self.OUTPUT_READ_INTERVAL)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.debug(f"Error in PTY output monitor: {e}")
-                await asyncio.sleep(0.1)
-
-        # Ensure future is resolved
-        if not future.done():
-            retcode = process.poll()
-            future.set_result(retcode if retcode is not None else -1)
-
-    async def _handle_pty_input(self, master_fd: int, process_id: str) -> None:
-        """Handle input from WebSocket and write to PTY."""
-        queue = self._pending_input.get(process_id)
-        if not queue:
-            return
-
-        while True:
-            try:
-                # Wait for input from queue
-                data = await queue.get()
-
-                if data is None:  # Sentinel to stop
-                    break
-
-                # Write to PTY
-                if isinstance(data, str):
-                    data = data.encode("utf-8")
-
-                try:
-                    os.write(master_fd, data)
-                except OSError as e:
-                    if e.errno == 5:  # I/O error
-                        break
-                    logger.debug(f"Error writing to PTY: {e}")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.debug(f"Error in PTY input handler: {e}")
-
-    async def _terminate_pty_process(self, process_id: str) -> None:
-        """Terminate a PTY process."""
-        pty_info = self._active_pty.get(process_id)
-        if not pty_info:
-            return
-
-        process = pty_info.get("process")
-        if process and process.poll() is None:
-            try:
-                # Send SIGTERM to process group
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    process.terminate()
-
-                # Wait briefly
-                try:
-                    process.wait(timeout=2.0)
-                except subprocess.TimeoutExpired:
-                    # Force kill
-                    try:
-                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        process.kill()
-                    process.wait(timeout=1.0)
-            except Exception as e:
-                logger.debug(f"Error terminating PTY process: {e}")
-
-    async def _cleanup_pty(self, process_id: str) -> None:
-        """Clean up PTY resources."""
-        async with self._cleanup_lock:
-            pty_info = self._active_pty.pop(process_id, None)
-            if pty_info:
-                master_fd = pty_info.get("master_fd")
-                if master_fd is not None:
-                    try:
-                        os.close(master_fd)
-                    except OSError:
-                        pass
-
-            self._pending_input.pop(process_id, None)
-            self._execution_futures.pop(process_id, None)
-            self._output_tasks.pop(process_id, None)
-
-    async def _execute_command_subprocess(
+    async def _execute_pty(
         self,
         command: str,
         working_dir: str | None = None,
         timeout: int | None = None,
     ) -> str:
-        """Fallback subprocess execution for Windows."""
-        process_id = f"cmd_{int(time.time() * 1000)}_{id(command) % 10000}"
-        self._current_process_id = process_id
-        cwd = working_dir if working_dir else self.working_directory
-        exec_timeout = timeout if timeout else self.default_timeout
+        """Execute command using PTY (Unix systems).
+
+        Args:
+            command: Shell command to execute.
+            working_dir: Working directory override.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Command output with exit code.
+        """
+        # Generate unique process ID
+        process_id = f"cmd_{int(time.time() * 1000)}_{hash(command) % 10000:04d}"
+        cwd = working_dir or self.working_directory
+        exec_timeout = timeout or self.default_timeout
+
+        # Validate working directory
+        if not os.path.isdir(cwd):
+            logger.warning(f"Working directory doesn't exist, using default: {cwd}")
+            cwd = self.working_directory
+
+        master_fd: int | None = None
+        slave_fd: int | None = None
+        proc: PTYProcess | None = None
+        input_task: asyncio.Task | None = None
+        output_task: asyncio.Task | None = None
+
+        try:
+            # Create PTY
+            try:
+                master_fd, slave_fd = self._create_pty_pair()
+            except PTYCreationError as e:
+                logger.error(f"PTY creation failed: {e}")
+                await self._notify_error(process_id, str(e))
+                return f"Error: Failed to create terminal - {e}"
+
+            # Configure PTY
+            try:
+                self._set_pty_size(slave_fd, self.cols, self.rows)
+                self._configure_master_fd(master_fd)
+            except PTYCreationError as e:
+                logger.error(f"PTY configuration failed: {e}")
+                self._close_fd_safe(master_fd)
+                self._close_fd_safe(slave_fd)
+                await self._notify_error(process_id, str(e))
+                return f"Error: Failed to configure terminal - {e}"
+
+            # Build environment and start process
+            env = self._build_environment(self.cols, self.rows)
+            shell = os.environ.get("SHELL", "/bin/bash")
+
+            try:
+                process = subprocess.Popen(
+                    [shell, "-c", command],
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    cwd=cwd,
+                    env=env,
+                    preexec_fn=os.setsid,
+                    close_fds=True,
+                )
+            except OSError as e:
+                logger.error(f"Failed to start process: {e}")
+                self._close_fd_safe(master_fd)
+                self._close_fd_safe(slave_fd)
+                await self._notify_error(process_id, f"Failed to start process: {e}")
+                return f"Error: Failed to start process - {e}"
+
+            # Close slave FD in parent (child has it)
+            self._close_fd_safe(slave_fd)
+            slave_fd = None
+
+            # Create process container
+            proc = PTYProcess(
+                process_id=process_id,
+                command=command,
+                working_dir=cwd,
+                master_fd=master_fd,
+                process=process,
+                state=ProcessState.RUNNING,
+            )
+
+            # Register process
+            async with self._lock:
+                self._processes[process_id] = proc
+                self._current_process_id = process_id
+
+            # Notify frontend
+            await self._notify_terminal_start(proc, self.cols, self.rows)
+
+            logger.info(
+                f"PTY command started: pid={process.pid}, "
+                f"command={command[:50]}{'...' if len(command) > 50 else ''}"
+            )
+
+            # Create completion future
+            future: asyncio.Future[int] = asyncio.Future()
+            self._futures[process_id] = future
+
+            # Start monitoring tasks
+            output_task = asyncio.create_task(
+                self._monitor_output(proc, future),
+                name=f"output_{process_id}",
+            )
+            input_task = asyncio.create_task(
+                self._monitor_input(proc),
+                name=f"input_{process_id}",
+            )
+
+            async with self._lock:
+                self._tasks[process_id] = [output_task, input_task]
+
+            # Wait for completion
+            exit_code: int
+            final_state: ProcessState
+
+            try:
+                if exec_timeout > 0:
+                    exit_code = await asyncio.wait_for(
+                        future, timeout=float(exec_timeout)
+                    )
+                    final_state = ProcessState.COMPLETED
+                else:
+                    exit_code = await future
+                    final_state = ProcessState.COMPLETED
+
+            except TimeoutError:
+                logger.warning(f"Command timed out after {exec_timeout}s: {process_id}")
+                await self._terminate_process(proc)
+                exit_code = 124
+                final_state = ProcessState.TIMEOUT
+
+            except asyncio.CancelledError:
+                logger.info(f"Command cancelled: {process_id}")
+                await self._terminate_process(proc)
+                exit_code = 130
+                final_state = ProcessState.CANCELLED
+
+            # Update process state
+            proc.state = final_state
+            proc.exit_code = exit_code
+
+            # Clean up tasks
+            await self._cancel_tasks(process_id, input_task, output_task)
+
+            # Notify frontend
+            await self._notify_terminal_end(process_id, exit_code, final_state)
+
+            # Get output
+            output = "".join(proc.output_buffer)
+
+            # Clean up
+            await self._cleanup_process(process_id)
+
+            return f"Exit code: {exit_code}\n{output.strip()}"
+
+        except Exception as e:
+            logger.exception(f"Unexpected error executing command: {e}")
+            await self._notify_error(process_id, str(e))
+
+            # Emergency cleanup
+            self._close_fd_safe(slave_fd)
+            if proc:
+                await self._cleanup_process(process_id)
+            elif master_fd is not None:
+                self._close_fd_safe(master_fd)
+
+            return f"Error: {e}"
+
+        finally:
+            async with self._lock:
+                if self._current_process_id == process_id:
+                    self._current_process_id = None
+
+    async def _execute_windows(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
+        """Execute command using subprocess (Windows fallback).
+
+        Args:
+            command: Shell command to execute.
+            working_dir: Working directory override.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Command output with exit code.
+        """
+        process_id = f"cmd_{int(time.time() * 1000)}_{hash(command) % 10000:04d}"
+        cwd = working_dir or self.working_directory
+        exec_timeout = timeout or self.default_timeout
+
+        async with self._lock:
+            self._current_process_id = process_id
 
         try:
             env = os.environ.copy()
@@ -511,7 +616,8 @@ class InteractiveCommandExecutor:
                 env=env,
             )
 
-            await self.stream_action(
+            # Notify frontend
+            await self._stream_message(
                 {
                     "type": "command_terminal_start",
                     "process_id": process_id,
@@ -524,60 +630,207 @@ class InteractiveCommandExecutor:
                 }
             )
 
+            exit_code: int
+            stdout: bytes
+            stderr: bytes
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(), timeout=float(exec_timeout)
                 )
-                return_code = process.returncode
+                exit_code = process.returncode or 0
             except TimeoutError:
                 process.kill()
                 await process.wait()
-                return_code = 124
+                exit_code = 124
                 stdout, stderr = b"", b"Command timed out"
 
-            # Stream output
+            # Stream output to frontend
             if stdout:
-                await self.stream_action(
-                    {
-                        "type": "terminal_output",
-                        "process_id": process_id,
-                        "data": stdout.decode("utf-8", errors="replace"),
-                        "timestamp": time.time(),
-                    }
+                await self._notify_terminal_output(
+                    process_id, stdout.decode("utf-8", errors="replace")
                 )
             if stderr:
-                await self.stream_action(
-                    {
-                        "type": "terminal_output",
-                        "process_id": process_id,
-                        "data": stderr.decode("utf-8", errors="replace"),
-                        "timestamp": time.time(),
-                    }
+                await self._notify_terminal_output(
+                    process_id, stderr.decode("utf-8", errors="replace")
                 )
 
-            await self.stream_action(
-                {
-                    "type": "command_terminal_end",
-                    "process_id": process_id,
-                    "exit_code": return_code,
-                    "timestamp": time.time(),
-                }
+            # Notify end
+            await self._notify_terminal_end(
+                process_id, exit_code, ProcessState.COMPLETED
             )
 
-            output = ""
+            # Build output
+            output_parts = []
             if stderr:
-                output += stderr.decode("utf-8", errors="replace") + "\n"
+                output_parts.append(stderr.decode("utf-8", errors="replace"))
             if stdout:
-                output += stdout.decode("utf-8", errors="replace")
+                output_parts.append(stdout.decode("utf-8", errors="replace"))
 
-            return f"Exit code: {return_code}\n{output.strip()}"
+            return f"Exit code: {exit_code}\n{chr(10).join(output_parts).strip()}"
 
         except Exception as e:
-            return f"Error executing command: {str(e)}"
-        finally:
-            self._current_process_id = None
+            logger.exception(f"Windows command execution failed: {e}")
+            await self._notify_error(process_id, str(e))
+            return f"Error: {e}"
 
-    def provide_input(self, process_id: str | None, user_input: str) -> bool:
+        finally:
+            async with self._lock:
+                if self._current_process_id == process_id:
+                    self._current_process_id = None
+
+    # =========================================================================
+    # OUTPUT MONITORING
+    # =========================================================================
+
+    async def _monitor_output(self, proc: PTYProcess, future: asyncio.Future) -> None:
+        """Monitor PTY output and stream to WebSocket.
+
+        Args:
+            proc: PTY process container.
+            future: Future to resolve with exit code.
+        """
+        loop = asyncio.get_event_loop()
+        master_fd = proc.master_fd
+
+        try:
+            while proc.state == ProcessState.RUNNING:
+                try:
+                    # Check for readable data
+                    readable, _, _ = await loop.run_in_executor(
+                        None,
+                        lambda fd=master_fd: select.select([fd], [], [], 0.1),
+                    )
+
+                    if master_fd in readable:
+                        await self._read_and_stream_output(proc)
+
+                    # Check process status
+                    retcode = proc.process.poll()
+                    if retcode is not None:
+                        # Drain remaining output
+                        await self._drain_remaining_output(proc)
+
+                        if not future.done():
+                            future.set_result(retcode)
+                        return
+
+                    await asyncio.sleep(self.OUTPUT_READ_INTERVAL)
+
+                except asyncio.CancelledError:
+                    raise
+                except OSError as e:
+                    if e.errno in (errno.EIO, errno.EBADF):
+                        # Terminal closed
+                        break
+                    logger.debug(f"Output read error: {e}")
+                except Exception as e:
+                    logger.debug(f"Output monitor error: {e}")
+                    await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Ensure future is resolved
+            if not future.done():
+                retcode = proc.process.poll()
+                future.set_result(retcode if retcode is not None else -1)
+
+    async def _read_and_stream_output(self, proc: PTYProcess) -> None:
+        """Read output from PTY and stream to frontend.
+
+        Args:
+            proc: PTY process container.
+        """
+        try:
+            data = os.read(proc.master_fd, self.READ_CHUNK_SIZE)
+            if data:
+                decoded = data.decode("utf-8", errors="replace")
+                proc.output_buffer.append(decoded)
+                await self._notify_terminal_output(proc.process_id, decoded)
+        except OSError as e:
+            if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                raise
+
+    async def _drain_remaining_output(self, proc: PTYProcess) -> None:
+        """Drain any remaining output from PTY after process exit.
+
+        Args:
+            proc: PTY process container.
+        """
+        try:
+            for _ in range(100):  # Max iterations to prevent infinite loop
+                readable, _, _ = select.select([proc.master_fd], [], [], 0.01)
+                if proc.master_fd not in readable:
+                    break
+
+                data = os.read(proc.master_fd, self.READ_CHUNK_SIZE)
+                if not data:
+                    break
+
+                decoded = data.decode("utf-8", errors="replace")
+                proc.output_buffer.append(decoded)
+                await self._notify_terminal_output(proc.process_id, decoded)
+        except OSError:
+            pass
+
+    # =========================================================================
+    # INPUT HANDLING
+    # =========================================================================
+
+    async def _monitor_input(self, proc: PTYProcess) -> None:
+        """Monitor input queue and write to PTY.
+
+        Args:
+            proc: PTY process container.
+        """
+        try:
+            while proc.state == ProcessState.RUNNING:
+                try:
+                    # Wait for input with timeout
+                    data = await asyncio.wait_for(proc.input_queue.get(), timeout=0.5)
+
+                    if data is None:  # Sentinel to stop
+                        break
+
+                    # Write to PTY
+                    await self._write_to_pty(proc, data)
+
+                except TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"Input handler error: {e}")
+
+        except asyncio.CancelledError:
+            pass
+
+    async def _write_to_pty(self, proc: PTYProcess, data: str | bytes) -> bool:
+        """Write data to PTY.
+
+        Args:
+            proc: PTY process container.
+            data: Data to write.
+
+        Returns:
+            True if write succeeded.
+        """
+        try:
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+
+            os.write(proc.master_fd, data)
+            return True
+
+        except OSError as e:
+            if e.errno == errno.EIO:
+                logger.debug("PTY closed, cannot write")
+            else:
+                logger.debug(f"PTY write error: {e}")
+            return False
+
+    def provide_input(self, process_id: str | None, user_input: str | bytes) -> bool:
         """Provide input to a running PTY process.
 
         This queues input to be written to the PTY, enabling real-time
@@ -590,149 +843,169 @@ class InteractiveCommandExecutor:
         Returns:
             True if input was queued successfully.
         """
+        if not user_input:
+            return False
+
         target_id = process_id or self._current_process_id
-
-        if target_id and target_id in self._pending_input:
-            queue = self._pending_input[target_id]
-            try:
-                queue.put_nowait(user_input)
-                return True
-            except asyncio.QueueFull:
-                logger.warning(f"Input queue full for process {target_id}")
-                return False
-
-        # Try any active process if no specific target
         if not target_id:
-            for pid, queue in self._pending_input.items():
-                try:
-                    queue.put_nowait(user_input)
-                    return True
-                except asyncio.QueueFull:
-                    continue
+            logger.debug("No active process for input")
+            return False
 
-        return False
+        proc = self._processes.get(target_id)
+        if not proc:
+            logger.debug(f"Process not found: {target_id}")
+            return False
 
-    async def send_input_to_process(self, process_id: str, input_text: str) -> bool:
-        """Send input directly to a running PTY process.
+        if proc.state != ProcessState.RUNNING:
+            logger.debug(f"Process not running: {target_id} (state={proc.state})")
+            return False
+
+        try:
+            proc.input_queue.put_nowait(user_input)
+            return True
+        except asyncio.QueueFull:
+            logger.warning(f"Input queue full for: {target_id}")
+            return False
+
+    # =========================================================================
+    # PROCESS TERMINATION
+    # =========================================================================
+
+    async def _terminate_process(self, proc: PTYProcess) -> None:
+        """Terminate a PTY process gracefully.
+
+        Args:
+            proc: PTY process to terminate.
+        """
+        if proc.process.poll() is not None:
+            return
+
+        proc.state = ProcessState.STOPPING
+        pid = proc.process.pid
+
+        try:
+            # Try graceful termination first
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.process.terminate()
+
+            # Wait for termination
+            try:
+                proc.process.wait(timeout=self.TERMINATION_TIMEOUT)
+                logger.debug(f"Process {pid} terminated gracefully")
+                return
+            except subprocess.TimeoutExpired:
+                pass
+
+            # Force kill
+            logger.warning(f"Force killing process {pid}")
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.process.kill()
+
+            proc.process.wait(timeout=self.FORCE_KILL_TIMEOUT)
+
+        except Exception as e:
+            logger.error(f"Error terminating process {pid}: {e}")
+
+    async def _cancel_tasks(
+        self,
+        process_id: str,
+        input_task: asyncio.Task | None,
+        output_task: asyncio.Task | None,
+    ) -> None:
+        """Cancel monitoring tasks.
 
         Args:
             process_id: Process identifier.
-            input_text: The input text to send.
-
-        Returns:
-            True if input was sent successfully.
+            input_task: Input monitoring task.
+            output_task: Output monitoring task.
         """
-        if process_id not in self._active_pty:
-            await self.stream_action(
-                {
-                    "type": "input_error",
-                    "process_id": process_id,
-                    "content": f"Process {process_id} not found",
-                    "timestamp": time.time(),
-                }
-            )
-            return False
+        for task in [input_task, output_task]:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (asyncio.CancelledError, TimeoutError):
+                    pass
 
-        pty_info = self._active_pty[process_id]
-        master_fd = pty_info.get("master_fd")
-        process = pty_info.get("process")
+    async def _cleanup_process(self, process_id: str) -> None:
+        """Clean up process resources.
 
-        if not master_fd:
-            await self.stream_action(
-                {
-                    "type": "input_error",
-                    "process_id": process_id,
-                    "content": "PTY not available",
-                    "timestamp": time.time(),
-                }
-            )
-            return False
+        Args:
+            process_id: Process identifier.
+        """
+        async with self._lock:
+            proc = self._processes.pop(process_id, None)
+            if proc:
+                self._close_fd_safe(proc.master_fd)
 
-        if process and process.poll() is not None:
-            await self.stream_action(
-                {
-                    "type": "input_error",
-                    "process_id": process_id,
-                    "content": f"Process has finished (exit code: {process.poll()})",
-                    "timestamp": time.time(),
-                }
-            )
-            return False
+            self._futures.pop(process_id, None)
+            self._tasks.pop(process_id, None)
 
-        try:
-            input_bytes = input_text.encode("utf-8")
-            os.write(master_fd, input_bytes)
-
-            await self.stream_action(
-                {
-                    "type": "input_sent",
-                    "process_id": process_id,
-                    "bytes_written": len(input_bytes),
-                    "timestamp": time.time(),
-                }
-            )
-
-            return True
-
-        except OSError as e:
-            await self.stream_action(
-                {
-                    "type": "input_error",
-                    "process_id": process_id,
-                    "content": f"Error sending input: {str(e)}",
-                    "timestamp": time.time(),
-                }
-            )
-            return False
-
-    def _get_signal_name(self, signal_num: int) -> str:
-        """Get human-readable signal name."""
-        signal_names = {
-            signal.SIGTERM: "SIGTERM",
-            signal.SIGKILL: "SIGKILL",
-            signal.SIGINT: "SIGINT",
-        }
-        if hasattr(signal, "SIGHUP"):
-            signal_names[signal.SIGHUP] = "SIGHUP"
-        if hasattr(signal, "SIGQUIT"):
-            signal_names[signal.SIGQUIT] = "SIGQUIT"
-        return signal_names.get(signal_num, f"SIGNAL_{signal_num}")
+    # =========================================================================
+    # PUBLIC API
+    # =========================================================================
 
     async def terminate_process(self, process_id: str) -> bool:
-        """Terminate a specific PTY process."""
-        if process_id not in self._active_pty:
+        """Terminate a specific process.
+
+        Args:
+            process_id: Process identifier.
+
+        Returns:
+            True if process was terminated.
+        """
+        proc = self._processes.get(process_id)
+        if not proc:
             return False
 
         try:
-            # Cancel execution future
-            if process_id in self._execution_futures:
-                future = self._execution_futures[process_id]
-                if not future.done():
-                    future.cancel()
-
-            # Terminate the PTY process
-            await self._terminate_pty_process(process_id)
-            await self._cleanup_pty(process_id)
+            await self._terminate_process(proc)
+            await self._cleanup_process(process_id)
             return True
-
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error terminating process {process_id}: {e}")
             return False
 
-    async def cleanup_all(self):
-        """Clean up all PTY processes."""
-        for process_id in list(self._active_pty.keys()):
+    async def cleanup_all(self) -> None:
+        """Clean up all processes."""
+        process_ids = list(self._processes.keys())
+        for process_id in process_ids:
             await self.terminate_process(process_id)
 
     def get_active_processes(self) -> list[str]:
-        """Get list of active PTY process IDs."""
-        return list(self._active_pty.keys())
+        """Get list of active process IDs.
+
+        Returns:
+            List of process IDs.
+        """
+        return [
+            pid
+            for pid, proc in self._processes.items()
+            if proc.state == ProcessState.RUNNING
+        ]
 
     def has_pending_input(self) -> bool:
-        """Check if any process has a pending input queue."""
-        return len(self._pending_input) > 0
+        """Check if any process is running.
+
+        Returns:
+            True if a process is running.
+        """
+        return any(
+            proc.state == ProcessState.RUNNING for proc in self._processes.values()
+        )
 
     def get_current_process_id(self) -> str | None:
-        """Get the currently executing process ID."""
+        """Get the currently executing process ID.
+
+        Returns:
+            Current process ID or None.
+        """
         return self._current_process_id
 
     def resize_pty(self, process_id: str, cols: int, rows: int) -> bool:
@@ -749,29 +1022,44 @@ class InteractiveCommandExecutor:
         if IS_WINDOWS:
             return False
 
-        pty_info = self._active_pty.get(process_id)
-        if not pty_info:
+        proc = self._processes.get(process_id)
+        if not proc or proc.state != ProcessState.RUNNING:
             return False
 
-        master_fd = pty_info.get("master_fd")
-        if not master_fd:
+        # Set size
+        if not self._set_pty_size(proc.master_fd, cols, rows):
             return False
 
+        # Send SIGWINCH
         try:
-            self._set_pty_size(master_fd, cols, rows)
+            pgid = os.getpgid(proc.process.pid)
+            os.killpg(pgid, signal.SIGWINCH)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
 
-            # Send SIGWINCH to process group
-            process = pty_info.get("process")
-            if process and process.poll() is None:
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGWINCH)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        return True
 
-            return True
-        except Exception as e:
-            logger.debug(f"Error resizing PTY: {e}")
-            return False
+    # Legacy method name for backwards compatibility
+    async def cleanup(self) -> None:
+        """Alias for cleanup_all."""
+        await self.cleanup_all()
+
+    # Legacy stream method
+    async def stream_action(self, action_data: dict[str, Any]) -> None:
+        """Legacy method - use _stream_message instead."""
+        await self._stream_message(action_data)
+
+    async def send_input_to_process(self, process_id: str, input_text: str) -> bool:
+        """Send input directly to a running PTY process.
+
+        Args:
+            process_id: Process identifier.
+            input_text: The input text to send.
+
+        Returns:
+            True if input was sent successfully.
+        """
+        return self.provide_input(process_id, input_text)
 
 
 class AsyncToolRegistry:

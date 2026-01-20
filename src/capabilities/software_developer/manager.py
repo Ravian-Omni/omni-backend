@@ -200,9 +200,7 @@ class SoftwareDeveloper:
         """
         return self.tool_registry.has_pending_input()
 
-    def resize_command_pty(
-        self, process_id: str | None, cols: int, rows: int
-    ) -> bool:
+    def resize_command_pty(self, process_id: str | None, cols: int, rows: int) -> bool:
         """Resize a command's PTY terminal.
 
         This is called when the frontend terminal is resized while a
@@ -216,7 +214,9 @@ class SoftwareDeveloper:
         Returns:
             True if resize was successful.
         """
-        target_id = process_id or self.tool_registry.command_executor.get_current_process_id()
+        target_id = (
+            process_id or self.tool_registry.command_executor.get_current_process_id()
+        )
         if target_id:
             return self.tool_registry.command_executor.resize_pty(target_id, cols, rows)
         return False
@@ -254,7 +254,7 @@ class SoftwareDeveloper:
             working_directory=self.working_directory,
             cols=cols,
             rows=rows,
-            shell=shell,
+            shell=shell,  # nosec B604 - shell is the executable path, not shell=True
         )
         return terminal is not None
 

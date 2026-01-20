@@ -1485,7 +1485,19 @@
                     updateTerminalStatus('stopped', 'Error');
                     showToast(`Command error: ${data.error}`, 'error');
                     break;
+
+                case 'command_input_error':
+                    // Input was rejected
+                    console.warn('Command input error:', data.error);
+                    showToast(`Input error: ${data.error}`, 'warning', 3000);
+                    break;
             }
+        }
+
+        // Helper to safely reset command terminal state
+        function resetCommandTerminalState() {
+            commandTerminalActive = false;
+            commandTerminalProcessId = null;
         }
 
         // =================================================================

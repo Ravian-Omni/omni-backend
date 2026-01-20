@@ -33,7 +33,6 @@ if not IS_WINDOWS:
     import signal
     import struct
     import termios
-    import tty
 
 if TYPE_CHECKING:
     from src.managers.connection import WebSocketManager
@@ -84,22 +83,18 @@ class BaseTerminal(ABC):
     @abstractmethod
     async def start(self, cols: int | None = None, rows: int | None = None) -> bool:
         """Start the terminal session."""
-        pass
 
     @abstractmethod
     async def write(self, data: str | bytes) -> bool:
         """Write data to the terminal."""
-        pass
 
     @abstractmethod
     async def resize(self, cols: int, rows: int) -> None:
         """Resize the terminal."""
-        pass
 
     @abstractmethod
     async def terminate(self, force: bool = False) -> None:
         """Terminate the terminal session."""
-        pass
 
     @property
     def is_running(self) -> bool:
@@ -171,7 +166,9 @@ class UnixPtyTerminal(BaseTerminal):
             True if started successfully.
         """
         if self._running:
-            logger.warning(f"PTY terminal already running for session {self.session_id}")
+            logger.warning(
+                f"PTY terminal already running for session {self.session_id}"
+            )
             return False
 
         self.cols = cols or self.DEFAULT_COLS
@@ -541,7 +538,11 @@ class WindowsTerminal(BaseTerminal):
                     "shell": self.shell,
                     "working_directory": self.working_directory,
                     "timestamp": time.time(),
-                    "mode": "winpty" if getattr(self, "_use_winpty", False) else "subprocess",
+                    "mode": (
+                        "winpty"
+                        if getattr(self, "_use_winpty", False)
+                        else "subprocess"
+                    ),
                 }
             )
 
@@ -637,7 +638,7 @@ class WindowsTerminal(BaseTerminal):
                             elif self.process.returncode is not None:
                                 await self._handle_exit(self.process.returncode)
                                 break
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             pass
 
                 await asyncio.sleep(0.01)
@@ -714,14 +715,14 @@ def create_terminal(
             session_id=session_id,
             working_directory=working_directory,
             websocket_manager=websocket_manager,
-            shell=shell,
+            shell=shell,  # nosec B604 - shell is the executable path, not shell=True
         )
     else:
         return UnixPtyTerminal(
             session_id=session_id,
             working_directory=working_directory,
             websocket_manager=websocket_manager,
-            shell=shell,
+            shell=shell,  # nosec B604 - shell is the executable path, not shell=True
         )
 
 
@@ -781,7 +782,7 @@ class PtyTerminalManager:
             session_id=session_id,
             working_directory=working_directory,
             websocket_manager=self.websocket_manager,
-            shell=shell,
+            shell=shell,  # nosec B604 - shell is the executable path, not shell=True
         )
 
         if await terminal.start(cols=cols, rows=rows):
@@ -813,9 +814,7 @@ class PtyTerminalManager:
 
     def get_active_sessions(self) -> list[str]:
         """Get list of active session IDs."""
-        return [
-            sid for sid, terminal in self._terminals.items() if terminal.is_running
-        ]
+        return [sid for sid, terminal in self._terminals.items() if terminal.is_running]
 
     def get_all_status(self) -> dict[str, dict[str, Any]]:
         """Get status of all terminals."""

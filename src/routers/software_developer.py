@@ -242,20 +242,43 @@ async def _handle_software_dev_messages(
 
             # === COMMAND_TERMINAL_INPUT: Input for running command's PTY ===
             elif msg_type == "command_terminal_input":
-                data = message.get("data", "")
+                data = message.get("data")
                 process_id = message.get("process_id")
 
-                if data:
+                # Validate input data
+                if data is None:
+                    logger.debug(f"Empty terminal input for session {chat_id}")
+                    continue
+
+                try:
                     # Handle base64-encoded binary data if present
                     if message.get("encoding") == "base64":
                         import base64
 
-                        data = base64.b64decode(data)
+                        try:
+                            data = base64.b64decode(data)
+                        except Exception as decode_err:
+                            logger.warning(
+                                f"Invalid base64 data for session {chat_id}: {decode_err}"
+                            )
+                            await websocket.send_json(
+                                {
+                                    "type": "command_input_error",
+                                    "error": "Invalid base64 encoding",
+                                    "process_id": process_id,
+                                    "timestamp": dt.now_iso(),
+                                }
+                            )
+                            continue
 
                     # Route to command executor's PTY
                     success = software_dev.provide_input(process_id, data)
 
                     if not success:
+                        logger.debug(
+                            f"No active command for input: session={chat_id}, "
+                            f"process_id={process_id}"
+                        )
                         await websocket.send_json(
                             {
                                 "type": "command_input_error",
@@ -265,18 +288,45 @@ async def _handle_software_dev_messages(
                             }
                         )
 
+                except Exception as input_err:
+                    logger.error(
+                        f"Error handling terminal input for session {chat_id}: {input_err}"
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "command_input_error",
+                            "error": f"Input handling failed: {str(input_err)}",
+                            "process_id": process_id,
+                            "timestamp": dt.now_iso(),
+                        }
+                    )
+
             # === COMMAND_TERMINAL_RESIZE: Resize command's PTY ===
             elif msg_type == "command_terminal_resize":
                 cols = message.get("cols")
                 rows = message.get("rows")
                 process_id = message.get("process_id")
 
-                if cols and rows:
-                    software_dev.resize_command_pty(
+                # Validate dimensions
+                if not isinstance(cols, int) or not isinstance(rows, int):
+                    logger.warning(f"Invalid resize dimensions for session {chat_id}")
+                    continue
+
+                # Clamp to reasonable values
+                cols = max(10, min(500, cols))
+                rows = max(5, min(200, rows))
+
+                try:
+                    success = software_dev.resize_command_pty(
                         process_id=process_id, cols=cols, rows=rows
                     )
-                    logger.debug(
-                        f"Command PTY resized to {cols}x{rows} for session {chat_id}"
+                    if success:
+                        logger.debug(
+                            f"Command PTY resized to {cols}x{rows} for session {chat_id}"
+                        )
+                except Exception as resize_err:
+                    logger.warning(
+                        f"Failed to resize command PTY for session {chat_id}: {resize_err}"
                     )
 
             # =================================================================
@@ -296,7 +346,7 @@ async def _handle_software_dev_messages(
                 success = await software_dev.start_terminal(
                     cols=cols,
                     rows=rows,
-                    shell=shell,
+                    shell=shell,  # nosec B604 - shell is the executable path, not shell=True
                 )
 
                 if not success:
