@@ -1,7 +1,7 @@
 """Async tool implementations for the Software Developer capability.
 
 This module provides async-native tool implementations for file operations,
-git operations, code analysis, and command execution.
+git operations, code analysis, and command execution with interactive input support.
 """
 
 import ast
@@ -9,27 +9,885 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import stat
+import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import git
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.managers.connection import WebSocketManager
+
+
+class InteractiveCommandExecutor:
+    """Async command executor with interactive input support.
+
+    This class handles command execution with:
+    - Real-time output streaming to WebSocket
+    - Input prompt detection
+    - Interactive input from frontend via WebSocket
+    - Proper process lifecycle management
+    """
+
+    # Configuration constants
+    STDIN_DRAIN_TIMEOUT = 5.0
+    READ_CHUNK_SIZE = 256
+    READ_TIMEOUT = 0.05
+    TERMINATION_GRACE_PERIOD = 5.0
+    # Stall detection: if no output for this long, assume process might need input
+    STALL_DETECTION_TIMEOUT = 1.5
+    WIN32 = os.name == "nt"
+
+    def __init__(
+        self,
+        session_id: str,
+        working_directory: str,
+        websocket_manager: "WebSocketManager | None" = None,
+        timeout: int = 120,
+    ):
+        """Initialize the interactive command executor.
+
+        Args:
+            session_id: Session identifier for WebSocket communication.
+            working_directory: Base directory for command execution.
+            websocket_manager: Optional WebSocket manager for streaming output.
+            timeout: Default command timeout in seconds.
+        """
+        self.session_id = session_id
+        self.working_directory = os.path.abspath(working_directory)
+        self.websocket_manager = websocket_manager
+        self.default_timeout = timeout
+
+        # Process management
+        self.active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._execution_futures: dict[str, asyncio.Future] = {}
+        self._process_monitor_tasks: dict[str, asyncio.Task] = {}
+        self._output_tasks: dict[str, list[asyncio.Task]] = {}
+        self._cleanup_lock = asyncio.Lock()
+
+        # Input handling
+        self._pending_input_futures: dict[str, asyncio.Future] = {}
+        self._current_process_id: str | None = None
+
+        # Stall detection - track last output time per process
+        self._last_output_time: dict[str, float] = {}
+        self._stall_detection_tasks: dict[str, asyncio.Task] = {}
+        self._stall_notified: dict[str, bool] = {}
+
+    def set_websocket_manager(self, manager: "WebSocketManager") -> None:
+        """Set the WebSocket manager for streaming."""
+        self.websocket_manager = manager
+
+    async def stream_action(self, action_data: dict[str, Any]) -> None:
+        """Stream action to WebSocket clients."""
+        if self.websocket_manager is None:
+            return
+
+        try:
+            await self.websocket_manager.send_chat_message(
+                session_id=self.session_id,
+                content=action_data,
+                source="command_executor",
+            )
+        except Exception as e:
+            logger.debug(f"Error streaming action: {e}")
+
+    async def execute_command(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
+        """Execute a shell command with interactive input support.
+
+        Args:
+            command: The shell command to execute.
+            working_dir: Optional working directory override.
+            timeout: Optional timeout override in seconds.
+
+        Returns:
+            Command output as string.
+        """
+        process_id = f"cmd_{int(time.time() * 1000)}_{id(command) % 10000}"
+        self._current_process_id = process_id
+        cwd = working_dir if working_dir else self.working_directory
+        exec_timeout = timeout if timeout else self.default_timeout
+
+        try:
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=env,
+                start_new_session=not self.WIN32,
+            )
+
+            self.active_processes[process_id] = process
+            execution_future: asyncio.Future[int] = asyncio.Future()
+            self._execution_futures[process_id] = execution_future
+
+            monitor_task = asyncio.create_task(
+                self._monitor_process_lifecycle(process, process_id, execution_future)
+            )
+            self._process_monitor_tasks[process_id] = monitor_task
+
+            await self.stream_action(
+                {
+                    "type": "process_started",
+                    "process_id": process_id,
+                    "pid": process.pid,
+                    "command": command,
+                    "working_dir": cwd,
+                    "timestamp": time.time(),
+                }
+            )
+
+            collected_stdout: list[str] = []
+            collected_stderr: list[str] = []
+
+            stdout_task = asyncio.create_task(
+                self._monitor_output_stream(
+                    process.stdout, process, process_id, "stdout", collected_stdout
+                )
+            )
+            stderr_task = asyncio.create_task(
+                self._monitor_output_stream(
+                    process.stderr, process, process_id, "stderr", collected_stderr
+                )
+            )
+
+            self._output_tasks[process_id] = [stdout_task, stderr_task]
+
+            # Initialize stall detection tracking
+            self._last_output_time[process_id] = time.time()
+            self._stall_notified[process_id] = False
+
+            # Start stall detection monitor
+            stall_task = asyncio.create_task(
+                self._monitor_stall_detection(process, process_id)
+            )
+            self._stall_detection_tasks[process_id] = stall_task
+
+            try:
+                if exec_timeout > 0:
+                    return_code = await asyncio.wait_for(
+                        execution_future, timeout=float(exec_timeout)
+                    )
+                else:
+                    return_code = await execution_future
+
+            except TimeoutError:
+                await self._handle_process_timeout(process_id)
+                return_code = 124
+                await self._wait_for_output_tasks(process_id)
+
+            except asyncio.CancelledError:
+                await self.stream_action(
+                    {
+                        "type": "process_cancelled",
+                        "process_id": process_id,
+                        "timestamp": time.time(),
+                    }
+                )
+                await self._terminate_process_group(process)
+                await self._wait_for_output_tasks(process_id)
+                return_code = 130
+
+            await self._wait_for_output_tasks(process_id)
+
+            stdout_output = "\n".join(collected_stdout) if collected_stdout else ""
+            stderr_output = "\n".join(collected_stderr) if collected_stderr else ""
+
+            output = ""
+            if stderr_output:
+                output += stderr_output + "\n"
+            if stdout_output:
+                output += stdout_output
+
+            await self._cleanup_single_process(process_id)
+
+            return f"Exit code: {return_code}\n{output.strip()}"
+
+        except Exception as e:
+            error_msg = f"Error executing command: {str(e)}"
+            await self.stream_action(
+                {
+                    "type": "terminal_error",
+                    "process_id": process_id,
+                    "content": error_msg,
+                    "timestamp": time.time(),
+                }
+            )
+            await self._cleanup_single_process(process_id)
+            return error_msg
+
+        finally:
+            self._current_process_id = None
+
+    async def _wait_for_output_tasks(self, process_id: str, timeout: float = 2.0):
+        """Wait for output tasks to complete with timeout."""
+        if process_id not in self._output_tasks:
+            return
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*self._output_tasks[process_id], return_exceptions=True),
+                timeout=timeout,
+            )
+        except TimeoutError:
+            for task in self._output_tasks[process_id]:
+                if not task.done():
+                    task.cancel()
+
+    async def _monitor_output_stream(
+        self,
+        stream: asyncio.StreamReader,
+        process: asyncio.subprocess.Process,
+        process_id: str,
+        stream_name: str,
+        collector: list[str],
+    ):
+        """Monitor output stream with real-time prompt detection."""
+        buffer = ""
+        try:
+            while True:
+                if process.returncode is not None and not buffer:
+                    try:
+                        remaining = await asyncio.wait_for(
+                            stream.read(self.READ_CHUNK_SIZE), timeout=0.1
+                        )
+                        if remaining:
+                            buffer += remaining.decode("utf-8", errors="replace")
+                        else:
+                            break
+                    except (TimeoutError, asyncio.CancelledError):
+                        break
+
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream.read(self.READ_CHUNK_SIZE), timeout=self.READ_TIMEOUT
+                    )
+
+                    if not chunk:
+                        if buffer:
+                            await self._process_output_buffer(
+                                buffer, process_id, stream_name, collector
+                            )
+                        break
+
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    buffer = await self._process_output_buffer(
+                        buffer, process_id, stream_name, collector
+                    )
+
+                except TimeoutError:
+                    if buffer and self._looks_like_input_prompt(buffer):
+                        await self._emit_output(
+                            buffer.rstrip("\n"),
+                            process_id,
+                            stream_name,
+                            collector,
+                            is_partial=True,
+                        )
+                        user_input = await self._wait_for_user_input(process_id, buffer)
+                        if user_input is not None:
+                            await self.send_input_to_process(process_id, user_input)
+                        buffer = ""
+                    continue
+
+                except asyncio.CancelledError:
+                    if buffer:
+                        await self._process_output_buffer(
+                            buffer, process_id, stream_name, collector, force_emit=True
+                        )
+                    raise
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            await self.stream_action(
+                {
+                    "type": "terminal_error",
+                    "process_id": process_id,
+                    "content": f"Error reading {stream_name}: {str(e)}",
+                    "timestamp": time.time(),
+                }
+            )
+
+    async def _process_output_buffer(
+        self,
+        buffer: str,
+        process_id: str,
+        stream_name: str,
+        collector: list[str],
+        force_emit: bool = False,
+    ) -> str:
+        """Process output buffer, emitting complete lines."""
+        lines = buffer.split("\n")
+
+        for line in lines[:-1]:
+            if line:
+                await self._emit_output(line, process_id, stream_name, collector)
+
+        remaining = lines[-1]
+
+        if force_emit and remaining:
+            await self._emit_output(remaining, process_id, stream_name, collector)
+            return ""
+
+        return remaining
+
+    async def _emit_output(
+        self,
+        content: str,
+        process_id: str,
+        stream_name: str,
+        collector: list[str],
+        is_partial: bool = False,
+    ):
+        """Emit output to WebSocket and collector."""
+        collector.append(content)
+        is_input_prompt = self._looks_like_input_prompt(content)
+
+        # Update last output time for stall detection
+        self._last_output_time[process_id] = time.time()
+        # Reset stall notification since we got output
+        self._stall_notified[process_id] = False
+
+        await self.stream_action(
+            {
+                "type": "terminal_output",
+                "stream": stream_name,
+                "process_id": process_id,
+                "content": content,
+                "is_input_prompt": is_input_prompt,
+                "is_partial": is_partial,
+                "timestamp": time.time(),
+            }
+        )
+
+        if is_input_prompt:
+            await self.stream_action(
+                {
+                    "type": "input_prompt_detected",
+                    "process_id": process_id,
+                    "prompt_text": content,
+                    "message": f"The command is waiting for input: {content}",
+                    "timestamp": time.time(),
+                }
+            )
+
+    def _looks_like_input_prompt(self, text: str) -> bool:
+        """Determine if text looks like an input prompt."""
+        text_stripped = text.strip()
+        text_lower = text_stripped.lower()
+
+        if not text_stripped:
+            return False
+
+        strong_indicators = [
+            "input(",
+            ">>> ",
+            "... ",
+            "password:",
+            "password: ",
+            "[y/n]",
+            "[yes/no]",
+            "(y/n)",
+            "(yes/no)",
+            "enter your",
+            "type your",
+            "please enter",
+            "please type",
+            "confirm",
+        ]
+
+        if any(ind in text_lower for ind in strong_indicators):
+            return True
+
+        prompt_endings = ["?", ": ", ":"]
+        question_words = [
+            "enter",
+            "input",
+            "type",
+            "provide",
+            "specify",
+            "choose",
+            "select",
+            "please",
+            "what",
+            "which",
+            "name",
+            "value",
+            "continue",
+            "proceed",
+            "overwrite",
+        ]
+
+        for ending in prompt_endings:
+            if text_stripped.endswith(ending):
+                if any(word in text_lower for word in question_words):
+                    return True
+
+        if text_stripped.endswith(":") and len(text_stripped) < 50:
+            non_prompt_patterns = [
+                "error:",
+                "warning:",
+                "info:",
+                "debug:",
+                "note:",
+                "traceback",
+                "file ",
+                "line ",
+                "exception",
+            ]
+            if not any(pat in text_lower for pat in non_prompt_patterns):
+                return True
+
+        return False
+
+    async def _wait_for_user_input(
+        self, process_id: str, prompt_text: str, timeout: float = 300.0
+    ) -> str | None:
+        """Wait for user input from WebSocket."""
+        input_future: asyncio.Future[str] = asyncio.Future()
+        self._pending_input_futures[process_id] = input_future
+
+        try:
+            user_input = await asyncio.wait_for(input_future, timeout=timeout)
+            return user_input
+        except TimeoutError:
+            await self.stream_action(
+                {
+                    "type": "input_timeout",
+                    "process_id": process_id,
+                    "message": "Input prompt timed out waiting for user response",
+                    "timestamp": time.time(),
+                }
+            )
+            return None
+        except asyncio.CancelledError:
+            return None
+        finally:
+            self._pending_input_futures.pop(process_id, None)
+
+    async def _monitor_stall_detection(
+        self, process: asyncio.subprocess.Process, process_id: str
+    ):
+        """Monitor for stalled processes that might be waiting for input.
+
+        This handles cases like bash's `read -p` which writes prompts
+        directly to /dev/tty instead of stdout/stderr, so we can't
+        detect the prompt through normal output monitoring.
+
+        Args:
+            process: The subprocess to monitor.
+            process_id: Process identifier.
+        """
+        try:
+            # Wait a bit before starting stall detection to allow initial output
+            await asyncio.sleep(self.STALL_DETECTION_TIMEOUT)
+
+            while process.returncode is None:
+                # Check if process is stalled (no output recently)
+                last_output = self._last_output_time.get(process_id, time.time())
+                time_since_output = time.time() - last_output
+
+                # If stalled and not already notified and no pending input future
+                if (
+                    time_since_output >= self.STALL_DETECTION_TIMEOUT
+                    and not self._stall_notified.get(process_id, False)
+                    and process_id not in self._pending_input_futures
+                ):
+                    # Mark as notified to avoid spamming
+                    self._stall_notified[process_id] = True
+
+                    # Notify frontend that input might be needed
+                    await self.stream_action(
+                        {
+                            "type": "input_might_be_needed",
+                            "process_id": process_id,
+                            "message": (
+                                "Process appears to be waiting for input. "
+                                "If prompted, please provide input."
+                            ),
+                            "stall_duration": time_since_output,
+                            "timestamp": time.time(),
+                        }
+                    )
+
+                    # Wait for user input
+                    user_input = await self._wait_for_user_input(
+                        process_id, "(possible hidden prompt)"
+                    )
+                    if user_input is not None:
+                        await self.send_input_to_process(process_id, user_input)
+
+                # Sleep before next check
+                await asyncio.sleep(0.5)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Stall detection error for {process_id}: {e}")
+
+    def provide_input(self, process_id: str | None, user_input: str) -> bool:
+        """Provide input to a waiting process.
+
+        Args:
+            process_id: Process identifier (or None to use current).
+            user_input: The input to provide.
+
+        Returns:
+            True if input was accepted.
+        """
+        target_id = process_id or self._current_process_id
+
+        if target_id and target_id in self._pending_input_futures:
+            future = self._pending_input_futures[target_id]
+            if not future.done():
+                future.set_result(user_input)
+                return True
+
+        if not target_id:
+            for pid, future in self._pending_input_futures.items():
+                if not future.done():
+                    future.set_result(user_input)
+                    return True
+
+        return False
+
+    async def send_input_to_process(self, process_id: str, input_text: str) -> bool:
+        """Send input directly to a running process stdin."""
+        if process_id not in self.active_processes:
+            await self.stream_action(
+                {
+                    "type": "input_error",
+                    "process_id": process_id,
+                    "content": f"Process {process_id} not found",
+                    "timestamp": time.time(),
+                }
+            )
+            return False
+
+        try:
+            process = self.active_processes[process_id]
+
+            if process.returncode is not None:
+                await self.stream_action(
+                    {
+                        "type": "input_error",
+                        "process_id": process_id,
+                        "content": f"Process has finished (exit code: {process.returncode})",
+                        "timestamp": time.time(),
+                    }
+                )
+                return False
+
+            if not process.stdin or process.stdin.is_closing():
+                await self.stream_action(
+                    {
+                        "type": "input_error",
+                        "process_id": process_id,
+                        "content": "Process stdin is not available",
+                        "timestamp": time.time(),
+                    }
+                )
+                return False
+
+            input_bytes = input_text.encode("utf-8") + b"\n"
+            process.stdin.write(input_bytes)
+
+            try:
+                await asyncio.wait_for(
+                    process.stdin.drain(), timeout=self.STDIN_DRAIN_TIMEOUT
+                )
+            except TimeoutError:
+                pass  # Continue anyway
+
+            await self.stream_action(
+                {
+                    "type": "input_sent",
+                    "process_id": process_id,
+                    "content": input_text,
+                    "bytes_written": len(input_bytes),
+                    "timestamp": time.time(),
+                }
+            )
+
+            return True
+
+        except BrokenPipeError:
+            await self.stream_action(
+                {
+                    "type": "input_error",
+                    "process_id": process_id,
+                    "content": "stdin pipe is broken (process ended)",
+                    "timestamp": time.time(),
+                }
+            )
+            return False
+        except Exception as e:
+            await self.stream_action(
+                {
+                    "type": "input_error",
+                    "process_id": process_id,
+                    "content": f"Error sending input: {str(e)}",
+                    "timestamp": time.time(),
+                }
+            )
+            return False
+
+    async def _monitor_process_lifecycle(
+        self,
+        process: asyncio.subprocess.Process,
+        process_id: str,
+        future: asyncio.Future,
+    ):
+        """Monitor process lifecycle and handle completion."""
+        try:
+            return_code = await process.wait()
+
+            if return_code < 0:
+                signal_name = self._get_signal_name(-return_code)
+                await self.stream_action(
+                    {
+                        "type": "process_terminated_by_signal",
+                        "process_id": process_id,
+                        "signal": signal_name,
+                        "return_code": return_code,
+                        "timestamp": time.time(),
+                    }
+                )
+            else:
+                await self.stream_action(
+                    {
+                        "type": "process_completed",
+                        "process_id": process_id,
+                        "exit_code": return_code,
+                        "timestamp": time.time(),
+                    }
+                )
+
+            if not future.done():
+                future.set_result(return_code)
+
+        except asyncio.CancelledError:
+            if not future.done():
+                future.cancel()
+            raise
+        except Exception as e:
+            if not future.done():
+                future.set_exception(e)
+
+    def _get_signal_name(self, signal_num: int) -> str:
+        """Get human-readable signal name."""
+        signal_names = {
+            signal.SIGTERM: "SIGTERM",
+            signal.SIGKILL: "SIGKILL",
+            signal.SIGINT: "SIGINT",
+        }
+        if hasattr(signal, "SIGHUP"):
+            signal_names[signal.SIGHUP] = "SIGHUP"
+        if hasattr(signal, "SIGQUIT"):
+            signal_names[signal.SIGQUIT] = "SIGQUIT"
+        return signal_names.get(signal_num, f"SIGNAL_{signal_num}")
+
+    async def _terminate_process_group(self, process: asyncio.subprocess.Process):
+        """Terminate process and all its children."""
+        if process.returncode is not None:
+            return
+
+        try:
+            if self.WIN32:
+                process.terminate()
+            else:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    process.terminate()
+
+            try:
+                await asyncio.wait_for(
+                    process.wait(), timeout=self.TERMINATION_GRACE_PERIOD
+                )
+            except TimeoutError:
+                if self.WIN32:
+                    process.kill()
+                else:
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        process.kill()
+                await process.wait()
+        except Exception:
+            try:
+                process.kill()
+                await process.wait()
+            except Exception:
+                pass
+
+    async def _handle_process_timeout(self, process_id: str):
+        """Handle process timeout."""
+        if process_id not in self.active_processes:
+            return
+
+        process = self.active_processes[process_id]
+        await self.stream_action(
+            {
+                "type": "process_timeout",
+                "process_id": process_id,
+                "timestamp": time.time(),
+            }
+        )
+        await self._terminate_process_group(process)
+
+    async def terminate_process(self, process_id: str) -> bool:
+        """Terminate a specific process."""
+        if process_id not in self.active_processes:
+            return False
+
+        try:
+            process = self.active_processes[process_id]
+
+            if process_id in self._execution_futures:
+                future = self._execution_futures[process_id]
+                if not future.done():
+                    future.cancel()
+
+            if process_id in self._pending_input_futures:
+                future = self._pending_input_futures[process_id]
+                if not future.done():
+                    future.cancel()
+
+            await self._terminate_process_group(process)
+            await self._cleanup_single_process(process_id)
+            return True
+
+        except Exception:
+            return False
+
+    async def _cleanup_single_process(self, process_id: str):
+        """Clean up a single process and all its resources."""
+        async with self._cleanup_lock:
+            try:
+                if process_id in self._process_monitor_tasks:
+                    task = self._process_monitor_tasks[process_id]
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+                        except (asyncio.CancelledError, TimeoutError):
+                            pass
+                    del self._process_monitor_tasks[process_id]
+
+                # Cancel stall detection task
+                if process_id in self._stall_detection_tasks:
+                    task = self._stall_detection_tasks[process_id]
+                    if not task.done():
+                        task.cancel()
+                    del self._stall_detection_tasks[process_id]
+
+                if process_id in self._output_tasks:
+                    for task in self._output_tasks[process_id]:
+                        if not task.done():
+                            task.cancel()
+                    del self._output_tasks[process_id]
+
+                self.active_processes.pop(process_id, None)
+                # Clean up stall detection tracking
+                self._last_output_time.pop(process_id, None)
+                self._stall_notified.pop(process_id, None)
+                if process_id in self._execution_futures:
+                    future = self._execution_futures[process_id]
+                    if not future.done():
+                        future.cancel()
+                    del self._execution_futures[process_id]
+                self._pending_input_futures.pop(process_id, None)
+
+            except Exception as e:
+                logger.debug(f"Cleanup error for {process_id}: {e}")
+
+    async def cleanup_all(self):
+        """Clean up all processes."""
+        for process_id in list(self.active_processes.keys()):
+            await self._cleanup_single_process(process_id)
+
+    def get_active_processes(self) -> list[str]:
+        """Get list of active process IDs."""
+        return list(self.active_processes.keys())
+
+    def has_pending_input(self) -> bool:
+        """Check if any process is waiting for input."""
+        return any(not f.done() for f in self._pending_input_futures.values())
+
+    def get_current_process_id(self) -> str | None:
+        """Get the currently executing process ID."""
+        return self._current_process_id
 
 
 class AsyncToolRegistry:
     """Registry for async tool handlers with execution support."""
 
-    def __init__(self, working_directory: str = "."):
+    def __init__(
+        self,
+        working_directory: str = ".",
+        session_id: str | None = None,
+        websocket_manager: "WebSocketManager | None" = None,
+    ):
         """Initialize the tool registry.
 
         Args:
             working_directory: Base directory for file operations.
+            session_id: Session identifier for command execution.
+            websocket_manager: WebSocket manager for streaming output.
         """
         self.working_directory = os.path.abspath(working_directory)
-        self._tools: dict[str, callable] = {}
+        self.session_id = session_id or "default"
+        self._tools: dict[str, Callable] = {}
+
+        # Create interactive command executor
+        self.command_executor = InteractiveCommandExecutor(
+            session_id=self.session_id,
+            working_directory=self.working_directory,
+            websocket_manager=websocket_manager,
+        )
+
         self._register_all_tools()
+
+    def set_websocket_manager(self, manager: "WebSocketManager") -> None:
+        """Set the WebSocket manager for streaming."""
+        self.command_executor.set_websocket_manager(manager)
+
+    def provide_input(self, process_id: str | None, user_input: str) -> bool:
+        """Provide input to a waiting process.
+
+        Args:
+            process_id: Process identifier (or None to use current).
+            user_input: The input to provide.
+
+        Returns:
+            True if input was accepted.
+        """
+        return self.command_executor.provide_input(process_id, user_input)
+
+    def has_pending_input(self) -> bool:
+        """Check if any process is waiting for input."""
+        return self.command_executor.has_pending_input()
+
+    async def cleanup(self):
+        """Clean up all resources."""
+        await self.command_executor.cleanup_all()
 
     def _register_all_tools(self):
         """Register all available tools."""
@@ -83,7 +941,6 @@ class AsyncToolRegistry:
             if asyncio.iscoroutinefunction(tool_func):
                 return await tool_func(**kwargs)
             else:
-                # Run sync functions in executor to avoid blocking
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, lambda: tool_func(**kwargs))
         except Exception as e:
@@ -224,33 +1081,13 @@ class AsyncToolRegistry:
     async def execute_command(
         self, command: str, working_dir: str | None = None, timeout: int = 120
     ) -> str:
-        """Execute shell command asynchronously."""
-        try:
-            cwd = (
-                self._resolve_path(working_dir)
-                if working_dir
-                else self.working_directory
-            )
-
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=timeout
-                )
-                output = stdout.decode() if stdout else stderr.decode()
-                return f"Exit code: {process.returncode}\n{output}"
-            except TimeoutError:
-                process.kill()
-                return f"Error: Command timed out after {timeout} seconds"
-
-        except Exception as e:
-            return f"Error executing command: {str(e)}"
+        """Execute shell command with interactive input support."""
+        cwd = self._resolve_path(working_dir) if working_dir else self.working_directory
+        return await self.command_executor.execute_command(
+            command=command,
+            working_dir=cwd,
+            timeout=timeout,
+        )
 
     def search_files(
         self, pattern: str, path: str = ".", file_pattern: str | None = None
@@ -315,7 +1152,7 @@ class AsyncToolRegistry:
             untracked = repo.untracked_files
             if untracked:
                 status.append("\nUntracked files:")
-                for file in untracked[:20]:  # Limit output
+                for file in untracked[:20]:
                     status.append(f"  ? {file}")
                 if len(untracked) > 20:
                     status.append(f"  ... and {len(untracked) - 20} more")
@@ -497,7 +1334,6 @@ class AsyncToolRegistry:
                 except SyntaxError as e:
                     return f"Syntax error in file: {e}"
             else:
-                # Generic pattern matching for JS/TS files
                 patterns = [
                     (r"^\s*(async\s+)?function\s+(\w+)", "function"),
                     (r"^\s*class\s+(\w+)", "class"),
@@ -551,7 +1387,6 @@ class AsyncToolRegistry:
                         if re.match(r"^\s*(from|import)\s+", line):
                             imports.append(line.strip())
             else:
-                # JS/TS imports
                 patterns = [
                     r'^\s*import\s+.*?[\'"]([^\'"]+)[\'"]',
                     r'^\s*const\s+\w+\s*=\s*require\s*\([\'"]([^\'"]+)[\'"]\)',
@@ -804,7 +1639,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "execute_command",
-        "description": "Execute a shell command and return its output. Use with caution.",
+        "description": "Execute a shell command and return its output. Supports interactive commands that require user input - the system will automatically detect input prompts and request input from the user.",
         "input_schema": {
             "type": "object",
             "properties": {

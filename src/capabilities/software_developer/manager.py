@@ -118,8 +118,12 @@ class SoftwareDeveloper:
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = self.llm_config.get("model", "claude-opus-4-5-20251101")
 
-        # Initialize tool registry
-        self.tool_registry = AsyncToolRegistry(working_directory=self.working_directory)
+        # Initialize tool registry with session ID and WebSocket manager
+        self.tool_registry = AsyncToolRegistry(
+            working_directory=self.working_directory,
+            session_id=self.context.chat_id,
+            websocket_manager=self.websocket_manager,
+        )
 
         # Create manager wrapper for compatibility
         self.manager = SoftwareDeveloperManager(self)
@@ -166,6 +170,36 @@ class SoftwareDeveloper:
             input_func: Async function to request user input.
         """
         self._input_func = input_func
+
+    def provide_input(self, process_id: str | None, user_input: str) -> bool:
+        """Provide input to a waiting process from the tool registry.
+
+        This method is called when user sends input via WebSocket
+        in response to an input prompt from a running command.
+
+        Args:
+            process_id: Process identifier (or None to use current).
+            user_input: The input text to provide to the process.
+
+        Returns:
+            True if input was successfully provided, False otherwise.
+        """
+        return self.tool_registry.provide_input(process_id, user_input)
+
+    def has_pending_input(self) -> bool:
+        """Check if any process is waiting for user input.
+
+        Returns:
+            True if a process is waiting for input.
+        """
+        return self.tool_registry.has_pending_input()
+
+    async def cleanup(self) -> None:
+        """Clean up all resources including running processes.
+
+        Should be called when the session ends or is disconnected.
+        """
+        await self.tool_registry.cleanup()
 
     def load_custom_instructions(self, instructions: str) -> None:
         """Load custom instructions for the agent.

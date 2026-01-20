@@ -202,13 +202,39 @@ async def _handle_software_dev_messages(
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong", "timestamp": dt.now_iso()})
 
-            # === INPUT_RESPONSE: User input for prompts ===
+            # === INPUT_RESPONSE: User input for interactive commands ===
             elif msg_type == "input_response":
-                response = message.get("response")
-                if response is not None:
-                    await ws_manager.handle_input_response(chat_id, response)
+                user_input = message.get("response")
+                process_id = message.get("process_id")  # Optional process ID
+
+                if user_input is not None:
+                    # Try to provide input to software_dev's tool registry first
+                    input_accepted = software_dev.provide_input(process_id, user_input)
+
+                    if input_accepted:
+                        logger.info(f"Input provided to process for session {chat_id}")
+                        await websocket.send_json(
+                            {
+                                "type": "input_accepted",
+                                "process_id": process_id,
+                                "timestamp": dt.now_iso(),
+                            }
+                        )
+                    else:
+                        # Fall back to ws_manager's input handling for compatibility
+                        await ws_manager.handle_input_response(chat_id, user_input)
+                        logger.info(
+                            f"Input forwarded to ws_manager for session {chat_id}"
+                        )
                 else:
                     logger.warning(f"Invalid input_response for session {chat_id}")
+                    await websocket.send_json(
+                        {
+                            "type": "input_error",
+                            "error": "No input provided",
+                            "timestamp": dt.now_iso(),
+                        }
+                    )
 
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON received for session {chat_id}")
@@ -250,6 +276,8 @@ async def software_developer_websocket(
         return
 
     logger.info(f"WebSocket connected for software_developer session {chat_id}")
+
+    software_dev = None  # Initialize for cleanup in finally block
 
     try:
         # Send initialization status
@@ -339,6 +367,13 @@ async def software_developer_websocket(
         except Exception:
             pass
     finally:
+        # Clean up software developer resources (running processes, etc.)
+        if software_dev is not None:
+            try:
+                await software_dev.cleanup()
+            except Exception as cleanup_error:
+                logger.warning(f"Cleanup error for session {chat_id}: {cleanup_error}")
+
         LLMConfigManager.clear_cache()
         await ws_manager.disconnect(chat_id)
 
