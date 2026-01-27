@@ -8,6 +8,9 @@ fastapi==0.116.1
 httpx==0.28.1
 langchain==0.3.25
 langchain-openai>=0.3.30  # ADD THIS LINE - supports openai 2.x
+langchain-core>=0.3.0
+langgraph>=0.2.0
+langgraph-checkpoint>=2.0.0  # For conversation state persistence
 loguru==0.7.3
 nest_asyncio==1.6.0
 openai==2.3.0
