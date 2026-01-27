@@ -2198,3 +2198,331 @@ TOOL_DEFINITIONS = [
         },
     },
 ]
+
+
+# =============================================================================
+# LANGGRAPH TOOL WRAPPERS
+# =============================================================================
+
+from langchain_core.tools import tool as langgraph_tool
+
+
+def create_langgraph_tools(tool_registry: "AsyncToolRegistry") -> list:
+    """Create LangGraph-compatible tools from AsyncToolRegistry.
+
+    Args:
+        tool_registry: The AsyncToolRegistry instance with all tools.
+
+    Returns:
+        List of LangChain tool instances.
+    """
+
+    @langgraph_tool
+    async def read_file(path: str) -> str:
+        """Read the contents of a file.
+
+        Args:
+            path: The path to the file to read (relative or absolute).
+
+        Returns:
+            The file contents as string.
+        """
+        return tool_registry.read_file(path)
+
+    @langgraph_tool
+    async def write_file(path: str, content: str) -> str:
+        """Write content to a file.
+
+        Args:
+            path: The path to the file to write.
+            content: The content to write to the file.
+
+        Returns:
+            Success message or error message.
+        """
+        return tool_registry.write_file(path, content)
+
+    @langgraph_tool
+    async def list_directory(path: str = ".") -> str:
+        """List all files and directories in a given path.
+
+        Args:
+            path: The directory path to list (defaults to current directory).
+
+        Returns:
+            Formatted list of files and directories.
+        """
+        return tool_registry.list_directory(path)
+
+    @langgraph_tool
+    async def create_directory(path: str) -> str:
+        """Create a new directory.
+
+        Args:
+            path: The directory path to create.
+
+        Returns:
+            Success message or error message.
+        """
+        return tool_registry.create_directory(path)
+
+    @langgraph_tool
+    async def delete_file(path: str) -> str:
+        """Delete a file or directory.
+
+        Args:
+            path: The path to delete.
+
+        Returns:
+            Success message or error message.
+        """
+        return tool_registry.delete_file(path)
+
+    @langgraph_tool
+    async def move_file(source: str, destination: str) -> str:
+        """Move or rename a file or directory.
+
+        Args:
+            source: The source path.
+            destination: The destination path.
+
+        Returns:
+            Success message or error message.
+        """
+        return tool_registry.move_file(source, destination)
+
+    @langgraph_tool
+    async def copy_file(source: str, destination: str) -> str:
+        """Copy a file or directory.
+
+        Args:
+            source: The source path.
+            destination: The destination path.
+
+        Returns:
+            Success message or error message.
+        """
+        return tool_registry.copy_file(source, destination)
+
+    @langgraph_tool
+    async def file_info(path: str) -> str:
+        """Get file metadata including size, permissions, and modification time.
+
+        Args:
+            path: The path to the file.
+
+        Returns:
+            File metadata information.
+        """
+        return tool_registry.file_info(path)
+
+    @langgraph_tool
+    async def read_file_lines(path: str, start_line: int, end_line: int) -> str:
+        """Read specific line ranges from a file.
+
+        Args:
+            path: The path to the file.
+            start_line: The starting line number (1-indexed).
+            end_line: The ending line number (inclusive).
+
+        Returns:
+            The requested lines with line numbers.
+        """
+        return tool_registry.read_file_lines(path, start_line, end_line)
+
+    @langgraph_tool
+    async def execute_command(command: str, working_dir: str = None, timeout: int = 120) -> str:
+        """Execute a shell command with PTY-based interactive terminal support.
+
+        The command runs in a pseudo-terminal with full interactivity support.
+
+        Args:
+            command: The shell command to execute.
+            working_dir: Optional working directory for the command.
+            timeout: Optional timeout in seconds (default 120).
+
+        Returns:
+            Command output with exit code.
+        """
+        return await tool_registry.execute_command(command, working_dir, timeout)
+
+    @langgraph_tool
+    async def search_files(pattern: str, path: str = ".", file_pattern: str = None) -> str:
+        """Search for a text pattern in files.
+
+        Args:
+            pattern: The text or regex pattern to search for.
+            path: The directory to search in (defaults to current directory).
+            file_pattern: Optional file name pattern to filter (e.g., '*.py').
+
+        Returns:
+            Formatted search results showing matches with line numbers.
+        """
+        return tool_registry.search_files(pattern, path, file_pattern)
+
+    @langgraph_tool
+    async def git_status(path: str = ".") -> str:
+        """Get the git status of the current repository.
+
+        Args:
+            path: The repository path (defaults to current directory).
+
+        Returns:
+            Git status information.
+        """
+        return tool_registry.git_status(path)
+
+    @langgraph_tool
+    async def git_diff(path: str = ".", cached: bool = False) -> str:
+        """Get the git diff for tracked changes.
+
+        Args:
+            path: The repository path (defaults to current directory).
+            cached: Show staged changes instead of unstaged.
+
+        Returns:
+            Git diff output.
+        """
+        return tool_registry.git_diff(path, cached)
+
+    @langgraph_tool
+    async def git_commit(message: str, path: str = ".") -> str:
+        """Stage all changes and create a git commit.
+
+        Args:
+            message: The commit message.
+            path: The repository path (defaults to current directory).
+
+        Returns:
+            Commit result message.
+        """
+        return tool_registry.git_commit(message, path)
+
+    @langgraph_tool
+    async def git_log(path: str = ".", limit: int = 10) -> str:
+        """View git commit history.
+
+        Args:
+            path: The repository path (defaults to current directory).
+            limit: Maximum number of commits to show (default 10).
+
+        Returns:
+            Git log output.
+        """
+        return tool_registry.git_log(path, limit)
+
+    @langgraph_tool
+    async def git_branch(path: str = ".", action: str = "list", branch_name: str = None) -> str:
+        """List, create, or switch branches.
+
+        Args:
+            path: The repository path (defaults to current directory).
+            action: Action to perform: 'list', 'create', or 'switch'.
+            branch_name: Branch name (required for create/switch).
+
+        Returns:
+            Branch operation result.
+        """
+        return tool_registry.git_branch(path, action, branch_name)
+
+    @langgraph_tool
+    async def find_definition(name: str, path: str = ".") -> str:
+        """Find function or class definitions in files.
+
+        Args:
+            name: The name of the function or class to find.
+            path: The directory to search in (defaults to current directory).
+
+        Returns:
+            Matching definitions with file paths and line numbers.
+        """
+        return tool_registry.find_definition(name, path)
+
+    @langgraph_tool
+    async def list_functions(path: str) -> str:
+        """List all function and class definitions in a file.
+
+        Args:
+            path: The path to the file to analyze.
+
+        Returns:
+            List of all definitions with line numbers.
+        """
+        return tool_registry.list_functions(path)
+
+    @langgraph_tool
+    async def analyze_imports(path: str) -> str:
+        """List all imports/dependencies in a file.
+
+        Args:
+            path: The path to the file to analyze.
+
+        Returns:
+            List of all imports.
+        """
+        return tool_registry.analyze_imports(path)
+
+    @langgraph_tool
+    async def summarize_codebase(path: str = ".", max_depth: int = 3) -> str:
+        """Generate a summary of the project structure and key files.
+
+        Args:
+            path: The project root path (defaults to current directory).
+            max_depth: Maximum directory depth to explore (default 3).
+
+        Returns:
+            Codebase structure summary.
+        """
+        return tool_registry.summarize_codebase(path, max_depth)
+
+    @langgraph_tool
+    async def run_tests(path: str = ".", framework: str = "auto", verbose: bool = False) -> str:
+        """Execute test suites (pytest, jest, etc.).
+
+        Args:
+            path: Path to test file or directory.
+            framework: Test framework: 'pytest', 'jest', 'npm', 'auto' (default auto).
+            verbose: Run in verbose mode.
+
+        Returns:
+            Test execution results.
+        """
+        return await tool_registry.run_tests(path, framework, verbose)
+
+    @langgraph_tool
+    async def format_code(path: str, formatter: str = None) -> str:
+        """Auto-format code using appropriate formatter.
+
+        Args:
+            path: Path to file or directory to format.
+            formatter: Formatter to use: 'black', 'prettier', 'autopep8' (default auto-detect).
+
+        Returns:
+            Formatting result message.
+        """
+        return await tool_registry.format_code(path, formatter)
+
+    return [
+        read_file,
+        write_file,
+        list_directory,
+        create_directory,
+        delete_file,
+        move_file,
+        copy_file,
+        file_info,
+        read_file_lines,
+        execute_command,
+        search_files,
+        git_status,
+        git_diff,
+        git_commit,
+        git_log,
+        git_branch,
+        find_definition,
+        list_functions,
+        analyze_imports,
+        summarize_codebase,
+        run_tests,
+        format_code,
+    ]

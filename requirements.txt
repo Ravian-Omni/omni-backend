@@ -7,7 +7,8 @@ cryptography==45.0.5
 fastapi==0.116.1
 httpx==0.28.1
 langchain==0.3.25
-langchain-openai>=0.3.30  # ADD THIS LINE - supports openai 2.x
+langchain-openai>=0.3.30  # supports openai 2.x
+langchain-anthropic>=0.3.0  # For Claude integration
 langchain-core>=0.3.0
 langgraph>=0.2.0
 langgraph-checkpoint>=2.0.0  # For conversation state persistence
