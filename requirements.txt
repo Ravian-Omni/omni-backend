@@ -9,7 +9,7 @@ langchain-openai>=0.3.30  # ADD THIS LINE - supports openai 2.x
 loguru==0.7.3
 nest_asyncio==1.6.0
 openai==2.3.0
-playwright==1.52.0
+browser-use>=0.11.5
 Pillow==11.3.0
 pydantic==2.11.7
 python-dotenv==1.1.1
@@ -20,4 +20,3 @@ tavily_python==0.7.8
 together==1.5.21
 websockets==15.0.1
 uvicorn==0.34.3
-# git+https://github.com/Suryaaa-Rathore/ravian-browser-use.git@ravian_0.3.1

@@ -714,10 +714,7 @@ class WebSocketManager:
                 )
 
     async def close_browser_session(self, browser_session) -> bool:
-        """Attempt to close browser gracefully using the session's built-in methods.
-
-        Tries multiple cleanup approaches including event bus cleanup,
-        standard close methods, and browser instance closure.
+        """Close browser session using CDP stop() method.
 
         Args:
             browser_session: Browser session instance to close.
@@ -729,37 +726,12 @@ class WebSocketManager:
             return True
 
         try:
-            if hasattr(browser_session, "agent"):
-                agent = browser_session.agent
-                if hasattr(agent, "event_bus"):
-                    # Try to stop or clean up the event bus
-                    if hasattr(agent.event_bus, "stop"):
-                        await agent.event_bus.stop()
-                    elif hasattr(agent.event_bus, "close"):
-                        await agent.event_bus.close()
-                    elif hasattr(agent.event_bus, "cleanup"):
-                        await agent.event_bus.cleanup()
-
-            # Also check for global EventBus registry cleanup
-            if hasattr(browser_session, "_cleanup_event_system"):
-                await browser_session._cleanup_event_system()
-
-            # Try the standard close method first
-            if hasattr(browser_session, "close"):
-                await browser_session.close()
-
-            # Then try kill method
-            if hasattr(browser_session, "kill"):
-                await browser_session.kill()
-
-            # Try to close the browser if it has a browser attribute
-            if hasattr(browser_session, "browser") and browser_session.browser:
-                await browser_session.browser.close()
-            browser_session = None
+            if hasattr(browser_session, "stop"):
+                await browser_session.stop()
             return True
 
         except Exception as e:
-            print(f"Error during graceful browser closure: {e}")
+            logger.warning(f"Error during browser closure: {e}")
             return False
 
     async def terminal_input(self, session_id: str, process_id: str, input_text: str):
