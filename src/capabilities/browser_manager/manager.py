@@ -871,9 +871,7 @@ class BrowserManager:
                 browser_session=browser_session,
                 max_failures=3,
                 use_vision=True,
-                generate_gif=(
-                    False if not self.save_results else self.browser_gif
-                ),
+                generate_gif=(False if not self.save_results else self.browser_gif),
                 llm=self.vision_llm,
                 controller=self.controller,
                 calculate_cost=True,

@@ -5,10 +5,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from browser_use import Agent
-from browser_use.agent.views import (
-    ActionResult,
-    AgentStepInfo,
-)
+from browser_use.agent.views import ActionResult, AgentStepInfo
 from browser_use.tools.registry.views import ActionModel
 from loguru import logger
 
@@ -324,9 +321,7 @@ class StreamingAgent(Agent):
                     "success": True,
                     "agent_id": self.task_id,
                     "consecutive_failures": self.state.consecutive_failures,
-                    "is_done": (
-                        self.history.is_done() if self.history else False
-                    ),
+                    "is_done": (self.history.is_done() if self.history else False),
                 }
             )
 
@@ -536,13 +531,9 @@ class StreamingAgent(Agent):
         description = "Unknown action"
         if hasattr(self, "tools") and hasattr(self.tools, "registry"):
             registry = self.tools.registry
-            if hasattr(registry, "registry") and hasattr(
-                registry.registry, "actions"
-            ):
+            if hasattr(registry, "registry") and hasattr(registry.registry, "actions"):
                 if action_name in registry.registry.actions:
-                    description = registry.registry.actions[
-                        action_name
-                    ].description
+                    description = registry.registry.actions[action_name].description
 
         return {
             "action_name": action_name,
