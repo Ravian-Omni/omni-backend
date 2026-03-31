@@ -104,7 +104,7 @@ class PythonDeveloper:
             or "default"
         )
         llm_code_writer_agent = LLMConfigManager.get_config(llm_config_name)
-        llm_code_writer_agent["max_tokens"] = 50000
+        llm_code_writer_agent["max_tokens"] = 16384
         return autogen.AssistantAgent(
             name="code_writer_agent",
             llm_config=llm_code_writer_agent,

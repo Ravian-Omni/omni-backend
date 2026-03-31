@@ -150,7 +150,7 @@ planner = """
       "high_level_capabilities": [
         "we can search web to explore any detail",
         "we can code to create any thing",
-        "we can send email to share the details",
+        "we can send email via connected Composio apps (e.g. Gmail) if available",
         "we can find files from local",
         "we can ask/confirm with user for better clarity on any ambiguous request"
       ]
@@ -165,13 +165,12 @@ planner = """
         ]
       },
       "email_sender": {
-        "description": "Can send emails with or without attachments, Can read email and reply on the same email, and can save attachments locally ",
+        "description": "Send, read, search, and reply to emails via connected Gmail app",
         "abilities": [
-          "Only invoke this when user ask this explicitly",
-          "can reply to emails",
-          "can send out emails with attachments",
-          "can read emails from the inbox and also save the attachments",
-          "can search emails based on subject, sender, date, etc."
+          "Requires Gmail to be connected via Composio",
+          "Can send emails with or without attachments",
+          "Can read and search emails",
+          "Can reply to emails"
         ]
       },
       "file_finder": {
@@ -181,17 +180,12 @@ planner = """
         ]
       },
       "web_browser": {
-        "description": "capability to surf the internet",
+        "description": "Web search capability powered by Tavily via Composio",
         "abilities": [
-          "Can be used to get real time information about any subject",
-          "It can be user for any question or topic that needs a web searching capability"
-        ]
-      },
-      "image_generator": {
-        "description": "Generate any image/photos IT IS AN AI IMAGE GENERATOR",
-        "abilities": [
-          "It generates image from text as suggested by user",
-          "It cannot generate charts and plots"
+          "Requires Tavily to be connected via Composio",
+          "Can search the web for real time information about any subject",
+          "Returns relevant search results with summaries and links",
+          "Can answer factual questions using web data"
         ]
       },
       "manual_verification": {
@@ -407,7 +401,8 @@ We have the below mentioned capabilities. Based on the plan made by planner, ana
 </python_coder>
 
 <email_sender>
-- Can send emails with or without attachments
+- Send, read, search, and reply to emails via connected Gmail app
+- Requires Gmail to be connected via Composio
 </email_sender>
 
 <file_finder>
@@ -422,10 +417,11 @@ We have the below mentioned capabilities. Based on the plan made by planner, ana
 </dashboard_server>
 
 <web_browser>
-- capability to surf the internet, websites,
-- It can perform task actions on these websites like, searching, clicking, extracting
-- Can be used to get real time information about any subject from the internet or web
-- It can be any question or topic that needs a web searching capability
+- Web search capability powered by Tavily via Composio
+- Requires Tavily to be connected via Composio
+- Can search the web for real time information about any subject
+- Returns relevant search results with summaries, answers, and links
+- Use for any question or topic that needs current web data
 </web_browser>
 
 <image_generator>
@@ -649,10 +645,9 @@ MANDATORY EXECUTION PROCESS:
 EXECUTION REQUIREMENTS:
 - For web_browser: Perform actual web searches, extract real information
 - For python_coder: Execute complete data analysis, provide visualizations
-- For email_sender: Actually send emails, confirm delivery
 - For file_finder: Locate and return actual file paths
-- For dashboard_server: Start servers, provide access URLs
 - For image_generator: Generate and return actual images
+- For Composio tools (e.g. GMAIL_SEND_EMAIL): Execute the tool action with provided parameters
 
 FAILURE IS NOT AN OPTION:
 - If a function fails, retry with different parameters

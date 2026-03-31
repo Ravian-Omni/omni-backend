@@ -108,6 +108,11 @@ build_command = [
     "--include-package=tavily",
     "--include-package=together",
     "--include-package=dotenv",
+    "--include-package=aiosqlite",
+    "--include-package=anthropic",
+    "--include-package=src.database",
+    "--include-package=src.services",
+    "--include-package=src.chat",
     # OpenTelemetry packages
     "--include-package=opentelemetry",
     "--include-package=opentelemetry.context",
@@ -129,6 +134,7 @@ build_command = [
     # INCLUDE DATA DIRECTORIES
     # ========================================
     "--include-data-dir=templates=templates",
+    "--include-data-dir=configs=configs",
     # ========================================
     # CRITICAL MODULES
     # ========================================

@@ -65,7 +65,15 @@ class Settings:
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
         self.USER_NAME = os.getenv("user_name")
-        self.AG2AI_PYTHON_PATH = os.getenv("AG2AI_PYTHON_PATH", "python")
+        # Default to the .venv in project root if it exists, otherwise "python"
+        _default_venv = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            ".venv",
+        )
+        self.AG2AI_PYTHON_PATH = os.getenv(
+            "AG2AI_PYTHON_PATH",
+            _default_venv if os.path.isdir(_default_venv) else "python",
+        )
         self.CHROME_EXECUTABLE_PATH = os.getenv(
             "CHROME_EXECUTABLE_PATH",
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -83,6 +91,21 @@ class Settings:
         self.IMAGE_GENERATOR_COLLECTION = os.getenv(
             "IMAGE_GENERATOR_COLLECTION", "image_generator"
         )
+
+        # LLM Provider API Keys
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        self.TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+        self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+        self.BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
+        self.COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY")
+
+        # User Profile
+        self.USER_FIRST_NAME = os.getenv("USER_FIRST_NAME", "")
+        self.USER_LAST_NAME = os.getenv("USER_LAST_NAME", "")
+        self.USER_DOB = os.getenv("USER_DOB", "")
+        self.USER_GENDER = os.getenv("USER_GENDER", "")
+        self.USER_COUNTRY = os.getenv("USER_COUNTRY", "")
 
     def get_date_time_now(self) -> datetime:
         """Get the current date and time in UTC timezone.

@@ -7,15 +7,33 @@ settings-related business logic including:
 - Email credentials validation and management
 """
 
-import base64
-import json
 import re
 import time
 
 from fastapi import HTTPException, status
 
-from src.configs.datetime_utils import dt
 from src.configs.settings import settings
+
+
+# Provider name → settings attribute mapping
+_PROVIDER_ATTR_MAP = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "tavily": "TAVILY_API_KEY",
+    "brave": "BRAVE_API_KEY",
+    "composio": "COMPOSIO_API_KEY",
+}
+
+# User profile field → settings attribute mapping
+_PROFILE_ATTR_MAP = {
+    "first_name": "USER_FIRST_NAME",
+    "last_name": "USER_LAST_NAME",
+    "email": "USER_EMAIL",
+    "dob": "USER_DOB",
+    "gender": "USER_GENDER",
+    "country": "USER_COUNTRY",
+}
 
 
 class SettingsService:
@@ -40,164 +58,130 @@ class SettingsService:
 
     @staticmethod
     def validate_email(email: str) -> bool:
-        """Validate email address format.
-
-        Args:
-            email: Email address to validate.
-
-        Returns:
-            bool: True if email format is valid, False otherwise.
-        """
+        """Validate email address format."""
         return SettingsService.EMAIL_PATTERN.match(email) is not None
 
     @staticmethod
     def validate_app_password(app_password: str) -> bool:
-        """Validate Google App Password format.
-
-        Expected format: "xxxx xxxx xxxx xxxx" (16 alphanumeric + 3 spaces = 19 chars).
-
-        Args:
-            app_password: App password string to validate.
-
-        Returns:
-            bool: True if password format is valid, False otherwise.
-        """
+        """Validate Google App Password format."""
         if len(app_password) != 19:
             return False
         return SettingsService.APP_PASSWORD_PATTERN.match(app_password) is not None
 
     @staticmethod
-    def validate_jwt_token(token: str) -> dict:
-        """Validate JWT token format and decode payload.
-
-        Args:
-            token: JWT token string to validate.
-
-        Returns:
-            dict: Decoded JWT payload.
-
-        Raises:
-            HTTPException: If token format is invalid or expired.
-        """
-        parts = token.split(".")
-        if len(parts) != 3:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JWT token format - must have 3 parts separated by dots",
-            )
-
-        try:
-            payload_part = parts[1]
-            # Add padding for base64 decoding
-            payload_part += "=" * (4 - len(payload_part) % 4)
-
-            decoded_payload = base64.urlsafe_b64decode(payload_part.encode())
-            payload = json.loads(decoded_payload)
-
-            # Check token expiration
-            if "exp" in payload:
-                if dt.now_timestamp() > payload["exp"]:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="JWT token is expired",
-                    )
-
-            return payload
-
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JWT token - payload is not valid JSON",
-            )
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JWT token format",
-            )
-
-    @staticmethod
     def mask_token(token: str) -> str:
-        """Create a masked preview of a token.
-
-        Args:
-            token: Token string to mask.
-
-        Returns:
-            str: Masked token preview showing first 20 and last 10 characters.
-        """
-        if len(token) > 30:
-            return f"{token[:20]}...{token[-10:]}"
+        """Create a masked preview of a token/key."""
+        if len(token) > 12:
+            return f"{token[:6]}...{token[-4:]}"
         return "***"
 
+    # =========================================================================
+    # API KEY MANAGEMENT
+    # =========================================================================
+
     @staticmethod
-    def update_user_token(token: str) -> dict:
-        """Update USER_TOKEN setting with validation.
+    def update_api_keys(keys: dict) -> dict:
+        """Update one or more provider API keys.
 
         Args:
-            token: JWT token string to set.
+            keys: Dict of provider_name → api_key.
 
         Returns:
-            dict: Success response with token preview and expiration info.
-
-        Raises:
-            HTTPException: If token format is invalid or expired.
+            dict: Summary of updated keys.
         """
-        payload = SettingsService.validate_jwt_token(token)
+        from src.configs.llm_configs_manager import LLMConfigManager
 
-        success = settings.update_setting("USER_TOKEN", token)
-        if not success:
-            settings.USER_TOKEN = token
+        updated = []
+        for provider, api_key in keys.items():
+            attr = _PROVIDER_ATTR_MAP.get(provider)
+            if not attr:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown provider: {provider}. Valid: {list(_PROVIDER_ATTR_MAP.keys())}",
+                )
+            settings.update_setting(attr, api_key)
+            updated.append(provider)
+
+        # Rebuild LLM configs with new keys
+        LLMConfigManager.clear_cache()
 
         return {
-            "message": "USER_TOKEN updated successfully",
-            "token_preview": SettingsService.mask_token(token),
-            "expires_at": (
-                dt.timestamp_to_iso(payload.get("exp")) if payload.get("exp") else None
-            ),
+            "message": f"API keys updated for: {', '.join(updated)}",
+            "updated_providers": updated,
             "timestamp": time.time(),
         }
 
     @staticmethod
-    def get_user_token() -> dict:
-        """Get current USER_TOKEN status.
+    def get_api_keys_status() -> dict:
+        """Get status of all configured API keys (masked)."""
+        providers = {}
+        for provider, attr in _PROVIDER_ATTR_MAP.items():
+            key = getattr(settings, attr, None)
+            providers[provider] = {
+                "is_set": bool(key),
+                "key_preview": SettingsService.mask_token(key) if key else None,
+            }
+        return {"providers": providers, "timestamp": time.time()}
 
-        Returns:
-            dict: Token status with masked preview.
+    @staticmethod
+    def clear_api_key(provider: str) -> dict:
+        """Clear an API key for a specific provider."""
+        from src.configs.llm_configs_manager import LLMConfigManager
 
-        Raises:
-            HTTPException: If USER_TOKEN not set.
-        """
-        token = getattr(settings, "USER_TOKEN", None)
-
-        if not token:
+        attr = _PROVIDER_ATTR_MAP.get(provider)
+        if not attr:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="USER_TOKEN not set"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown provider: {provider}",
             )
 
+        settings.update_setting(attr, None)
+        LLMConfigManager.clear_cache()
+
         return {
-            "key": "USER_TOKEN",
-            "token_preview": SettingsService.mask_token(token),
-            "is_set": True,
+            "message": f"API key cleared for {provider}",
+            "timestamp": time.time(),
+        }
+
+    # =========================================================================
+    # USER PROFILE MANAGEMENT
+    # =========================================================================
+
+    @staticmethod
+    def update_user_profile(profile: dict) -> dict:
+        """Update user profile fields.
+
+        Args:
+            profile: Dict of field_name → value.
+
+        Returns:
+            dict: Updated profile summary.
+        """
+        updated = []
+        for field, value in profile.items():
+            attr = _PROFILE_ATTR_MAP.get(field)
+            if not attr:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown profile field: {field}",
+                )
+            settings.update_setting(attr, value)
+            updated.append(field)
+
+        return {
+            "message": f"Profile updated: {', '.join(updated)}",
+            "updated_fields": updated,
             "timestamp": time.time(),
         }
 
     @staticmethod
-    def clear_user_token() -> dict:
-        """Clear USER_TOKEN from settings.
-
-        Returns:
-            dict: Success message with timestamp.
-
-        Raises:
-            HTTPException: If USER_TOKEN not found.
-        """
-        if not hasattr(settings, "USER_TOKEN"):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="USER_TOKEN not found"
-            )
-
-        settings.USER_TOKEN = None
-        return {"message": "USER_TOKEN cleared successfully", "timestamp": time.time()}
+    def get_user_profile() -> dict:
+        """Get current user profile."""
+        profile = {}
+        for field, attr in _PROFILE_ATTR_MAP.items():
+            profile[field] = getattr(settings, attr, "") or ""
+        profile["timestamp"] = time.time()
+        return profile
 
     @staticmethod
     def update_email_credentials(email: str, email_password: str) -> dict:

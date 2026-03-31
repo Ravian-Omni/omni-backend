@@ -4,13 +4,10 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
-from browser_use import Agent
-from browser_use.agent.views import ActionResult, AgentStepInfo
-from browser_use.tools.registry.views import ActionModel
+from browser_use import ActionModel, ActionResult, Agent
+from browser_use.agent.views import AgentStepInfo
 from loguru import logger
 
-from src.configs.routes import RoutesConfig
-from src.utilities.api_client import api_client
 
 if TYPE_CHECKING:
     from src.managers.cancellation_token import CancellationToken
@@ -149,7 +146,7 @@ class StreamingAgent(Agent):
     async def _deduct_tokens(
         self, model: str, input_tokens: int, output_tokens: int, total_tokens: int
     ):
-        """Call API to deduct tokens from user's balance.
+        """Record token usage locally.
 
         Args:
             model: Model name used.
@@ -158,31 +155,23 @@ class StreamingAgent(Agent):
             total_tokens: Total tokens used.
         """
         try:
-            update_result = await api_client.post(
-                RoutesConfig.API_CREDIT_DEDUCT,
-                data={
-                    "model_name": model,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "metadata": {
-                        "chat_id": self._custom_session_id,
-                        "agent_name": "browser_automation",
-                    },
-                },
-            )
-            update_result = update_result.standard_response()
-            if not update_result.get("success"):
-                raise Exception(
-                    f"Failed to update chat history: {update_result.get('message', 'Unknown error')}"
-                )
+            from src.services.token_usage_service import TokenUsageService
 
-            result = update_result.get("data")
+            await TokenUsageService.record_usage(
+                chat_id=self._custom_session_id,
+                model_name=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                agent_name="browser_automation",
+                capability="browser",
+            )
 
             self.logger.info(
-                f"💰 Tokens deducted - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens} having status {result}"
+                f"Token usage recorded - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}"
             )
         except Exception as e:
-            self.logger.error(f"Failed to deduct tokens: {str(e)}")
+            self.logger.error(f"Failed to record token usage: {str(e)}")
 
     async def _deduct_tokens_from_step(self):
         """Deduct tokens using the built-in token cost service after each step.

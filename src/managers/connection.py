@@ -506,14 +506,14 @@ class WebSocketManager:
         await self._send_message(session_id, message)
 
     async def send_chat_message(
-        self, session_id: str, content: str, source: str = "assistant"
+        self, session_id: str, content, source: str = "assistant"
     ) -> None:
         """Send a formatted chat message to the client.
 
         Args:
             session_id: Session identifier.
-            content: Message content.
-            source: Message source (e.g., "assistant", "user", agent name).
+            content: Message content (str or dict).
+            source: Message source (e.g., "assistant", "user", "OMNI").
                 Defaults to "assistant".
         """
         await self._send_message(

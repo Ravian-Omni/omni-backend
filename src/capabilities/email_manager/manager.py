@@ -841,7 +841,7 @@ class EmailManager:
             or "default"
         )
         llm_content_writer_agent = LLMConfigManager.get_config(llm_config_name)
-        llm_content_writer_agent["max_tokens"] = 50000
+        llm_content_writer_agent["max_tokens"] = 16384
         return autogen.AssistantAgent(
             name="content_writer_agent",
             llm_config=llm_content_writer_agent,

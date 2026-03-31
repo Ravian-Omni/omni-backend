@@ -10,7 +10,6 @@ from autogen import UserProxyAgent
 from loguru import logger
 
 from src.capabilities.browser_manager.manager import BrowserManager
-from src.capabilities.email_manager.manager import EmailManager
 from src.capabilities.file_finder.manager import FileFinder
 from src.capabilities.image_generator.manager import ImageGenerator
 from src.capabilities.python_developer.manager import PythonDeveloper
@@ -35,8 +34,10 @@ from src.omni.response_format import (
     PlannerResponse,
     QuestionClassification,
 )
+from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
 from src.utilities.async_helpers import async_to_sync
-from src.utilities.storage import a_speak, update_chat_history
+from src.database import update_chat_history
+from src.utilities.storage import a_speak
 
 today_date = dt.now()
 
@@ -146,13 +147,17 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         return self._calculate_agent_usage_delta(sender, sender.name)
 
     async def _send_websocket_message(self, message_data: dict) -> None:
-        """Send message to WebSocket clients."""
+        """Send message to WebSocket clients.
+
+        Sends with source='OMNI' and content as the full message_data dict,
+        matching the format the frontend expects for omni mode messages.
+        """
         try:
             websocket_manager = await get_websocket_manager()
             await websocket_manager.send_chat_message(
                 session_id=self.chat_id,
                 content=message_data,
-                source=CapabilityType.OMNI.value.upper(),
+                source="OMNI",
             )
         except Exception as e:
             logger.error(f"WebSocket send failed for chat_id {self.chat_id}: {e}")
@@ -311,7 +316,7 @@ class Omni:
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.task_id = None
-        self.llm_config = LLMConfigManager.get_config("default")
+        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.groupchat_config = (
             GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
                 "omni"
@@ -328,9 +333,168 @@ class Omni:
             memory=self.memory,
         )
 
+        self._composio_initialized = False
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
+
+    @classmethod
+    async def create(
+        cls,
+        chat_id: str,
+        user_id: str = "default_user",
+        chat_dir: str = None,
+    ) -> "Omni":
+        """Async factory method that initializes Omni with Composio tools.
+
+        Args:
+            chat_id: Unique chat session identifier.
+            user_id: User identifier for Composio tool access.
+            chat_dir: Directory for chat files.
+
+        Returns:
+            Fully initialized Omni instance with Composio tools registered.
+        """
+        if chat_dir is None:
+            chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
+        instance = cls(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        await instance.initialize_composio_tools_async()
+        return instance
+
+    async def initialize_composio_tools_async(self) -> int:
+        """Initialize Composio tools and register them with agent_caller/agent_executor.
+
+        Returns:
+            Number of Composio tools registered.
+        """
+        if self._composio_initialized:
+            logger.debug(f"Omni {self.chat_id} Composio already initialized")
+            return 0
+
+        try:
+            composio_tool_manager = ComposioToolManager(
+                user_id=self.user_id,
+                chat_agent=self.agent_caller,
+                agent_executor=self.agent_executor,
+            )
+            tool_count = await composio_tool_manager.register_all_tools_async()
+            self._composio_initialized = True
+            logger.info(
+                f"Registered {tool_count} Composio tools for omni session {self.chat_id}"
+            )
+
+            # Update planner with connected/available app info
+            try:
+                apps_info = await composio_tool_manager.get_user_connected_apps_async(self.user_id)
+                connected_apps = apps_info.get("app_names", [])
+
+                app_capabilities = {
+                    "GMAIL": "email — send, read, search, reply, forward emails",
+                    "GOOGLECALENDAR": "calendar — create events, check schedule, manage calendar",
+                    "GOOGLESHEETS": "spreadsheets — create, read, update spreadsheets",
+                    "GOOGLEDRIVE": "file storage — upload, download, share files",
+                    "SLACK": "messaging — send messages, manage channels",
+                    "ZOOM": "meetings — schedule and manage video meetings",
+                    "DISCORD": "chat — send messages, manage servers",
+                    "OUTLOOK": "email — Microsoft email and calendar",
+                    "ONEDRIVE": "storage — Microsoft cloud file storage",
+                    "TEAMS": "collaboration — Microsoft Teams chat and meetings",
+                    "GITHUB": "code — manage repos, issues, pull requests",
+                    "GITLAB": "devops — code repos and CI/CD",
+                    "LINEAR": "issues — create and manage issues/projects",
+                    "JIRA": "projects — agile project and issue tracking",
+                    "SALESFORCE": "CRM — sales and customer management",
+                    "HUBSPOT": "CRM — marketing and sales automation",
+                    "PIPEDRIVE": "sales — pipeline and deal management",
+                    "ZOHOCRM": "CRM — customer relationship management",
+                    "NOTION": "docs — create/edit pages and databases",
+                    "AIRTABLE": "data — database and spreadsheet hybrid",
+                    "MONDAY": "work — project management and workflows",
+                    "CANVA": "design — visual content creation",
+                    "TWITTER": "social — post tweets, manage account",
+                    "LINKEDIN": "professional — networking and content",
+                    "FACEBOOK": "social — page management and posts",
+                    "WHATSAPP": "messaging — business communication",
+                    "INSTANTLY": "outreach — email outreach automation",
+                    "ZENDESK": "support — customer support and ticketing",
+                    "PAGERDUTY": "ops — incident management and on-call",
+                    "POSTHOG": "analytics — product analytics",
+                    "SNOWFLAKE": "data — cloud data warehouse",
+                    "RAMP": "finance — corporate card and expenses",
+                    "STRAVA": "fitness — activity tracking",
+                }
+                all_apps = list(app_capabilities.keys())
+                not_connected = [a for a in all_apps if a not in connected_apps]
+
+                app_context = "\n\n## App Integration Status\n"
+
+                if connected_apps:
+                    app_context += "### Connected Apps (tools available for agent_caller):\n"
+                    for app in connected_apps:
+                        desc = app_capabilities.get(app, f"{app.lower()} — connected")
+                        app_context += f"- **{app}**: {desc}\n"
+                    app_context += (
+                        "\nFor tasks involving connected apps, use the corresponding capability name "
+                        "(e.g., 'email_sender' for Gmail, 'google_calendar' for Google Calendar). "
+                        "Do NOT use 'python_coder' for tasks these apps can handle directly.\n"
+                    )
+
+                if not_connected:
+                    app_context += "\n### Available to Connect (NOT yet connected):\n"
+                    for app in not_connected:
+                        desc = app_capabilities.get(app, f"{app.lower()}")
+                        app_context += f"- **{app}**: {desc}\n"
+
+                app_context += (
+                    "\nCRITICAL RULE: If a user's task requires an app that is NOT connected, "
+                    "you MUST use 'manual_verification' capability to tell the user: "
+                    "\"This task requires [App Name] to be connected. Please connect it in Settings > Connections, "
+                    "then try again.\" Do NOT attempt the task with python_coder or any other workaround.\n"
+                )
+
+                self.planner.update_system_message(self.planner.system_message + app_context)
+                logger.info(f"Updated planner: {len(connected_apps)} connected, {len(not_connected)} available to connect")
+            except Exception as e:
+                logger.warning(f"Failed to update planner with app info: {e}")
+
+            return tool_count
+        except Exception as e:
+            logger.warning(f"Composio tool init failed (offline?): {e}")
+            return 0
+
+    async def connect_app(self, app_name: str) -> dict:
+        """Connect a Composio app and register its tools in the live session.
+
+        Args:
+            app_name: App name to connect (e.g., 'GMAIL', 'SLACK').
+
+        Returns:
+            Dict with success status, app name, and tool count.
+        """
+        logger.info(f"Connecting app {app_name} for omni session {self.chat_id}")
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.agent_caller,
+            agent_executor=self.agent_executor,
+        )
+        return await composio_tool_manager.connect_app_async(app_name)
+
+    async def disconnect_app(self, app_name: str) -> dict:
+        """Disconnect a Composio app and remove its tools from cache.
+
+        Args:
+            app_name: App name to disconnect (e.g., 'GMAIL', 'SLACK').
+
+        Returns:
+            Dict with success status and removed tool count.
+        """
+        logger.info(f"Disconnecting app {app_name} for omni session {self.chat_id}")
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.agent_caller,
+            agent_executor=self.agent_executor,
+        )
+        return await composio_tool_manager.disconnect_app_async(app_name)
 
     def set_input_function(self, input_function):
         """Set the custom input function for user interactions."""
@@ -478,24 +642,6 @@ class Omni:
             query, self.python_coder_config, call_id
         )
 
-    async def get_email_sender(
-        self, query: Annotated[str, "The complete user query"]
-    ) -> dict:
-        """Execute the email sender capability."""
-        call_id = self.find_call_id("email_sender", query)
-        self.email_sender_config = CapabilityConfig(
-            name=CapabilityType.EMAIL_MANAGER.value,
-            collection=settings.EMAIL_COLLECTION,
-            manager_class=EmailManager,
-            completion_agent_name="process_completion_agent",
-            task_id=self.task_id,
-            cancellation_token=self.cancellation_token,
-            manager_kwargs={"input_function": self.input_function},
-        )
-        return await self.capability_manager.execute_capability(
-            query, self.email_sender_config, call_id
-        )
-
     async def get_file_finder(self, query: Annotated[str, "The search query"]):
         """Execute the file finder capability."""
         call_id = self.find_call_id("file_finder", query)
@@ -526,11 +672,63 @@ class Omni:
                 str,
                 "The complete search query with all the details like subject relationship with the message",
             ]
-        ) -> Annotated[
-            str,
-            "The complete search query with all the details like subject relationship with the message",
-        ]:
-            return await self.get_web_browser(query)
+        ) -> Annotated[str, "The search results"]:
+            """Web search via Tavily API directly, falls back to BrowserManager."""
+            try:
+                import httpx
+
+                tavily_key = getattr(settings, "TAVILY_API_KEY", None)
+                if not tavily_key:
+                    return json.dumps({
+                        "error": "Tavily API key not set. Please set it via Settings.",
+                        "action_required": "set_api_key",
+                        "instructions": "Set tavily_api_key in PUT /settings/api/settings/api-keys",
+                    })
+
+                logger.info(f"Executing Tavily search for: {query[:100]}")
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        "https://api.tavily.com/search",
+                        json={
+                            "api_key": tavily_key,
+                            "query": query,
+                            "max_results": 5,
+                            "search_depth": "basic",
+                            "include_answer": True,
+                            "include_raw_content": False,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                # Format results cleanly
+                answer = data.get("answer", "")
+                results = []
+                for r in data.get("results", []):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "content": r.get("content", "")[:300],
+                    })
+
+                logger.info(f"Tavily search returned {len(results)} results")
+                return json.dumps({
+                    "status": "success",
+                    "query": query,
+                    "answer": answer,
+                    "results": results,
+                    "source": "tavily",
+                })
+            except Exception as e:
+                logger.error(f"Tavily search failed: {e}")
+                # Fall back to BrowserManager
+                try:
+                    return await self.get_web_browser(query)
+                except Exception as fallback_err:
+                    return json.dumps({
+                        "error": f"Web search failed: {str(e)}. Fallback also failed: {str(fallback_err)}",
+                        "query": query,
+                    })
 
         async def python_coder_wrapper(
             query: Annotated[
@@ -540,13 +738,90 @@ class Omni:
         ) -> Annotated[str, "The results"]:
             return await self.get_python_coder(query)
 
-        async def email_sender_wrapper(
-            query: Annotated[str, "The complete user query"]
-        ):
-            return await self.get_email_sender(query)
-
         async def file_finder_wrapper(query: Annotated[str, "The search query"]):
             return await self.get_file_finder(query)
+
+        async def email_sender_wrapper(
+            query: Annotated[str, "The complete user query for email operations"]
+        ):
+            """Email capability via Composio Gmail. Executes directly or returns connect prompt."""
+            try:
+                from composio import Composio
+
+                composio_api_key = LLMConfigManager.get_config("composio_api_key")
+                api_key = composio_api_key.get("config_list", [])[0].get("api_key")
+                if not api_key:
+                    return json.dumps({
+                        "error": "Composio API key not set. Please set it in Settings.",
+                        "action_required": "set_api_key",
+                    })
+
+                composio_client = Composio(api_key=api_key)
+
+                # Verify active Gmail connection exists
+                connections = composio_client.connected_accounts.list(user_ids=[self.user_id])
+                gmail_active = any(
+                    c.toolkit and c.toolkit.slug.lower() == "gmail" and c.status == "ACTIVE"
+                    for c in connections.items
+                )
+                if not gmail_active:
+                    return json.dumps({
+                        "error": "Gmail is not connected. Please connect Gmail via Composio first.",
+                        "action_required": "connect_app",
+                        "app": "GMAIL",
+                        "instructions": "Use the sidebar to connect Gmail, or send: {\"type\": \"connect_app\", \"app\": \"GMAIL\"}",
+                    })
+
+                # Use LLM to extract email fields from the query
+                import openai as _openai
+                oai_key = getattr(settings, "OPENAI_API_KEY", None)
+                if not oai_key:
+                    return json.dumps({"error": "OpenAI API key not set, needed to parse email query."})
+
+                oai = _openai.OpenAI(api_key=oai_key)
+                extraction = oai.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": "Extract email fields from the user query. Return JSON with: recipient_email, subject, body. If not specified, use reasonable defaults. Body should be plain text."},
+                        {"role": "user", "content": query},
+                    ],
+                )
+                email_fields = json.loads(extraction.choices[0].message.content)
+                logger.info(f"Extracted email fields: {email_fields}")
+
+                result = composio_client.tools.execute(
+                    slug="GMAIL_SEND_EMAIL",
+                    user_id=self.user_id,
+                    arguments={
+                        "recipient_email": email_fields.get("recipient_email", ""),
+                        "subject": email_fields.get("subject", "No Subject"),
+                        "body": email_fields.get("body", ""),
+                        "user_id": "me",
+                    },
+                    dangerously_skip_version_check=True,
+                )
+                logger.info(f"GMAIL_SEND_EMAIL result: {result}")
+                return json.dumps({
+                    "status": "sent",
+                    "message": f"Email sent to {email_fields.get('recipient_email', '')}",
+                    "subject": email_fields.get("subject", ""),
+                    "result": str(result)[:500],
+                })
+            except Exception as e:
+                logger.error(f"Email send via Composio failed: {e}")
+                return json.dumps({
+                    "error": f"Failed to send email: {str(e)}",
+                    "query": query,
+                })
+
+        autogen.agentchat.register_function(
+            email_sender_wrapper,
+            caller=self.agent_caller,
+            executor=self.agent_executor,
+            name="email_sender",
+            description=email_manager_description,
+        )
 
         autogen.agentchat.register_function(
             python_coder_wrapper,
@@ -555,15 +830,6 @@ class Omni:
             name="python_coder",
             # description="This tool will be used to write any sort of python code.",
             description=python_coder_description,
-        )
-
-        autogen.agentchat.register_function(
-            email_sender_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="email_sender",
-            # description="This tool will be used to send emails as per the user's request.",
-            description=email_manager_description,
         )
 
         autogen.agentchat.register_function(
@@ -582,15 +848,6 @@ class Omni:
             name="web_browser",
             # description="This tool will be used to search the web.",
             description=web_browser_description,
-        )
-
-        autogen.agentchat.register_function(
-            image_generator_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="image_generator",
-            # description="This tool will be used to generate images form textual input.",
-            description=image_generator_description,
         )
 
     def get_judge_question(self):
@@ -812,12 +1069,12 @@ class Omni:
             # how the sequential processes will get called
             if last_speaker.name == "agent_router":
                 return groupchat.agent_by_name("agent_caller")
-            if last_speaker.name == "agent_caller" and messages[-1].get(
-                "content", None
-            ):
-                return groupchat.agent_by_name("conversation_agent")
             if last_speaker.name == "agent_caller":
-                return groupchat.agent_by_name("agent_executor")
+                # If agent_caller made a tool call, route to executor
+                if messages[-1].get("tool_calls"):
+                    return groupchat.agent_by_name("agent_executor")
+                # If agent_caller gave a text response (no tool call), route to conversation
+                return groupchat.agent_by_name("conversation_agent")
             if last_speaker.name == "agent_executor":
                 return groupchat.agent_by_name("planner_agent")
             if last_speaker.name == "chat_manager":

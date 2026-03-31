@@ -10,15 +10,13 @@ chat-related business logic including:
 
 import os
 import uuid
-from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, status
 
 from src.configs.datetime_utils import dt
-from src.configs.routes import RoutesConfig
 from src.configs.settings import CapabilityType, settings
-from src.utilities.api_client import api_client
+from src.database import get_chat_repository
 from src.utilities.storage import ensure_path
 
 
@@ -150,20 +148,8 @@ class ChatService:
 
         chat_document = ChatService.build_chat_document(user_id, chat_id, chat_dir)
 
-        response = await api_client.post(
-            RoutesConfig.API_CREATE_OMNI_CHAT,
-            params={"capability": "omni"},
-            data=chat_document,
-        )
-        result = response.standard_response()
-
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create chat: {result.get('message', 'Unknown error')}",
-            )
-
-        return result.get("data")
+        repo = await get_chat_repository()
+        return await repo.create_chat(chat_document, "omni")
 
     @staticmethod
     async def create_capability_chat(
@@ -192,20 +178,8 @@ class ChatService:
             user_id, chat_id, chat_dir, is_capability=True
         )
 
-        response = await api_client.post(
-            RoutesConfig.API_CREATE_OMNI_CHAT,
-            params={"capability": collection_name},
-            data=chat_document,
-        )
-        result = response.standard_response()
-
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create capability chat: {result.get('message', 'Unknown error')}",
-            )
-
-        return result.get("data")
+        repo = await get_chat_repository()
+        return await repo.create_chat(chat_document, collection_name)
 
     @staticmethod
     async def create_chat_mode_session(
@@ -228,28 +202,17 @@ class ChatService:
 
         chat_document = ChatService.build_chat_document(user_id, chat_id, chat_dir)
 
-        response = await api_client.post(
-            RoutesConfig.API_CREATE_CHAT,
-            params={"capability": "chats"},
-            data=chat_document,
-        )
-        result = response.standard_response()
-
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create chat: {result.get('message', 'Unknown error')}",
-            )
-
-        return result.get("data")
+        repo = await get_chat_repository()
+        return await repo.create_chat(chat_document, "chats")
 
     @staticmethod
-    async def get_omni_chat_history(user_id: str, chat_id: str) -> dict:
-        """Get omni chat history for a specific user and chat.
+    async def get_omni_chat_history(user_id: str, chat_id: str, collection: str = "omni") -> dict:
+        """Get chat history for a specific user and chat.
 
         Args:
             user_id: User identifier.
             chat_id: Chat session identifier.
+            collection: Collection/capability name (omni, chats, etc.).
 
         Returns:
             dict: Simplified chat history with chat_id, chat_dir, and raw_messages.
@@ -257,28 +220,20 @@ class ChatService:
         Raises:
             HTTPException: If chat not found or retrieval fails.
         """
-        query = {"user_id": user_id, "chat_id": chat_id}
+        repo = await get_chat_repository()
+        document = await repo.get_chat(user_id, chat_id, collection)
 
-        response = await api_client.post(
-            RoutesConfig.API_OMNI_CHAT_HISTORY,
-            params={"capability": "omni"},
-            data=query,
-        )
-        result = response.standard_response()
-
-        if not result.get("success"):
+        if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}",
             )
 
-        document = result.get("data")
-        serialized_doc = ChatService.serialize_document(document)
-        raw_messages = ChatService.transform_raw_messages(serialized_doc)
+        raw_messages = ChatService.transform_raw_messages(document)
 
         return {
-            "chat_id": serialized_doc.get("chat_id", ""),
-            "chat_dir": serialized_doc.get("chat_dir", ""),
+            "chat_id": document.get("chat_id", ""),
+            "chat_dir": document.get("chat_dir", ""),
             "raw_messages": raw_messages,
         }
 
@@ -300,25 +255,23 @@ class ChatService:
         Raises:
             HTTPException: If chat not found or retrieval fails.
         """
-        filter_data = {
-            "task_id": task_id,
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "capability": capability,
-        }
+        capability_type = CapabilityType.from_string(capability)
+        collection = capability_type.collection if capability_type else "omni"
 
-        response = await api_client.post(
-            RoutesConfig.API_OMNI_TASK_HISTORY, data=filter_data
-        )
-        result = response.standard_response()
+        repo = await get_chat_repository()
+        document = await repo.get_chat_by_task(task_id, user_id, chat_id, collection)
 
-        if not result.get("success"):
+        if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chat not found for chat_id: {chat_id} and task_id: {task_id}",
             )
 
-        return result
+        return {
+            "success": True,
+            "message": "Chat history retrieved",
+            "data": document,
+        }
 
     @staticmethod
     async def get_capability_chat_history(
@@ -346,29 +299,24 @@ class ChatService:
 
         capability = CapabilityType._value2member_map_.get(capability_name)
         collection_name = capability.collection
-        query = {"user_id": user_id, "chat_id": chat_id, "call_id": call_id}
 
-        response = await api_client.post(
-            RoutesConfig.API_OMNI_CHAT_HISTORY,
-            params={"capability": collection_name},
-            data=query,
+        repo = await get_chat_repository()
+        document = await repo.get_chat(
+            user_id, chat_id, collection_name, call_id=call_id
         )
-        result = response.standard_response()
 
-        if not result.get("success"):
+        if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}",
             )
 
-        document = result.get("data")
-        serialized_doc = ChatService.serialize_document(document)
-        raw_messages = ChatService.transform_raw_messages(serialized_doc)
+        raw_messages = ChatService.transform_raw_messages(document)
 
         return {
             "call_id": call_id,
             "capability_name": capability_name,
-            "chat_id": serialized_doc.get("chat_id", ""),
+            "chat_id": document.get("chat_id", ""),
             "raw_messages": raw_messages,
         }
 
@@ -386,28 +334,20 @@ class ChatService:
         Raises:
             HTTPException: If chat not found or retrieval fails.
         """
-        query = {"user_id": user_id, "chat_id": chat_id}
+        repo = await get_chat_repository()
+        document = await repo.get_chat(user_id, chat_id, "chats")
 
-        response = await api_client.post(
-            RoutesConfig.API_CHAT_HISTORY,
-            params={"capability": "chats"},
-            data=query,
-        )
-        result = response.standard_response()
-
-        if not result.get("success"):
+        if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chat not found for user_id: {user_id} and chat_id: {chat_id}",
             )
 
-        document = result.get("data")
-        serialized_doc = ChatService.serialize_document(document)
-        raw_messages = ChatService.transform_raw_messages(serialized_doc)
+        raw_messages = ChatService.transform_raw_messages(document)
 
         return {
-            "chat_id": serialized_doc.get("chat_id", ""),
-            "chat_dir": serialized_doc.get("chat_dir", ""),
+            "chat_id": document.get("chat_id", ""),
+            "chat_dir": document.get("chat_dir", ""),
             "raw_messages": raw_messages,
-            "feedback": serialized_doc.get("feedback", {}),
+            "feedback": document.get("feedback", {}),
         }

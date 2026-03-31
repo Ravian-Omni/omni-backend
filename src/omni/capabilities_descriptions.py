@@ -122,56 +122,23 @@ Advanced file search and discovery system for macOS that locates files and folde
 """
 
 web_browser_description = """
-Advanced web browsing and automation system with dual capabilities: API-based information retrieval for fast data access and automated browser surfing for complex web interactions. Intelligently selects the appropriate method based on task requirements. Has access to stored credentials for authenticated websites and can execute complex web workflows including social media posting, form submissions, and real-time browsing.
+Web search capability powered by Tavily via Composio. Searches the web for real-time information and returns relevant results with summaries, direct answers, and links.
+
+Requires Tavily to be connected via Composio. If not connected, returns instructions to connect.
 
 **Parameters:**
-- task (required): Complete description of the web-based action to perform. Include hints about method preference: use "search" or "quick lookup" for API-based retrieval, or "browse", "navigate", "interact", "post", "login" for automated browser surfing
-
-**Dual Capability System:**
-
-**API-Based Method** (Fast, efficient for information retrieval):
-- Quick searches and data lookups
-- Real-time information gathering
-- News and current events
-- Stock prices, weather, basic facts
-- Public information without authentication
-
-**Automated Browser Method** (Full interaction capabilities):
-- Social media posting and management
-- Authenticated website access
-- Form submissions and applications
-- Complex website interactions
-- Multi-step workflows
-- Visual content verification
-- Dynamic content loading
+- query (required): The search query. Be specific and descriptive for better results.
 
 **Use this function when users need:**
-- **API Method**: Search for current information, news, stock prices, weather, quick facts, research topics
-- **Browser Method**: Post to social media, login to accounts, submit forms, interact with dynamic websites, perform authenticated actions
-- Extract information from specific websites or web pages
-- Monitor websites for changes or updates
-- Gather competitive intelligence or market research
-- Perform online shopping or price comparisons
-- Download files or resources from websites
-- Verify information across multiple web sources
-- Collect contact information or business details
-- Track trends, mentions, or online discussions
+- Current information (news, stock prices, weather, events)
+- Factual answers to questions
+- Research on any topic
+- Competitive intelligence or market data
+- Technical documentation or tutorials
+- Any information that requires up-to-date web data
 
-**Method Selection Guide:**
-- **Use API hints**: "search for", "find information about", "get current", "lookup", "check latest"
-- **Use Browser hints**: "post to", "login and", "navigate to", "interact with", "submit form", "browse through"
-
-**Output includes:**
-- Retrieved information and data from web sources
-- Confirmation of posted content with links and timestamps
-- Extracted data in structured format
-- Screenshots or visual confirmation of browser actions
-- Status updates on completed web interactions
-- Error handling for failed operations or inaccessible sites
-- Method used (API or Browser) and execution details
-
-**Examples of requests to handle:**
-"Search for the latest news about artificial intelligence developments" (API method), "Post this announcement to our company LinkedIn page" (Browser method), "Find the current stock price for Apple Inc" (API method), "Login to our analytics dashboard and download the monthly report" (Browser method), "Get the weather forecast for New York next week" (API method), "Navigate to Amazon and add this product to cart" (Browser method), "Quick lookup of competitor pricing for cloud storage" (API method), "Browse through our social media mentions and respond to comments" (Browser method), "Search for job openings at Google" (API method), "Submit this application form on the university website" (Browser method)
+**Examples:**
+"What is the current stock price of Meta?", "Latest news about artificial intelligence", "Weather forecast for New York", "Best Python frameworks for web development 2026"
 
 **Output characteristics:**
 - Method-optimized results (fast API responses or detailed browser interactions)

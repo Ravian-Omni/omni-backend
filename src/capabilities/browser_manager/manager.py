@@ -14,11 +14,12 @@ import aiohttp
 # AutoGen imports
 import autogen
 import certifi
-import requests
 from autogen import AssistantAgent, UserProxyAgent
 
 # Browser-use imports
-from browser_use import ActionResult, ChatAzureOpenAI, ChatOpenAI, Controller
+from browser_use import ActionResult, Controller
+from langchain_openai import AzureChatOpenAI as ChatAzureOpenAI
+from langchain_openai import ChatOpenAI
 from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 from loguru import logger
@@ -250,24 +251,20 @@ class BrowserManager:
             )
 
     def _get_user_country(self) -> str:
-        """Get user's country from IP address."""
-        try:
-            response = requests.get(RoutesConfig.IPINFO_URL, timeout=5)
-            data = response.json()
-            country_code = data.get("country")
-
-            country = next(
-                (
-                    c
-                    for c in country_codes
-                    if c["alpha_2"] == country_code or c["alpha_3"] == country_code
-                ),
-                None,
-            )
-            return country["name"] if country else f"Unknown ({country_code})"
-        except Exception as e:
-            print(f"Failed to get country: {e}")
+        """Get user's country from local settings."""
+        country_code = settings.USER_COUNTRY
+        if not country_code:
             return "Unknown"
+
+        country = next(
+            (
+                c
+                for c in country_codes
+                if c["alpha_2"] == country_code or c["alpha_3"] == country_code
+            ),
+            None,
+        )
+        return country["name"] if country else f"Unknown ({country_code})"
 
     async def _initialize_browser_session(self) -> BrowserSession:
         """Initialize browser session with optimized configuration."""
@@ -1036,7 +1033,12 @@ class BrowserManager:
             or "default"
         )
         llm_browser_reader = LLMConfigManager.get_config(llm_config_name)
-        llm_browser_reader["config_list"][0]["tool_choice"] = {"type": "any"}
+        # "required" works for OpenAI; Anthropic uses {"type": "any"}
+        provider = llm_browser_reader["config_list"][0].get("model", "")
+        if "claude" in provider:
+            llm_browser_reader["config_list"][0]["tool_choice"] = {"type": "any"}
+        else:
+            llm_browser_reader["config_list"][0]["tool_choice"] = "required"
         return AssistantAgent(
             name="browser_reader",
             llm_config=llm_browser_reader,

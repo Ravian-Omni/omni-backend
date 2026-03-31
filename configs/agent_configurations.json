@@ -1,0 +1,95 @@
+{
+    "omni": {
+        "groupchat_settings": {"max_round": 500},
+        "agents": {
+            "judge_question": {"llm_config": "gpt_4_1_mini"},
+            "conversation_agent": {"llm_config": "gpt_4_1_mini"},
+            "planner_agent": {"llm_config": "gpt_4_1_mini"},
+            "agent_aligner": {"llm_config": "gpt_4_1_mini"},
+            "agent_router": {"llm_config": "gpt_4_1_mini"},
+            "agent_caller": {"llm_config": "gpt_4_1_mini"},
+            "manual_verification": {"llm_config": "gpt_4_1_mini"},
+            "process_completion_agent": {"llm_config": "gpt_4_1_mini"}
+        }
+    },
+    "web_browser": {
+        "groupchat_settings": {"max_round": 5},
+        "agents": {
+            "browser_planner": {
+                "llm_config": "gpt_4_1_mini",
+                "system_message": "You are a planning agent that creates execution strategies. Work directory: {chart_location}",
+                "description": "Plans the execution strategy for tasks",
+                "max_consecutive_auto_reply": 5
+            },
+            "browser_reader": {
+                "llm_config": "gpt_4_1_mini",
+                "system_message": "You are a code writer that implements solutions based on plans.",
+                "description": "Writes code based on planning requirements"
+            },
+            "process_completion": {
+                "llm_config": "gpt_4_1_mini",
+                "system_message": "You are a debugging specialist. Fix code issues and errors. Work directory: {chart_location}",
+                "max_consecutive_auto_reply": 5
+            }
+        }
+    },
+    "email_sender": {
+        "groupchat_settings": {"max_round": 5},
+        "agents": {
+            "planner_agent": {"llm_config": "gpt_4_1_mini"},
+            "intent_classifier_agent": {"llm_config": "gpt_4_1_mini"},
+            "content_writer_agent": {"llm_config": "gpt_4_1_mini"},
+            "email_caller_agent": {"llm_config": "gpt_4_1_mini"},
+            "process_completion_agent": {"llm_config": "gpt_4_1_mini"}
+        }
+    },
+    "file_finder": {
+        "groupchat_settings": {"max_round": 5},
+        "agents": {
+            "file_finder_planner": {"llm_config": "gpt_4_1_mini"},
+            "file_finder": {"llm_config": "gpt_4_1_mini"},
+            "prob_status_checker": {"llm_config": "gpt_4_1_mini"},
+            "process_completion": {"llm_config": "gpt_4_1_mini"}
+        }
+    },
+    "image_generator": {
+        "groupchat_settings": {"max_round": 5},
+        "agents": {
+            "user_intent": {"llm_config": "gpt_4_1_mini"},
+            "image_prompt_generator": {"llm_config": "gpt_4_1_mini"},
+            "image_generator_caller": {"llm_config": "gpt_4_1_mini"},
+            "process_completion": {"llm_config": "gpt_4_1_mini"}
+        },
+        "custom_properties": {
+            "image_api": {
+                "llm_config": "image_together_llm",
+                "configuration": {"width": 768, "height": 432, "steps": 30}
+            }
+        }
+    },
+    "python_coder": {
+        "groupchat_settings": {"max_round": 5},
+        "agents": {
+            "planner_agent": {"llm_config": "gpt_4_1_mini"},
+            "code_writer_agent": {"llm_config": "gpt_4_1_mini"},
+            "code_debugger_agent": {"llm_config": "gpt_4_1_mini"},
+            "problem_status_checker_agent": {"llm_config": "gpt_4_1_mini"},
+            "process_completion_agent": {"llm_config": "gpt_4_1_mini"}
+        }
+    },
+    "chat": {
+        "groupchat_settings": {"max_round": 500},
+        "agents": {
+            "chat_agent": {"llm_config": "default"},
+            "process_completion_agent": {"llm_config": "default"}
+        },
+        "function_description": {
+            "web_api_search": {
+                "description": "Search the web using Tavily Search API to find current information, news, articles, and other content. Use this when you need real-time information, stock prices, current events, or any data that requires an internet search."
+            },
+            "file_search": {
+                "description": "Search for files on the user's local computer by filename or pattern. Use this when the user asks to find, locate, or search for files on their system. Supports wildcards like *.pdf or partial names."
+            }
+        }
+    }
+}

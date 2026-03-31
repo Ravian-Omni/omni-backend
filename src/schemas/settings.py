@@ -21,47 +21,44 @@ class SettingsResponse(BaseModel):
     timestamp: float = Field(..., description="Unix timestamp of response")
 
 
-class TokenResponse(BaseModel):
-    """Response model for token status.
+class APIKeysUpdateRequest(BaseModel):
+    """Request model for updating LLM provider API keys."""
 
-    Attributes:
-        key: Setting key name (USER_TOKEN).
-        token_preview: Masked preview of the token.
-        is_set: Whether the token is configured.
-        timestamp: Unix timestamp of the response.
-    """
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    together_api_key: str | None = None
+    tavily_api_key: str | None = None
+    brave_api_key: str | None = None
+    composio_api_key: str | None = None
 
-    key: str = Field(default="USER_TOKEN", description="Setting key name")
-    token_preview: str = Field(..., description="Masked token preview")
-    is_set: bool = Field(..., description="Whether token is configured")
+
+class APIKeysStatusResponse(BaseModel):
+    """Response model for API keys status."""
+
+    providers: dict = Field(..., description="Provider status with masked key previews")
     timestamp: float = Field(..., description="Unix timestamp of response")
 
 
-class TokenUpdateResponse(BaseModel):
-    """Response model for successful token update.
+class UserProfileUpdateRequest(BaseModel):
+    """Request model for updating user profile."""
 
-    Attributes:
-        message: Success message.
-        token_preview: Masked preview of the updated token.
-        expires_at: ISO timestamp of token expiration (if available).
-        timestamp: Unix timestamp of the response.
-    """
-
-    message: str = Field(..., description="Success message")
-    token_preview: str = Field(..., description="Masked token preview")
-    expires_at: str | None = Field(default=None, description="Token expiration time")
-    timestamp: float = Field(..., description="Unix timestamp of response")
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    dob: str | None = None
+    gender: str | None = None
+    country: str | None = None
 
 
-class TokenClearResponse(BaseModel):
-    """Response model for token clear operation.
+class UserProfileResponse(BaseModel):
+    """Response model for user profile."""
 
-    Attributes:
-        message: Success message.
-        timestamp: Unix timestamp of the response.
-    """
-
-    message: str = Field(..., description="Success message")
+    first_name: str = ""
+    last_name: str = ""
+    email: str = ""
+    dob: str = ""
+    gender: str = ""
+    country: str = ""
     timestamp: float = Field(..., description="Unix timestamp of response")
 
 

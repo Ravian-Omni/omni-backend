@@ -1,55 +1,27 @@
 """Centralized routes configuration.
 
-This module provides centralized management of all API routes and endpoints
-used across the application.
+This module provides centralized management of external API routes and endpoints
+used across the application. Cloud backend routes have been removed as the app
+now uses local SQLite persistence.
 """
 
 import os
 
 
 class RoutesConfig:
-    """Centralized configuration for all API routes and endpoints.
-
-    All configuration values are class attributes and can be accessed directly
-    without instantiation: RoutesConfig.BACKEND_URL
-    """
+    """Centralized configuration for external API routes and endpoints."""
 
     # External API Services
     BRAVE_SEARCH_BASE_URL = os.getenv(
         "BRAVE_SEARCH_BASE_URL", "https://api.search.brave.com/res/v1"
     )
-    IPINFO_URL = os.getenv("IPINFO_URL", "https://ipinfo.io/json")
 
-    # Backend URLs
+    # Backend URL (kept for Composio and any remaining external calls)
     BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
     BACKEND_URL_FALLBACK = os.getenv("BACKEND_URL_FALLBACK", "http://localhost:8001")
 
-    # OMNI
-    API_CREATE_OMNI_CHAT = "/chats/new"
-    API_OMNI_CHAT_HISTORY = "/chats/history"
-    API_OMNI_TASK_HISTORY = "/chats/history/task_id"
-    API_UPDATE_OMNI_CHAT = "/chats/chat_update"
-
-    # USER DETAILS
-    API_USER_DETAILS = "/auth/user"
-
-    # CHAT MODE
-    API_CREATE_CHAT = "/chats/new"
-    API_UPDATE_CHAT = "/chats/chat_update"
-    API_CHAT_HISTORY = "/chats/history"
+    # Composio (optional, works when online)
     API_CHAT_NO_AUTH_APPS = "/v1/composio/api/get-noAuth-apps"
-
-    # Credits
-    API_CREDIT_DEDUCT = "/v1/wallet/credits-update"
-
-    # API Keys
-    API_LLM_KEYS = "/chats/api_keys"
-
-    # AGENT Configurations
-    API_AGENT_CONFIGURATIONS = "/chats/configurations"
-
-    # Server Check
-    API_SERVER_CHECK = "/"
 
     @classmethod
     def get_brave_search_url(cls, endpoint: str = "/web/search") -> str:
