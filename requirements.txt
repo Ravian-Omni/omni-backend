@@ -1,21 +1,25 @@
 aiofiles==24.1.0
+aiosqlite>=0.20.0
 anthropic>=0.39.0
+claude-agent-sdk>=0.2.157  # Agent runtime for personas (bundles the Claude Code CLI)
 autogen==0.9.7
+browser-use>=0.11.5  # still imported by browser_manager at startup
 certifi
+composio-autogen==0.11.3
 GitPython>=3.1.40
 cryptography==45.0.5
 fastapi==0.116.1
 httpx==0.28.1
+Jinja2>=3.1.0  # FastAPI Jinja2Templates (HTML pages served by src/main.py)
 langchain==0.3.25
-langchain-openai>=0.3.30  # supports openai 2.x
+langchain-openai>=0.3.30  # supports openai 2.x; 1.x needs langchain-core 1.x (incompatible with langchain 0.3.25)
 langchain-anthropic>=0.3.0  # For Claude integration
 langchain-core>=0.3.0
 langgraph>=0.2.0
 langgraph-checkpoint>=2.0.0  # For conversation state persistence
 loguru==0.7.3
 nest_asyncio==1.6.0
-openai==2.3.0
-playwright==1.52.0
+openai>=2.3.0
 Pillow==11.3.0
 pydantic==2.11.7
 python-dotenv==1.1.1
@@ -26,4 +30,11 @@ tavily_python==0.7.8
 together==1.5.21
 websockets==15.0.1
 uvicorn==0.34.3
-# git+https://github.com/Suryaaa-Rathore/ravian-browser-use.git@ravian_0.3.1
+
+# ML Engineer persona runtime (analytics and model training in the project venv)
+pandas>=2.2
+matplotlib>=3.9
+scikit-learn>=1.5
+statsmodels>=0.14
+openpyxl>=3.1
+pyarrow>=17

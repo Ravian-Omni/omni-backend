@@ -421,6 +421,7 @@ class WebSocketManager:
         async def input_handler(
             prompt: str = "",
             input_type: InputRequestType = "text_input",
+            source: str = "system",
         ) -> str:
             """Handle input request from chat session.
 
@@ -447,7 +448,7 @@ class WebSocketManager:
                         "type": "input_request",
                         "input_type": input_type,
                         "prompt": prompt,
-                        "data": {"source": "system", "content": prompt},
+                        "data": {"source": source, "content": prompt, "timestamp": dt.now_iso()},
                         "timestamp": dt.now_iso(),
                     },
                 )
@@ -496,6 +497,56 @@ class WebSocketManager:
 
         return input_handler
 
+    async def request_input(
+        self, session_id: str, message: dict[str, Any], timeout: int = 600
+    ) -> Any:
+        """Send a message that asks the user something, then wait for the reply.
+
+        Generalises ``_create_input_func``: the caller supplies the whole
+        ``input_request`` message (a decision card, a question with options,
+        a plain prompt) and gets back whatever the client sent as the
+        ``response`` field of its ``input_response``, which may be a string
+        or a dict.
+
+        Args:
+            session_id: Session identifier.
+            message: Message to send; ``type`` defaults to ``input_request``.
+            timeout: Seconds to wait before the session is stopped.
+
+        Returns:
+            The client's response payload.
+
+        Raises:
+            TimeoutError: If no response arrived within ``timeout``.
+            ValueError: If the session has no input queue or was closed.
+        """
+        message = {"type": "input_request", "timestamp": dt.now_iso(), **message}
+        await self._send_message(session_id, message)
+
+        if session_id not in self._input_responses:
+            raise ValueError(f"No input queue for session {session_id}")
+
+        async def poll_for_response():
+            while True:
+                if (
+                    session_id in self._closed_connections
+                    or self._stop_flags.get(session_id, False)
+                ):
+                    raise ValueError("Session was closed or stopped")
+                try:
+                    return await asyncio.wait_for(
+                        self._input_responses[session_id].get(), timeout=min(timeout, 5)
+                    )
+                except TimeoutError:
+                    continue
+
+        try:
+            return await asyncio.wait_for(poll_for_response(), timeout=timeout)
+        except TimeoutError:
+            logger.warning(f"Input response timeout for session {session_id}")
+            await self.stop_session(session_id, "Input timeout")
+            raise
+
     async def send_message(self, session_id: str, message: dict[str, Any]) -> None:
         """Send a message to the client.
 
@@ -506,14 +557,14 @@ class WebSocketManager:
         await self._send_message(session_id, message)
 
     async def send_chat_message(
-        self, session_id: str, content: str, source: str = "assistant"
+        self, session_id: str, content, source: str = "assistant"
     ) -> None:
         """Send a formatted chat message to the client.
 
         Args:
             session_id: Session identifier.
-            content: Message content.
-            source: Message source (e.g., "assistant", "user", agent name).
+            content: Message content (str or dict).
+            source: Message source (e.g., "assistant", "user", "OMNI").
                 Defaults to "assistant".
         """
         await self._send_message(
@@ -714,10 +765,7 @@ class WebSocketManager:
                 )
 
     async def close_browser_session(self, browser_session) -> bool:
-        """Attempt to close browser gracefully using the session's built-in methods.
-
-        Tries multiple cleanup approaches including event bus cleanup,
-        standard close methods, and browser instance closure.
+        """Close browser session using CDP stop() method.
 
         Args:
             browser_session: Browser session instance to close.
@@ -729,37 +777,12 @@ class WebSocketManager:
             return True
 
         try:
-            if hasattr(browser_session, "agent"):
-                agent = browser_session.agent
-                if hasattr(agent, "event_bus"):
-                    # Try to stop or clean up the event bus
-                    if hasattr(agent.event_bus, "stop"):
-                        await agent.event_bus.stop()
-                    elif hasattr(agent.event_bus, "close"):
-                        await agent.event_bus.close()
-                    elif hasattr(agent.event_bus, "cleanup"):
-                        await agent.event_bus.cleanup()
-
-            # Also check for global EventBus registry cleanup
-            if hasattr(browser_session, "_cleanup_event_system"):
-                await browser_session._cleanup_event_system()
-
-            # Try the standard close method first
-            if hasattr(browser_session, "close"):
-                await browser_session.close()
-
-            # Then try kill method
-            if hasattr(browser_session, "kill"):
-                await browser_session.kill()
-
-            # Try to close the browser if it has a browser attribute
-            if hasattr(browser_session, "browser") and browser_session.browser:
-                await browser_session.browser.close()
-            browser_session = None
+            if hasattr(browser_session, "stop"):
+                await browser_session.stop()
             return True
 
         except Exception as e:
-            print(f"Error during graceful browser closure: {e}")
+            logger.warning(f"Error during browser closure: {e}")
             return False
 
     async def terminal_input(self, session_id: str, process_id: str, input_text: str):

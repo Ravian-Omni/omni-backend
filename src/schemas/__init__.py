@@ -12,11 +12,13 @@ from src.schemas.chat import (
     SimplifiedChatHistory,
 )
 from src.schemas.settings import (
+    APIKeysStatusResponse,
+    APIKeysUpdateRequest,
     EmailCredentialsResponse,
     EmailUpdateRequest,
     SettingsResponse,
-    TokenResponse,
-    TokenUpdateResponse,
+    UserProfileResponse,
+    UserProfileUpdateRequest,
 )
 
 __all__ = [
@@ -29,8 +31,10 @@ __all__ = [
     "EnhancedChatHistory",
     # Settings schemas
     "SettingsResponse",
-    "TokenResponse",
-    "TokenUpdateResponse",
+    "APIKeysUpdateRequest",
+    "APIKeysStatusResponse",
+    "UserProfileUpdateRequest",
+    "UserProfileResponse",
     "EmailUpdateRequest",
     "EmailCredentialsResponse",
 ]

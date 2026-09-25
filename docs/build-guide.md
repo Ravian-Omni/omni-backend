@@ -107,8 +107,8 @@ After a successful build, you'll find:
 
 ```
 dist/
-├── ravian              # Main executable (or ravian.exe on Windows)
-├── ravian.dist/        # Application files and dependencies
+├── daxagent              # Main executable (or daxagent.exe on Windows)
+├── daxagent.dist/        # Application files and dependencies
 ├── .env               # Environment configuration (if copied)
 └── templates/         # HTML templates (if included)
 ```
@@ -222,10 +222,10 @@ python main.py
 ### After Building
 ```bash
 # macOS/Linux
-./dist/ravian
+./dist/daxagent
 
 # Windows
-dist\ravian.exe
+dist\daxagent.exe
 ```
 
 ## Environment Variables
@@ -288,8 +288,8 @@ find . -type f -name "*.pyc" -delete
 
 The built application can be distributed as:
 
-1. **Single directory**: `dist/ravian.dist/` with all dependencies
-2. **Standalone executable**: `dist/ravian` (main executable)
+1. **Single directory**: `dist/daxagent.dist/` with all dependencies
+2. **Standalone executable**: `dist/daxagent` (main executable)
 3. **Compressed archive**: Zip the entire `dist/` directory
 
 Remember to include:

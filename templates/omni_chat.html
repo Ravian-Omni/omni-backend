@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omni Chat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #f7f7f8;
+            --surface: #ffffff;
+            --surface-alt: #f0f0f1;
+            --border: #e5e5e6;
+            --text: #1a1a1a;
+            --text-secondary: #6b6b6b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --user-bg: #2563eb;
+            --user-text: #ffffff;
+            --agent-bg: #f0f0f1;
+            --agent-text: #1a1a1a;
+            --system-bg: #fef3c7;
+            --system-text: #92400e;
+            --error-bg: #fee2e2;
+            --error-text: #991b1b;
+            --success-bg: #d1fae5;
+            --success-text: #065f46;
+            --input-bg: #ffffff;
+            --shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .dark {
+            --bg: #1a1a2e;
+            --surface: #16213e;
+            --surface-alt: #1a1a2e;
+            --border: #2a2a4a;
+            --text: #e0e0e0;
+            --text-secondary: #9ca3af;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --user-bg: #3b82f6;
+            --user-text: #ffffff;
+            --agent-bg: #1e293b;
+            --agent-text: #e0e0e0;
+            --system-bg: #422006;
+            --system-text: #fcd34d;
+            --error-bg: #450a0a;
+            --error-text: #fca5a5;
+            --success-bg: #052e16;
+            --success-text: #6ee7b7;
+            --input-bg: #1e293b;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        .header-title { font-size: 18px; font-weight: 700; }
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;
+        }
+        .status-badge.disconnected { background: var(--error-bg); color: var(--error-text); }
+        .status-badge.connecting { background: var(--system-bg); color: var(--system-text); }
+        .status-badge.connected { background: var(--success-bg); color: var(--success-text); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-badge.disconnected .status-dot { background: #ef4444; }
+        .status-badge.connecting .status-dot { background: #f59e0b; animation: pulse 1s infinite; }
+        .status-badge.connected .status-dot { background: #10b981; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .header-actions { display: flex; gap: 8px; align-items: center; }
+        .btn {
+            padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+            border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+            background: var(--surface); color: var(--text);
+        }
+        .btn:hover { background: var(--surface-alt); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-danger { background: #ef4444; color: white; border-color: #ef4444; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-icon { padding: 6px 8px; font-size: 16px; border: none; background: none; cursor: pointer; color: var(--text-secondary); }
+        .btn-icon:hover { color: var(--text); }
+
+        /* Sidebar */
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .sidebar {
+            width: 280px; background: var(--surface); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; flex-shrink: 0; transition: width 0.2s;
+        }
+        .sidebar.collapsed { width: 0; overflow: hidden; border-right: none; }
+        .sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .sidebar-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px; }
+        .app-list { display: flex; flex-direction: column; gap: 4px; }
+        .app-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 10px; border-radius: 6px; font-size: 13px; background: var(--surface-alt);
+        }
+        .app-item .app-name { font-weight: 500; }
+        .app-status { font-size: 11px; color: var(--text-secondary); }
+        .app-connect-input {
+            display: flex; gap: 6px; margin-top: 8px;
+        }
+        .app-connect-input input {
+            flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+            background: var(--input-bg); color: var(--text); font-size: 13px; outline: none;
+        }
+        .app-connect-input input:focus { border-color: var(--accent); }
+
+        .init-log {
+            flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .init-log-entry { padding: 4px 0; display: flex; align-items: center; gap: 6px; }
+        .init-log-entry.done { color: var(--success-text); }
+        .init-log-entry.error { color: var(--error-text); }
+        .init-log-entry.active { color: var(--system-text); }
+
+        /* Chat area */
+        .chat-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .messages {
+            flex: 1; overflow-y: auto; padding: 20px; display: flex;
+            flex-direction: column; gap: 16px; scroll-behavior: smooth;
+        }
+        .messages::-webkit-scrollbar { width: 6px; }
+        .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .empty-state {
+            flex: 1; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; color: var(--text-secondary); gap: 8px;
+        }
+        .empty-state-icon { font-size: 48px; opacity: 0.3; }
+        .empty-state-text { font-size: 15px; }
+        .empty-state-hint { font-size: 13px; opacity: 0.7; }
+
+        /* Message bubbles */
+        .msg { display: flex; flex-direction: column; max-width: 85%; }
+        .msg.user { align-self: flex-end; }
+        .msg.agent { align-self: flex-start; }
+        .msg.system { align-self: center; max-width: 90%; }
+
+        .msg-header { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; padding: 0 4px; }
+        .msg.user .msg-header { text-align: right; }
+
+        .msg-bubble {
+            padding: 10px 14px; border-radius: 16px; font-size: 14px;
+            line-height: 1.5; word-wrap: break-word; box-shadow: var(--shadow);
+        }
+        .msg.user .msg-bubble { background: var(--user-bg); color: var(--user-text); border-bottom-right-radius: 4px; }
+        .msg.agent .msg-bubble { background: var(--agent-bg); color: var(--agent-text); border-bottom-left-radius: 4px; }
+        .msg.system .msg-bubble {
+            background: var(--system-bg); color: var(--system-text);
+            border-radius: 8px; font-size: 13px; text-align: center; padding: 8px 16px;
+        }
+        .msg.error .msg-bubble { background: var(--error-bg); color: var(--error-text); border-radius: 8px; font-size: 13px; }
+
+        .msg-bubble pre {
+            background: rgba(0,0,0,0.06); padding: 8px 10px; border-radius: 6px;
+            overflow-x: auto; font-size: 13px; margin: 6px 0; font-family: 'SF Mono', Monaco, monospace;
+        }
+        .dark .msg-bubble pre { background: rgba(255,255,255,0.06); }
+
+        .msg-bubble code {
+            background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+            font-size: 13px; font-family: 'SF Mono', Monaco, monospace;
+        }
+        .dark .msg-bubble code { background: rgba(255,255,255,0.08); }
+
+        /* Action buttons (for input_request) */
+        .action-bar {
+            display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+        }
+        .action-btn {
+            padding: 6px 14px; border-radius: 16px; font-size: 12px; font-weight: 500;
+            border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+            background: var(--surface); color: var(--text);
+        }
+        .action-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+        .action-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+        .action-btn.primary:hover { background: var(--accent-hover); }
+        .action-btn.danger { border-color: #ef4444; color: #ef4444; }
+        .action-btn.danger:hover { background: #ef4444; color: white; }
+
+        .custom-input-row {
+            display: flex; gap: 6px; margin-top: 8px;
+        }
+        .custom-input-row input {
+            flex: 1; padding: 6px 10px; border-radius: 16px; border: 1px solid var(--border);
+            background: var(--input-bg); color: var(--text); font-size: 13px; outline: none;
+        }
+        .custom-input-row input:focus { border-color: var(--accent); }
+
+        /* Typing indicator */
+        .typing-indicator {
+            display: none; align-self: flex-start; padding: 10px 14px;
+            background: var(--agent-bg); border-radius: 16px; border-bottom-left-radius: 4px;
+            box-shadow: var(--shadow);
+        }
+        .typing-indicator.visible { display: flex; gap: 4px; align-items: center; }
+        .typing-dot {
+            width: 6px; height: 6px; background: var(--text-secondary); border-radius: 50%;
+            animation: typingBounce 1.2s infinite;
+        }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typingBounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
+
+        /* Input bar */
+        .input-bar {
+            background: var(--surface); border-top: 1px solid var(--border);
+            padding: 12px 20px; display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0;
+        }
+        .input-bar textarea {
+            flex: 1; resize: none; padding: 10px 14px; border-radius: 20px;
+            border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
+            font-size: 14px; font-family: inherit; outline: none; max-height: 120px;
+            line-height: 1.4; min-height: 42px;
+        }
+        .input-bar textarea:focus { border-color: var(--accent); }
+        .input-bar textarea::placeholder { color: var(--text-secondary); }
+        .send-btn {
+            width: 42px; height: 42px; border-radius: 50%; border: none;
+            background: var(--accent); color: white; cursor: pointer; font-size: 18px;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .send-btn:hover { background: var(--accent-hover); transform: scale(1.05); }
+        .send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+        .stop-btn { background: #ef4444; }
+        .stop-btn:hover { background: #dc2626; }
+
+        /* Toast */
+        .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+        .toast {
+            padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideIn 0.2s ease; max-width: 360px;
+        }
+        .toast.info { background: var(--accent); color: white; }
+        .toast.error { background: #ef4444; color: white; }
+        .toast.success { background: #10b981; color: white; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .msg { max-width: 95%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toasts"></div>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <button class="btn-icon" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
+            <span class="header-title">Omni Chat</span>
+            <span class="status-badge disconnected" id="statusBadge">
+                <span class="status-dot"></span>
+                <span id="statusText">Disconnected</span>
+            </span>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-primary" id="newChatBtn" onclick="createAndConnect()">New Chat</button>
+            <button class="btn btn-sm" id="reconnectBtn" onclick="reconnectWs()" style="display:none;">Reconnect</button>
+            <button class="btn btn-danger btn-sm" id="disconnectBtn" onclick="disconnectWs()" disabled>Disconnect</button>
+            <button class="btn-icon" onclick="clearMessages()" title="Clear messages">&#128465;</button>
+            <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-section">
+                <h3>Composio Apps</h3>
+                <div class="app-list" id="appList">
+                    <div class="app-item" style="color: var(--text-secondary); font-size: 12px;">
+                        Connect after starting a chat
+                    </div>
+                </div>
+                <div class="app-connect-input">
+                    <input type="text" id="appNameInput" placeholder="App name (e.g. GMAIL)" />
+                    <button class="btn btn-sm btn-primary" onclick="connectApp()" id="connectAppBtn" disabled>Connect</button>
+                </div>
+            </div>
+            <div class="sidebar-section">
+                <h3>Initialization Log</h3>
+            </div>
+            <div class="init-log" id="initLog"></div>
+        </div>
+
+        <!-- Chat -->
+        <div class="chat-container">
+            <div class="messages" id="messages">
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-state-icon">&#128172;</div>
+                    <div class="empty-state-text">Click "New Chat" to start</div>
+                    <div class="empty-state-hint">Ask anything — browse the web, send emails, generate images, write code</div>
+                </div>
+            </div>
+            <div class="typing-indicator" id="typingIndicator">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+            <div class="input-bar">
+                <textarea id="chatInput" placeholder="Type a message..." rows="1" disabled
+                    onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled title="Send (Enter)">&#10148;</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let chatId = null;
+        let isStreaming = false;
+        let pendingInputRequest = null;
+
+        // =====================================================================
+        // THEME
+        // =====================================================================
+        function initTheme() {
+            const saved = localStorage.getItem('omni-theme');
+            if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.body.classList.add('dark');
+            }
+            updateThemeIcon();
+        }
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('omni-theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+            updateThemeIcon();
+        }
+        function updateThemeIcon() {
+            document.getElementById('themeBtn').textContent = document.body.classList.contains('dark') ? '\u2600' : '\u263D';
+        }
+        initTheme();
+
+        // =====================================================================
+        // TOAST
+        // =====================================================================
+        function toast(msg, type = 'info', duration = 3000) {
+            const t = document.createElement('div');
+            t.className = `toast ${type}`;
+            t.textContent = msg;
+            document.getElementById('toasts').appendChild(t);
+            setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 200); }, duration);
+        }
+
+        // =====================================================================
+        // SIDEBAR
+        // =====================================================================
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+
+        function addInitLog(text, status = 'active') {
+            const log = document.getElementById('initLog');
+            const icon = status === 'done' ? '\u2705' : status === 'error' ? '\u274C' : '\u23F3';
+            const entry = document.createElement('div');
+            entry.className = `init-log-entry ${status}`;
+            entry.innerHTML = `<span>${icon}</span><span>${text}</span>`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+            return entry;
+        }
+
+        function clearInitLog() {
+            document.getElementById('initLog').innerHTML = '';
+        }
+
+        // =====================================================================
+        // CONNECTION
+        // =====================================================================
+        function setStatus(state) {
+            const badge = document.getElementById('statusBadge');
+            const text = document.getElementById('statusText');
+            badge.className = `status-badge ${state}`;
+            text.textContent = state === 'connected' ? `Connected` : state === 'connecting' ? 'Connecting...' : 'Disconnected';
+        }
+
+        function setInputEnabled(enabled) {
+            document.getElementById('chatInput').disabled = !enabled;
+            document.getElementById('sendBtn').disabled = !enabled;
+            document.getElementById('disconnectBtn').disabled = !enabled;
+            document.getElementById('connectAppBtn').disabled = !enabled;
+        }
+
+        async function createAndConnect() {
+            const btn = document.getElementById('newChatBtn');
+            btn.disabled = true;
+            document.getElementById('reconnectBtn').style.display = 'none';
+            clearInitLog();
+            clearMessages();
+            setStatus('connecting');
+            addInitLog('Creating chat session...');
+
+            try {
+                const resp = await fetch('/chats/new_chat', { method: 'POST', headers: { 'accept': 'application/json' } });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                chatId = data.chat_id;
+                addInitLog(`Chat created: ${chatId.slice(0, 8)}...`, 'done');
+                connectWs();
+            } catch (e) {
+                addInitLog(`Failed: ${e.message}`, 'error');
+                setStatus('disconnected');
+                toast(`Failed to create chat: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function connectWs() {
+            if (ws) ws.close();
+            addInitLog('Opening WebSocket...');
+            const url = `ws://${location.host}/ws/omni/${chatId}`;
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                addInitLog('WebSocket connected', 'done');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (e) {
+                    console.error('Parse error:', e);
+                }
+            };
+
+            ws.onerror = () => {
+                addInitLog('WebSocket error', 'error');
+                toast('Connection error', 'error');
+            };
+
+            ws.onclose = () => {
+                setStatus('disconnected');
+                setInputEnabled(false);
+                isStreaming = false;
+                hideTyping();
+                addInitLog('Disconnected');
+                // Show reconnect button if we still have a chatId
+                if (chatId) {
+                    document.getElementById('reconnectBtn').style.display = '';
+                }
+            };
+        }
+
+        function reconnectWs() {
+            if (!chatId) return;
+            document.getElementById('reconnectBtn').style.display = 'none';
+            clearInitLog();
+            setStatus('connecting');
+            addInitLog(`Reconnecting to ${chatId.slice(0, 8)}...`);
+            connectWs();
+        }
+
+        function disconnectWs() {
+            if (ws) ws.close();
+            ws = null;
+            document.getElementById('reconnectBtn').style.display = 'none';
+            setStatus('disconnected');
+            setInputEnabled(false);
+        }
+
+        // =====================================================================
+        // MESSAGE HANDLING
+        // =====================================================================
+        function handleMessage(data) {
+            const type = data.type;
+
+            // Init status messages
+            if (type === 'system') {
+                addInitLog('Connection accepted', 'done');
+                return;
+            }
+            if (type === 'init_status') {
+                const status = data.status;
+                addInitLog(data.message, status === 'ready' ? 'done' : 'active');
+                if (status === 'ready') {
+                    setStatus('connected');
+                    setInputEnabled(true);
+                    document.getElementById('reconnectBtn').style.display = 'none';
+                    toast('Ready!', 'success', 1500);
+                }
+                return;
+            }
+
+            // Pong
+            if (type === 'pong') return;
+
+            // Error
+            if (type === 'error') {
+                appendMessage('error', 'Error', data.error || data.message || 'Unknown error');
+                hideTyping();
+                isStreaming = false;
+                updateSendButton();
+                return;
+            }
+
+            // Completion
+            if (type === 'completion') {
+                hideTyping();
+                isStreaming = false;
+                updateSendButton();
+                if (data.status === 'cancelled' || data.status === 'stopped') {
+                    appendMessage('system', '', `Session ${data.status}`);
+                }
+                return;
+            }
+
+            // Input request — show action buttons
+            if (type === 'input_request') {
+                hideTyping();
+                pendingInputRequest = data;
+                showInputRequest(data);
+                return;
+            }
+
+            // Chat message from agent
+            if (type === 'message') {
+                hideTyping();
+                const source = data.data?.source || 'assistant';
+                const content = data.data?.content || '';
+                if (source === 'user') return; // Don't echo back user messages
+
+                // Parse agent name for display
+                const displayName = formatAgentName(source);
+                appendMessage('agent', displayName, content);
+                return;
+            }
+
+            // App connection result
+            if (type === 'app_connection_result') {
+                const action = data.action || 'connect';
+                if (data.oauth_required && data.redirect_url) {
+                    // OAuth needed — show clickable link (bypass escapeHtml)
+                    appendRawHtml('system', '',
+                        `${escapeHtml(data.app)} requires authorization. ` +
+                        `<a href="${escapeHtml(data.redirect_url)}" target="_blank" ` +
+                        `style="color: var(--accent); text-decoration: underline; font-weight: 600;">` +
+                        `Click here to authorize ${escapeHtml(data.app)}</a>` +
+                        `<br><em style="font-size: 12px;">After authorizing, click Connect again in the sidebar.</em>`
+                    );
+                    toast(`${data.app}: Authorization required — check chat`, 'info', 5000);
+                } else if (data.success && data.tool_count > 0) {
+                    toast(`${data.app} connected (${data.tool_count} tools)`, 'success');
+                    updateAppList(data.app, true);
+                } else if (data.success) {
+                    toast(`${data.app}: ${data.message}`, 'info');
+                } else {
+                    toast(`${data.app}: ${data.message}`, 'error');
+                }
+                return;
+            }
+
+            // Browser streaming events
+            if (['step_start', 'step_complete', 'action_start', 'action_complete',
+                 'agent_start', 'agent_complete', 'multi_action_start', 'multi_action_complete'].includes(type)) {
+                handleBrowserEvent(data);
+                return;
+            }
+
+            // Terminal/executor events
+            if (['terminal_output', 'process_started', 'process_completed', 'execution_summary',
+                 'terminal_info', 'terminal_error', 'input_prompt_detected'].includes(type)) {
+                handleTerminalEvent(data);
+                return;
+            }
+
+            // Fallback — show raw
+            console.log('Unhandled message type:', type, data);
+        }
+
+        function handleBrowserEvent(data) {
+            const type = data.type;
+            if (type === 'agent_start') {
+                appendMessage('system', '', `Browser: Starting task...`);
+                showTyping();
+            } else if (type === 'step_start') {
+                appendMessage('system', '', `Browser: Step ${data.step_number || '?'}/${data.max_steps || '?'}`);
+            } else if (type === 'agent_complete') {
+                hideTyping();
+                appendMessage('agent', 'Browser', data.result || 'Task complete');
+            } else if (type === 'agent_error' || type === 'step_error') {
+                hideTyping();
+                appendMessage('error', 'Browser', data.error || 'Browser error');
+            }
+        }
+
+        function handleTerminalEvent(data) {
+            const type = data.type;
+            if (type === 'process_started') {
+                appendMessage('system', '', `Running: ${data.command || 'code'}`);
+                showTyping();
+            } else if (type === 'terminal_output') {
+                appendMessage('agent', 'Terminal', data.output || '');
+            } else if (type === 'process_completed' || type === 'execution_summary') {
+                hideTyping();
+                const exitCode = data.return_code ?? data.exit_code ?? '?';
+                const output = data.output || '';
+                if (output) appendMessage('agent', 'Terminal', output);
+                appendMessage('system', '', `Process finished (exit code: ${exitCode})`);
+            } else if (type === 'terminal_error') {
+                hideTyping();
+                appendMessage('error', 'Terminal', data.content || data.error || 'Error');
+            } else if (type === 'input_prompt_detected') {
+                hideTyping();
+                showTerminalInputPrompt(data.process_id, data.prompt || 'Input requested:');
+            }
+        }
+
+        // =====================================================================
+        // INPUT REQUEST UI
+        // =====================================================================
+        function showInputRequest(data) {
+            const prompt = data.prompt || '';
+            let promptText = prompt;
+
+            // Try to parse JSON prompt for better display
+            try {
+                const parsed = JSON.parse(prompt);
+                if (parsed.agent) {
+                    promptText = parsed.prompt || `${parsed.agent} is asking for input`;
+                }
+            } catch {}
+
+            // Determine what kind of input this is
+            const isAcceptance = promptText.toLowerCase().includes('accept') ||
+                                 promptText.toLowerCase().includes('confirm') ||
+                                 promptText.toLowerCase().includes('proceed') ||
+                                 promptText.toLowerCase().includes('auto-reply');
+
+            const container = document.createElement('div');
+            container.className = 'msg system';
+
+            let html = `<div class="msg-bubble">
+                <div style="margin-bottom: 8px; font-weight: 500;">${escapeHtml(promptText)}</div>
+                <div class="action-bar">`;
+
+            if (isAcceptance) {
+                html += `
+                    <button class="action-btn primary" onclick="sendInputResponse('yes', this)">Yes, proceed</button>
+                    <button class="action-btn danger" onclick="sendInputResponse('no', this)">No</button>`;
+            }
+
+            html += `</div>
+                <div class="custom-input-row">
+                    <input type="text" placeholder="Or type a custom response..." id="customInputField"
+                        onkeydown="if(event.key==='Enter'){sendInputResponse(this.value, this); event.preventDefault();}" />
+                    <button class="action-btn" onclick="sendInputResponse(document.getElementById('customInputField').value, this)">Send</button>
+                </div>
+            </div>`;
+
+            container.innerHTML = html;
+            document.getElementById('messages').appendChild(container);
+            scrollToBottom();
+        }
+
+        function showTerminalInputPrompt(processId, prompt) {
+            const container = document.createElement('div');
+            container.className = 'msg system';
+            container.innerHTML = `<div class="msg-bubble">
+                <div style="margin-bottom: 8px; font-weight: 500;">${escapeHtml(prompt)}</div>
+                <div class="custom-input-row">
+                    <input type="text" placeholder="Enter input for the process..." id="termInputField"
+                        onkeydown="if(event.key==='Enter'){sendTerminalInput('${processId}', this.value, this); event.preventDefault();}" />
+                    <button class="action-btn" onclick="sendTerminalInput('${processId}', document.getElementById('termInputField').value, this)">Send</button>
+                </div>
+            </div>`;
+            document.getElementById('messages').appendChild(container);
+            scrollToBottom();
+        }
+
+        function sendInputResponse(response, btnEl) {
+            if (!response || !ws) return;
+            ws.send(JSON.stringify({ type: 'input_response', response: response }));
+            // Disable the action bar
+            const actionBar = btnEl.closest('.msg-bubble');
+            if (actionBar) {
+                actionBar.querySelectorAll('button, input').forEach(el => el.disabled = true);
+                actionBar.style.opacity = '0.6';
+            }
+            appendMessage('user', 'You', response);
+            pendingInputRequest = null;
+            showTyping();
+        }
+
+        function sendTerminalInput(processId, input, btnEl) {
+            if (!input || !ws) return;
+            ws.send(JSON.stringify({ type: 'executor_input', process_id: processId, response: input }));
+            const actionBar = btnEl.closest('.msg-bubble');
+            if (actionBar) {
+                actionBar.querySelectorAll('button, input').forEach(el => el.disabled = true);
+                actionBar.style.opacity = '0.6';
+            }
+            appendMessage('user', 'You', input);
+        }
+
+        // =====================================================================
+        // SEND MESSAGE
+        // =====================================================================
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            if (isStreaming) {
+                // Stop current stream
+                ws.send(JSON.stringify({ type: 'stop' }));
+                isStreaming = false;
+                hideTyping();
+                updateSendButton();
+                return;
+            }
+
+            // Send as start message
+            ws.send(JSON.stringify({ type: 'start', task: text, files: [] }));
+            appendMessage('user', 'You', text);
+            input.value = '';
+            autoResize(input);
+            isStreaming = true;
+            showTyping();
+            updateSendButton();
+        }
+
+        function updateSendButton() {
+            const btn = document.getElementById('sendBtn');
+            if (isStreaming) {
+                btn.innerHTML = '&#9632;'; // Stop square
+                btn.classList.add('stop-btn');
+                btn.title = 'Stop (Enter)';
+            } else {
+                btn.innerHTML = '&#10148;'; // Arrow
+                btn.classList.remove('stop-btn');
+                btn.title = 'Send (Enter)';
+            }
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function autoResize(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+        }
+
+        // =====================================================================
+        // MESSAGE RENDERING
+        // =====================================================================
+        function appendMessage(type, name, content) {
+            const msgs = document.getElementById('messages');
+            document.getElementById('emptyState')?.remove();
+
+            const container = document.createElement('div');
+            container.className = `msg ${type}`;
+
+            const header = name ? `<div class="msg-header">${escapeHtml(name)}</div>` : '';
+            const formattedContent = formatContent(content);
+
+            container.innerHTML = `${header}<div class="msg-bubble">${formattedContent}</div>`;
+            msgs.appendChild(container);
+            scrollToBottom();
+        }
+
+        function appendRawHtml(type, name, html) {
+            const msgs = document.getElementById('messages');
+            document.getElementById('emptyState')?.remove();
+
+            const container = document.createElement('div');
+            container.className = `msg ${type}`;
+
+            const header = name ? `<div class="msg-header">${escapeHtml(name)}</div>` : '';
+            container.innerHTML = `${header}<div class="msg-bubble">${html}</div>`;
+            msgs.appendChild(container);
+            scrollToBottom();
+        }
+
+        function formatContent(text) {
+            if (!text) return '';
+            text = String(text);
+
+            // Try to parse as JSON (agent structured responses)
+            try {
+                const parsed = JSON.parse(text);
+                if (typeof parsed === 'object' && parsed !== null) {
+                    return formatStructuredResponse(parsed);
+                }
+            } catch {}
+
+            // Basic markdown-ish formatting
+            text = escapeHtml(text);
+            text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+            text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+            text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            text = text.replace(/\n/g, '<br>');
+            return text;
+        }
+
+        function formatStructuredResponse(obj) {
+            // Handle known structured types
+            if (obj.classification) {
+                return `<strong>Classification:</strong> ${escapeHtml(obj.classification)}<br>
+                    <strong>Confidence:</strong> ${escapeHtml(obj.confidence || '')}<br>
+                    <strong>Reasoning:</strong> ${escapeHtml(obj.reasoning || '')}`;
+            }
+            if (obj.user_request && obj.breakdown) {
+                let html = `<strong>Plan:</strong> ${escapeHtml(obj.user_request)}<br>
+                    <strong>Strategy:</strong> ${escapeHtml(obj.overall_strategy || '')}<br>`;
+                if (obj.breakdown?.length) {
+                    html += '<div style="margin-top: 6px;">';
+                    obj.breakdown.forEach((t, i) => {
+                        const status = t.status === 'completed' ? '\u2705' : t.status === 'failed' ? '\u274C' : '\u23F3';
+                        html += `<div style="padding: 4px 0;">${status} <strong>Task ${t.task_id || i+1}:</strong> ${escapeHtml(t.task)} <em>(${escapeHtml(t.capability || '')})</em></div>`;
+                    });
+                    html += '</div>';
+                }
+                return html;
+            }
+            if (obj.task_assignments) {
+                let html = '<strong>Routing:</strong><br>';
+                obj.task_assignments.forEach(a => {
+                    html += `<div style="padding: 2px 0;">&#8594; <strong>${escapeHtml(a.capability)}</strong>: ${escapeHtml(a.task)}</div>`;
+                });
+                return html;
+            }
+            if (obj.steps && obj.final_answer) {
+                return `<strong>Decision:</strong> ${escapeHtml(obj.final_answer)}<br>
+                    <em>${escapeHtml(obj.steps?.[0]?.thought || '')}</em>`;
+            }
+            if (obj.status && obj.email_data) {
+                const s = obj.status === 'COMPLETED' ? '\u2705' : '\u274C';
+                return `${s} <strong>Email:</strong> ${escapeHtml(obj.what_was_requested || '')}<br>
+                    <strong>Outcome:</strong> ${escapeHtml(obj.outcome || obj.status)}`;
+            }
+            // Generic object
+            return `<pre><code>${escapeHtml(JSON.stringify(obj, null, 2))}</code></pre>`;
+        }
+
+        function formatAgentName(source) {
+            const names = {
+                'chat_manager': 'System',
+                'judge_question': 'Classifier',
+                'conversation_agent': 'Assistant',
+                'planner_agent': 'Planner',
+                'agent_aligner': 'Aligner',
+                'agent_router': 'Router',
+                'agent_caller': 'Executor',
+                'agent_executor': 'Tool Result',
+                'process_completion_agent': 'Summary',
+                'manual_verification': 'Verification',
+                'get_user_acceptance': 'You',
+                'user_input': 'You',
+            };
+            return names[source] || source.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        // =====================================================================
+        // COMPOSIO APP MANAGEMENT
+        // =====================================================================
+        const connectedApps = new Set();
+
+        function connectApp() {
+            const input = document.getElementById('appNameInput');
+            const name = input.value.trim().toUpperCase();
+            if (!name || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'connect_app', app: name }));
+            input.value = '';
+            toast(`Connecting ${name}...`, 'info', 2000);
+        }
+
+        function disconnectApp(name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'disconnect_app', app: name }));
+            toast(`Disconnecting ${name}...`, 'info', 2000);
+        }
+
+        function updateAppList(appName, connected) {
+            if (connected) connectedApps.add(appName);
+            else connectedApps.delete(appName);
+            renderAppList();
+        }
+
+        function renderAppList() {
+            const list = document.getElementById('appList');
+            if (connectedApps.size === 0) {
+                list.innerHTML = '<div class="app-item" style="color: var(--text-secondary); font-size: 12px;">No apps connected</div>';
+                return;
+            }
+            list.innerHTML = '';
+            connectedApps.forEach(app => {
+                const item = document.createElement('div');
+                item.className = 'app-item';
+                item.innerHTML = `<span class="app-name">${app}</span>
+                    <button class="btn btn-sm btn-danger" onclick="disconnectApp('${app}')" style="padding: 2px 8px; font-size: 11px;">Disconnect</button>`;
+                list.appendChild(item);
+            });
+        }
+
+        // =====================================================================
+        // UTILITIES
+        // =====================================================================
+        function showTyping() { document.getElementById('typingIndicator').classList.add('visible'); scrollToBottom(); }
+        function hideTyping() { document.getElementById('typingIndicator').classList.remove('visible'); }
+
+        function scrollToBottom() {
+            const msgs = document.getElementById('messages');
+            requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
+        }
+
+        function clearMessages() {
+            const msgs = document.getElementById('messages');
+            msgs.innerHTML = `<div class="empty-state" id="emptyState">
+                <div class="empty-state-icon">&#128172;</div>
+                <div class="empty-state-text">Messages cleared</div>
+            </div>`;
+        }
+
+        function escapeHtml(str) {
+            if (typeof str !== 'string') str = String(str);
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return str.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Keyboard shortcut
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                e.preventDefault();
+                createAndConnect();
+            }
+        });
+
+        // Focus input on load
+        document.getElementById('chatInput').focus();
+    </script>
+</body>
+</html>

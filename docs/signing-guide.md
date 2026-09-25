@@ -43,7 +43,7 @@ Copy the entire string in quotes (including "Developer ID Application:").
 2. Sign in with your Apple ID
 3. Navigate to: **Sign-In and Security** > **App-Specific Passwords**
 4. Click the **+** button to generate a new password
-5. Give it a label like "Ravian Notarization"
+5. Give it a label like "DAXAGENT Notarization"
 6. Copy the generated password (format: xxxx-xxxx-xxxx-xxxx)
 
 ## Step 4: Configure Environment Variables
@@ -177,20 +177,20 @@ After signing, verify the signature:
 
 ```bash
 # Verify deep signature
-codesign --verify --deep --strict main.dist/ravian
+codesign --verify --deep --strict main.dist/daxagent
 
 # Display signature info
-codesign -dv --verbose=4 main.dist/ravian
+codesign -dv --verbose=4 main.dist/daxagent
 
 # Check if notarized
-spctl -a -vv main.dist/ravian
+spctl -a -vv main.dist/daxagent
 ```
 
 ## Distribution
 
 After successful signing and notarization:
 
-1. **Distribute the signed binary**: `main.dist/ravian`
+1. **Distribute the signed binary**: `main.dist/daxagent`
 2. **Include the .dist folder**: Users need all the files in `main.dist/`
 3. **Provide .env template**: Don't include your actual `.env` with secrets
 4. **Include README**: Instructions for running the app

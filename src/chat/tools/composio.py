@@ -319,22 +319,53 @@ class ComposioToolManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, lambda: func(*args, **kwargs))
 
+    async def has_active_connection(self, app_name: str) -> bool:
+        """Check if the user has an ACTIVE Composio connection for the given app.
+
+        Args:
+            app_name: App name (e.g., 'GMAIL').
+
+        Returns:
+            True if an active connection exists.
+        """
+        try:
+            connections = await self._run_in_executor(
+                self.composio.connected_accounts.list, user_ids=[self.user_id]
+            )
+            app_lower = app_name.lower()
+            for conn in connections.items:
+                toolkit = conn.toolkit.slug.lower() if conn.toolkit else ""
+                if toolkit == app_lower and conn.status == "ACTIVE":
+                    return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking connection for {app_name}: {e}")
+            return False
+
     async def get_no_auth_apps(self) -> dict[str, Any]:
-        """Get all no-auth apps from Composio.
+        """Get all no-auth apps from Composio (optional, degrades gracefully offline).
 
         Returns:
             Dictionary with no-auth apps information.
         """
+        import asyncio
+
         self.logger.debug("Fetching no-auth apps")
 
         try:
-            result = await api_client.get(RoutesConfig.API_CHAT_NO_AUTH_APPS)
+            result = await asyncio.wait_for(
+                api_client.get(RoutesConfig.API_CHAT_NO_AUTH_APPS),
+                timeout=5.0,
+            )
             result = result.standard_response()
             if not result.get("success"):
                 raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
             return result.get("data")
+        except asyncio.TimeoutError:
+            self.logger.warning("No-auth apps fetch timed out (offline?)")
+            return {"apps": []}
         except Exception as e:
-            self.logger.error(f"Error loading NO-AUTH Apps: {e}")
+            self.logger.warning(f"No-auth apps unavailable (offline?): {e}")
             return {"apps": []}
 
     async def get_user_connected_apps_async(
@@ -428,7 +459,14 @@ class ComposioToolManager:
         self.logger.info(f"Configured toolkits: {toolkits}")
         return toolkits
 
-    async def _fetch_toolkit_tools(self, toolkit: str) -> list[dict[str, Any]]:
+    # OpenAI accepts at most 128 tools per request. Composio toolkits share what is left
+    # after the local and MCP tools (Data Axle etc.), so each connected app gets a slice.
+    TOOL_BUDGET = 128
+    RESERVED_FOR_OTHER_TOOLS = 30
+    MAX_PER_TOOLKIT = 60
+    MIN_PER_TOOLKIT = 8
+
+    async def _fetch_toolkit_tools(self, toolkit: str, limit: int = 60) -> list[dict[str, Any]]:
         """Fetch tools for a single toolkit (runs in thread pool).
 
         Args:
@@ -439,7 +477,7 @@ class ComposioToolManager:
         """
         try:
             toolkit_tools = await self._run_in_executor(
-                self.composio.tools.get, user_id=self.user_id, toolkits=[toolkit]
+                self.composio.tools.get, user_id=self.user_id, toolkits=[toolkit], limit=limit
             )
             self.logger.info(f"Fetched {len(toolkit_tools)} tools from {toolkit}")
             return list(toolkit_tools)
@@ -465,7 +503,12 @@ class ComposioToolManager:
         self.logger.info(f"Fetching tools from {len(toolkits)} toolkits in parallel")
         start_time = time.time()
 
-        tasks = [self._fetch_toolkit_tools(toolkit) for toolkit in toolkits]
+        per_toolkit = max(
+            self.MIN_PER_TOOLKIT,
+            min(self.MAX_PER_TOOLKIT, (self.TOOL_BUDGET - self.RESERVED_FOR_OTHER_TOOLS) // len(toolkits)),
+        )
+        self.logger.info(f"Tool budget: up to {per_toolkit} tools for each of {len(toolkits)} toolkits")
+        tasks = [self._fetch_toolkit_tools(toolkit, per_toolkit) for toolkit in toolkits]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         raw_tools = []
@@ -524,7 +567,8 @@ class ComposioToolManager:
                 self.logger.debug(f"Arguments: {arguments}")
 
                 result = self.composio.tools.execute(
-                    slug=slug, user_id=self.user_id, arguments=arguments
+                    slug=slug, user_id=self.user_id, arguments=arguments,
+                    dangerously_skip_version_check=True,
                 )
 
                 self.logger.info(f"Successfully executed: {slug}")
@@ -648,6 +692,78 @@ class ComposioToolManager:
             )
             raise
 
+    async def _initiate_oauth(self, app_name: str) -> dict[str, Any]:
+        """Initiate OAuth connection flow for an app.
+
+        Creates an auth config (if needed) and initiates the connection,
+        returning the OAuth URL for the user to complete in their browser.
+
+        Args:
+            app_name: App name (e.g., 'GMAIL').
+
+        Returns:
+            Dict with redirect_url for OAuth and connection status.
+        """
+        app_slug = app_name.lower()
+
+        # Create auth config if it doesn't exist
+        try:
+            auth_config = await self._run_in_executor(
+                self.composio.auth_configs.create,
+                app_slug,
+                {"type": "use_composio_managed_auth"},
+            )
+            auth_config_id = auth_config.id
+            self.logger.info(
+                f"Created auth config for {app_name}: {auth_config_id}"
+            )
+        except Exception as e:
+            # Might already exist — try to find it
+            self.logger.info(
+                f"Auth config creation failed (may already exist): {e}"
+            )
+            configs = await self._run_in_executor(
+                self.composio.auth_configs.list
+            )
+            auth_config_id = None
+            for c in configs.items:
+                # Check toolkit_slug, name, or id for the app
+                toolkit = getattr(c, "toolkit_slug", "") or ""
+                name = getattr(c, "name", "") or ""
+                if toolkit.lower() == app_slug or app_slug in name.lower():
+                    auth_config_id = c.id
+                    break
+            if not auth_config_id:
+                raise Exception(
+                    f"Cannot find or create auth config for {app_name}"
+                )
+
+        # Initiate connection
+        conn_request = await self._run_in_executor(
+            self.composio.connected_accounts.initiate,
+            self.user_id,
+            auth_config_id,
+        )
+
+        redirect_url = getattr(conn_request, "redirect_url", None)
+        conn_id = getattr(conn_request, "id", None)
+        conn_status = getattr(conn_request, "status", "UNKNOWN")
+
+        self.logger.info(
+            f"OAuth initiated for {app_name}: status={conn_status}, url={redirect_url}"
+        )
+
+        return {
+            "success": True,
+            "app": app_name,
+            "tool_count": 0,
+            "message": f"Please complete {app_name} authorization in your browser, then try connecting again.",
+            "oauth_required": True,
+            "redirect_url": redirect_url,
+            "connection_id": conn_id,
+            "connection_status": conn_status,
+        }
+
     async def connect_app_async(self, app_name: str) -> dict[str, Any]:
         """Connect a new app and register its tools without full reload.
 
@@ -664,10 +780,31 @@ class ComposioToolManager:
         start_time = time.time()
 
         try:
-            # Check if app is already connected
+            # Verify there's an ACTIVE Composio connection (not just cached tools)
+            is_active = await self.has_active_connection(app_upper)
+
+            if not is_active:
+                # No active connection — initiate OAuth flow
+                self.logger.info(
+                    f"No active connection for {app_upper}, initiating OAuth"
+                )
+                # Clear stale cache for this app
+                self._cache.remove_app(self.user_id, app_upper)
+                try:
+                    return await self._initiate_oauth(app_upper)
+                except Exception as oauth_err:
+                    self.logger.error(f"OAuth initiation failed: {oauth_err}")
+                    return {
+                        "success": False,
+                        "app": app_upper,
+                        "tool_count": 0,
+                        "message": f"OAuth initiation failed for {app_upper}: {str(oauth_err)}",
+                    }
+
+            # Active connection exists — check cache first
             if self._cache.has_app(self.user_id, app_upper):
                 self.logger.info(
-                    f"App {app_upper} already connected for user {self.user_id}"
+                    f"App {app_upper} already cached for user {self.user_id}"
                 )
                 return {
                     "success": True,
@@ -679,17 +816,17 @@ class ComposioToolManager:
                     "already_connected": True,
                 }
 
-            # Fetch tools for the new app
-            self.logger.info(f"Connecting app {app_upper} for user {self.user_id}")
+            # Fetch tools for the newly connected app
+            self.logger.info(f"Fetching tools for {app_upper}")
             app_tools = await self._fetch_toolkit_tools(app_upper)
 
             if not app_tools:
-                self.logger.warning(f"No tools found for app {app_upper}")
+                self.logger.warning(f"No tools returned for {app_upper}")
                 return {
                     "success": False,
                     "app": app_upper,
                     "tool_count": 0,
-                    "message": f"No tools found for app {app_upper}",
+                    "message": f"Connection is active but no tools found for {app_upper}",
                 }
 
             # Update cache
@@ -732,12 +869,10 @@ class ComposioToolManager:
             }
 
     async def disconnect_app_async(self, app_name: str) -> dict[str, Any]:
-        """Disconnect an app and remove its tools.
+        """Disconnect an app: revoke Composio connection and remove cached tools.
 
-        This method removes tools for an app from the cache.
-        Note: Autogen doesn't support unregistering tools at runtime,
-        so the tools will remain registered until the next session.
-        However, the cache is updated so new sessions won't have the tools.
+        Deletes the connected account from Composio (user will need to
+        re-authorize via OAuth to use the app again) and clears local cache.
 
         Args:
             app_name: App name to disconnect (e.g., 'GMAIL')
@@ -746,22 +881,39 @@ class ComposioToolManager:
             Dict with status, app name, and removed tools count
         """
         app_upper = app_name.upper()
+        app_lower = app_name.lower()
 
         try:
-            # Check if app is connected
-            if not self._cache.has_app(self.user_id, app_upper):
-                self.logger.info(
-                    f"App {app_upper} not connected for user {self.user_id}"
+            # Delete active Composio connections for this app
+            deleted_count = 0
+            try:
+                connections = await self._run_in_executor(
+                    self.composio.connected_accounts.list,
+                    user_ids=[self.user_id],
                 )
-                return {
-                    "success": True,
-                    "app": app_upper,
-                    "removed_count": 0,
-                    "message": "App was not connected",
-                    "was_connected": False,
-                }
+                for conn in connections.items:
+                    toolkit = conn.toolkit.slug.lower() if conn.toolkit else ""
+                    if toolkit == app_lower:
+                        try:
+                            await self._run_in_executor(
+                                self.composio.connected_accounts.delete,
+                                conn.id,
+                            )
+                            deleted_count += 1
+                            self.logger.info(
+                                f"Deleted Composio connection {conn.id} "
+                                f"({conn.status}) for {app_upper}"
+                            )
+                        except Exception as del_err:
+                            self.logger.warning(
+                                f"Failed to delete connection {conn.id}: {del_err}"
+                            )
+            except Exception as e:
+                self.logger.warning(
+                    f"Could not list/delete Composio connections: {e}"
+                )
 
-            # Remove from cache
+            # Remove from local cache
             removed_slugs = self._cache.remove_app(self.user_id, app_upper)
 
             self.logger.info(
@@ -773,9 +925,12 @@ class ComposioToolManager:
                 "app": app_upper,
                 "removed_count": len(removed_slugs),
                 "removed_tools": removed_slugs,
+                "composio_deleted": deleted_count,
                 "message": (
-                    f"Disconnected {app_upper}. {len(removed_slugs)} tools removed from cache. "
-                    "Note: Tools remain active until session ends."
+                    f"Disconnected {app_upper}. "
+                    f"{deleted_count} Composio connection(s) removed. "
+                    f"{len(removed_slugs)} tools removed from cache. "
+                    "You will need to re-authorize to use this app again."
                 ),
                 "was_connected": True,
             }

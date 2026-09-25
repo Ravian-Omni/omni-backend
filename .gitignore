@@ -198,7 +198,7 @@ images/*
 events/*
 logs/*
 omni_venv
-ravian/
+daxagent/
 test/
 local_test*/
 
@@ -210,3 +210,4 @@ nuitka-crash-report.xml
 
 # Temporary/utility scripts
 update_imports.py
+.removed_capabilities/

@@ -136,7 +136,7 @@ class APIResponse:
         error: APIError instance if an error occurred.
 
     Example:
-        >>> response = await api_client.get(RoutesConfig.API_USER_DETAILS)
+        >>> response = await api_client.get("/some/endpoint")
         >>> if response.is_success:
         ...     data = response.json()
         ...     print(f"Request took {response.elapsed_time}s")
@@ -397,11 +397,6 @@ class ServerAPIClient:
             Complete headers dictionary for the request.
         """
         headers = self.default_headers.copy()
-
-        # Add JWT token if available
-        jwt_token = getattr(settings, "USER_TOKEN", None)
-        if jwt_token:
-            headers["Authorization"] = f"Bearer {jwt_token}"
 
         # Merge custom headers
         if custom_headers:

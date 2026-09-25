@@ -10,6 +10,9 @@ This module provides:
 from fastapi import HTTPException, status
 from loguru import logger
 
+from src.configs.settings import settings
+from src.database.connection import close_db, init_db
+from src.database import load_all_api_keys, load_user_profile
 from src.managers.connection import WebSocketManager
 
 # Global manager instances
@@ -60,6 +63,56 @@ async def init_managers() -> None:
         _websocket_manager = WebSocketManager()
         logger.info("Connection manager initialized")
 
+        # Initialize SQLite database
+        await init_db()
+        from src.mcp_client.config import refresh as refresh_mcp_servers
+
+        await refresh_mcp_servers()
+        try:
+            from src.agent_runtime import specialists
+
+            await specialists.refresh()
+        except Exception as e:
+            logger.warning(f"MCP specialists not built at startup: {e}")
+        logger.info("SQLite database initialized")
+
+        # Restore persisted API keys into settings
+        saved_keys = await load_all_api_keys()
+        _PROVIDER_ATTR_MAP = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "together": "TOGETHER_API_KEY",
+            "tavily": "TAVILY_API_KEY",
+            "brave": "BRAVE_API_KEY",
+            "composio": "COMPOSIO_API_KEY",
+        }
+        for provider, key in saved_keys.items():
+            attr = _PROVIDER_ATTR_MAP.get(provider)
+            if attr:
+                settings.update_setting(attr, key)
+        if saved_keys:
+            logger.info(f"Restored API keys for: {', '.join(saved_keys.keys())}")
+            # Clear LLM config cache so it rebuilds with the restored keys
+            from src.configs.llm_configs_manager import LLMConfigManager
+            LLMConfigManager.clear_cache()
+
+        # Restore persisted user profile into settings
+        _PROFILE_ATTR_MAP = {
+            "first_name": "USER_FIRST_NAME",
+            "last_name": "USER_LAST_NAME",
+            "email": "USER_EMAIL",
+            "dob": "USER_DOB",
+            "gender": "USER_GENDER",
+            "country": "USER_COUNTRY",
+        }
+        saved_profile = await load_user_profile()
+        for field, value in saved_profile.items():
+            attr = _PROFILE_ATTR_MAP.get(field)
+            if attr and value:
+                settings.update_setting(attr, value)
+        if saved_profile:
+            logger.info("Restored user profile from database")
+
     except Exception as e:
         logger.error(f"Failed to initialize managers: {str(e)}")
         await cleanup_managers()  # Cleanup any partially initialized managers
@@ -84,6 +137,12 @@ async def cleanup_managers() -> None:
             logger.error(f"Error cleaning up connection manager: {str(e)}")
         finally:
             _websocket_manager = None
+
+    # Close SQLite database
+    try:
+        await close_db()
+    except Exception as e:
+        logger.error(f"Error closing SQLite database: {str(e)}")
 
     logger.info("All managers cleaned up")
 

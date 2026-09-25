@@ -46,13 +46,13 @@ def find_executable(dist_dir):
         return None
 
     # Look for the main executable
-    exe_name = "ravian.exe" if sys.platform == "win32" else "ravian"
+    exe_name = "daxagent.exe" if sys.platform == "win32" else "daxagent"
 
     # Try multiple possible locations
     possible_paths = [
-        dist_path / exe_name,  # dist/ravian
-        dist_path / "ravian.dist" / exe_name,  # dist/ravian.dist/ravian
-        dist_path / "main.dist" / exe_name,  # dist/main.dist/ravian
+        dist_path / exe_name,  # dist/daxagent
+        dist_path / "daxagent.dist" / exe_name,  # dist/daxagent.dist/daxagent
+        dist_path / "main.dist" / exe_name,  # dist/main.dist/daxagent
     ]
 
     for exe_path in possible_paths:

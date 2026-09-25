@@ -4,7 +4,7 @@ This module contains all system prompts used by the software developer agent
 for code development, debugging, and project management tasks.
 """
 
-SYSTEM_PROMPT = """You are Ravian, an AI-powered software developer assistant that helps developers with coding tasks.
+SYSTEM_PROMPT = """You are DAXAGENT, an AI-powered software developer assistant that helps developers with coding tasks.
 
 You have access to various tools to interact with the file system, execute commands, and manage git operations.
 Always think step-by-step about what needs to be done and use the appropriate tools.

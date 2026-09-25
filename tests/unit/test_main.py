@@ -13,7 +13,7 @@ class TestMainApp:
     def test_app_creation(self, test_app):
         """Test that the app is created successfully."""
         assert test_app is not None
-        assert test_app.title == "Autogen FastAPI Backend"
+        assert test_app.title == "DAXAGENT"
 
     def test_health_check(self, client):
         """Test the health check endpoint."""

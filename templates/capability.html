@@ -333,7 +333,7 @@
         <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-5 flex-shrink-0">
             <div class="flex items-center justify-between">
                 <div>
-                    <h1 class="text-2xl font-light mb-1">🚀 Ravian AI</h1>
+                    <h1 class="text-2xl font-light mb-1">🚀 DAXAGENT</h1>
                     <p class="opacity-90 text-sm">Chat with Omni</p>
                 </div>
                 <div class="flex gap-2">
@@ -564,7 +564,7 @@
     </div>
 
     <script>
-        // Enhanced Ravian AI with all requested fixes
+        // Enhanced DAXAGENT with all requested fixes
         // Global variables
         let ws;
         let sentCount = 0;
@@ -1737,7 +1737,7 @@
             newChatBtn.disabled = true;
 
             try {
-                const response = await fetch('{{ backend_url }}/chats/new_chat', {
+                const response = await fetch('/chats/new_chat', {
                     method: 'POST',
                     headers: {
                         'accept': 'application/json',
@@ -2121,7 +2121,7 @@
             // Initialize performance tracking
             setInterval(updatePerformanceMetrics, 1000);
 
-            showToast('Enhanced Ravian AI loaded successfully', 'success', 2000);
+            showToast('Enhanced DAXAGENT loaded successfully', 'success', 2000);
         });
     </script>
 </body>

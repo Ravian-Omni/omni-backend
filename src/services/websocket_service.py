@@ -13,28 +13,24 @@ from typing import Any
 from loguru import logger
 
 from src.capabilities.browser_manager.manager import BrowserManager
-from src.capabilities.email_manager.manager import EmailManager
-from src.capabilities.file_finder.manager import FileFinder
-from src.capabilities.image_generator.manager import ImageGenerator
-from src.capabilities.python_developer.manager import PythonDeveloper
+from src.agent_runtime import persona_capability_class
 from src.capabilities.software_developer.manager import SoftwareDeveloper
 from src.configs.datetime_utils import dt
-from src.configs.routes import RoutesConfig
 from src.configs.settings import settings
+from src.database import get_chat_repository
 from src.omni.manager import Omni
 from src.omni.memory import OmniMemory
-from src.utilities.api_client import api_client
 from src.utilities.custom_manager import ChatContext
 
 # Mapping of capability names to their class implementations
 CAPABILITY_CLASS_MAP = {
     "omni": Omni,
-    "email_sender": EmailManager,
     "web_browser": BrowserManager,
-    "python_coder": PythonDeveloper,
-    "file_finder": FileFinder,
-    "image_generator": ImageGenerator,
     "software_developer": SoftwareDeveloper,
+    **{
+        name: persona_capability_class(name)
+        for name in ("ml_engineer", "lead_finder", "buyer_finder", "contact_enricher", "campaign_builder", "outreach")
+    },
 }
 
 
@@ -98,11 +94,11 @@ def get_default_chat_dir() -> str:
     Returns:
         str: Default chat directory path.
     """
-    return os.path.join(settings.ROOT_DIR, "ravian")
+    return os.path.join(settings.ROOT_DIR, "daxagent")
 
 
 async def load_omni_chat_history(chat_id: str, user_id: str) -> dict | None:
-    """Load omni chat history from API.
+    """Load omni chat history from local database.
 
     Args:
         chat_id: Chat session identifier.
@@ -111,22 +107,12 @@ async def load_omni_chat_history(chat_id: str, user_id: str) -> dict | None:
     Returns:
         dict | None: Chat history data or None if not found.
     """
-    response = await api_client.post(
-        RoutesConfig.API_OMNI_CHAT_HISTORY,
-        params={"capability": "omni"},
-        data={"chat_id": chat_id, "user_id": user_id},
-    )
-    result = response.standard_response()
-
-    if not result.get("success"):
-        logger.error(result)
-        return None
-
-    return result.get("data")
+    repo = await get_chat_repository()
+    return await repo.get_chat(user_id, chat_id, "omni")
 
 
 async def load_chat_mode_history(chat_id: str, user_id: str) -> dict | None:
-    """Load chat mode history from API.
+    """Load chat mode history from local database.
 
     Args:
         chat_id: Chat session identifier.
@@ -135,24 +121,14 @@ async def load_chat_mode_history(chat_id: str, user_id: str) -> dict | None:
     Returns:
         dict | None: Chat history data or None if not found.
     """
-    response = await api_client.post(
-        RoutesConfig.API_CHAT_HISTORY,
-        params={"capability": "chats"},
-        data={"chat_id": chat_id, "user_id": user_id},
-    )
-    result = response.standard_response()
-
-    if not result.get("success"):
-        logger.error(result)
-        return None
-
-    return result.get("data")
+    repo = await get_chat_repository()
+    return await repo.get_chat(user_id, chat_id, "chats")
 
 
 async def load_capability_chat_history(
     chat_id: str, user_id: str, collection_name: str
 ) -> dict | None:
-    """Load capability-specific chat history from API.
+    """Load capability-specific chat history from local database.
 
     Args:
         chat_id: Chat session identifier.
@@ -162,45 +138,27 @@ async def load_capability_chat_history(
     Returns:
         dict | None: Chat history data or None if not found.
     """
-    query = {
-        "user_id": user_id,
-        "chat_id": chat_id,
-        "call_id": "Individual",
-        "capability_id": chat_id,
-    }
-
-    response = await api_client.post(
-        RoutesConfig.API_OMNI_CHAT_HISTORY,
-        params={"capability": collection_name},
-        data=query,
+    repo = await get_chat_repository()
+    return await repo.get_chat(
+        user_id, chat_id, collection_name,
+        call_id="Individual", capability_id=chat_id,
     )
-    result = response.standard_response()
-
-    if not result.get("success"):
-        logger.error(result)
-        return None
-
-    return result.get("data")
 
 
 async def get_user_details() -> dict | None:
-    """Fetch user details from API.
+    """Get user details from local settings.
 
     Returns:
-        dict | None: User details data or None if request fails.
-
-    Raises:
-        Exception: If API request fails.
+        dict | None: User profile data from local settings.
     """
-    response = await api_client.get(RoutesConfig.API_USER_DETAILS)
-    result = response.standard_response()
-
-    if not result.get("success"):
-        raise Exception(
-            f"Failed to fetch user details: {result.get('message', 'Unknown error')}"
-        )
-
-    return result.get("data")
+    return {
+        "first_name": settings.USER_FIRST_NAME or "",
+        "last_name": settings.USER_LAST_NAME or "",
+        "email": settings.USER_EMAIL or "",
+        "dob": settings.USER_DOB or "",
+        "gender": settings.USER_GENDER or "",
+        "country": settings.USER_COUNTRY or "",
+    }
 
 
 def get_capability_class(capability_name: str) -> type | None:
@@ -212,7 +170,14 @@ def get_capability_class(capability_name: str) -> type | None:
     Returns:
         type | None: Capability class or None if not found.
     """
-    return CAPABILITY_CLASS_MAP.get(capability_name)
+    if capability_name in CAPABILITY_CLASS_MAP:
+        return CAPABILITY_CLASS_MAP[capability_name]
+    if capability_name.startswith("mcp_"):
+        try:
+            return persona_capability_class(capability_name)
+        except ValueError:
+            return None
+    return None
 
 
 def create_capability_context(

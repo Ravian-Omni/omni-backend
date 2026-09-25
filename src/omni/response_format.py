@@ -76,10 +76,14 @@ class Capability(str, Enum):
     """Enum for available agent capabilities."""
 
     WEB_BROWSER = "web_browser"
-    PYTHON_CODER = "python_coder"
+    SOFTWARE_DEVELOPER = "software_developer"
+    ML_ENGINEER = "ml_engineer"
+    LEAD_FINDER = "lead_finder"
+    BUYER_FINDER = "buyer_finder"
+    CONTACT_ENRICHER = "contact_enricher"
+    CAMPAIGN_BUILDER = "campaign_builder"
+    OUTREACH = "outreach"
     EMAIL_SENDER = "email_sender"
-    FILE_FINDER = "file_finder"
-    IMAGE_GENERATOR = "image_generator"
     MANUAL_VERIFICATION = "manual_verification"
 
 
@@ -103,7 +107,7 @@ class Task(BaseModel):
 
     task_id: int
     task: str
-    capability: Capability
+    capability: str = Field(..., description="A capability name from the list you were given: a built-in one (lead_finder, buyer_finder, contact_enricher, campaign_builder, outreach, ml_engineer, software_developer, web_browser, email_sender, manual_verification) or a connected-app specialist (names starting with mcp_)")
     status: Status
     details: str
     estimated_time: str = Field(
@@ -128,7 +132,7 @@ class PlannerResponse(BaseModel):
     overall_status: OverallStatus
     overall_estimated_time: str = Field(
         ...,
-        description="The total estimated time for completing all tasks combined, in hours (or minutes). e.g., '5 hours', '90 minutes')",
+        description="Total estimated time, at most four words, e.g. '5 hours' or '90 minutes'. No sentences: it is shown in a narrow header.",
     )
 
 
@@ -281,11 +285,15 @@ class AgentSelectionResponse(BaseModel):
 class Capability(str, Enum):
     """Enum for routing agent capabilities."""
 
-    PYTHON_CODER = "python_coder"
+    SOFTWARE_DEVELOPER = "software_developer"
+    ML_ENGINEER = "ml_engineer"
+    LEAD_FINDER = "lead_finder"
+    BUYER_FINDER = "buyer_finder"
+    CONTACT_ENRICHER = "contact_enricher"
+    CAMPAIGN_BUILDER = "campaign_builder"
+    OUTREACH = "outreach"
     EMAIL_SENDER = "email_sender"
-    FILE_FINDER = "file_finder"
     WEB_BROWSER = "web_browser"
-    IMAGE_GENERATOR = "image_generator"
 
 
 class TaskCapabilityMapping(BaseModel):
@@ -296,7 +304,7 @@ class TaskCapabilityMapping(BaseModel):
         title="Task",
         description="The complete details of the task needs to be executed",
     )
-    capability: Capability = Field(
+    capability: str = Field(
         ..., title="Capability", description="The capability to handle this task"
     )
     task_id: int | None = Field(
@@ -310,18 +318,13 @@ class TaskCapabilityMapping(BaseModel):
     @classmethod
     def validate_capability(cls, value):
         """Ensure only valid capabilities are assigned."""
-        valid_capabilities = [
-            Capability.PYTHON_CODER,
-            Capability.EMAIL_SENDER,
-            Capability.FILE_FINDER,
-            Capability.WEB_BROWSER,
-            Capability.IMAGE_GENERATOR,
-        ]
-        if value not in valid_capabilities:
+        valid_capabilities = {c.value for c in Capability} | {"manual_verification"}
+        name = getattr(value, "value", value)
+        if name not in valid_capabilities and not str(name).startswith("mcp_"):
             raise ValueError(
-                f"Capability must be one of: {[c.value for c in valid_capabilities]}"
+                f"Capability must be one of: {sorted(valid_capabilities)} or a connected-app specialist (mcp_...)"
             )
-        return value
+        return name
 
 
 class CapabilityRoutingResponse(BaseModel):
@@ -738,3 +741,36 @@ class process_completion_response(BaseModel):
         """Helper method to add a learning."""
         if learning and learning.strip():
             self.learnings.append(learning.strip())
+
+
+#############################################
+# User verification (clarifier) response    #
+#############################################
+
+
+class ClarifyOption(BaseModel):
+    """One selectable answer."""
+
+    label: str
+    value: str
+
+
+class ClarifyQuestion(BaseModel):
+    """One question shown to the user as a form field."""
+
+    id: str = Field(..., description="snake_case key for the answer, e.g. geography")
+    label: str = Field(..., description="The question, short and specific")
+    type: Literal["text", "choice", "multi_choice"]
+    options: list[ClarifyOption] = Field(default_factory=list, description="Choices for choice/multi_choice")
+    default: str | None = Field(None, description="Pre-filled answer or the option value selected by default")
+    required: bool = False
+    help: str | None = Field(None, description="One line on why it matters or what a good answer looks like")
+
+
+class ClarifierResponse(BaseModel):
+    """What the user must confirm before work starts (or a decision mid-way)."""
+
+    needs_input: bool = Field(..., description="False when the request can be planned without asking")
+    intro: str = Field(..., description="One or two sentences: what was understood and what will happen next")
+    questions: list[ClarifyQuestion] = Field(default_factory=list, description="At most 6")
+    assumptions: list[str] = Field(default_factory=list, description="What will be assumed or cannot be done, stated plainly")

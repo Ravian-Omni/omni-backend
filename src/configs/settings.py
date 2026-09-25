@@ -40,9 +40,6 @@ class Settings:
         OMNI_COLLECTION: MongoDB collection name for omni.
         EMAIL_COLLECTION: MongoDB collection name for email manager.
         BROWSER_COLLECTION: MongoDB collection name for browser manager.
-        PYTHON_DEV_COLLECTION: MongoDB collection name for Python developer.
-        FILE_FINDER_COLLECTION: MongoDB collection name for file finder.
-        IMAGE_GENERATOR_COLLECTION: MongoDB collection name for image generator.
     """
 
     def __init__(self):
@@ -60,12 +57,20 @@ class Settings:
         self.PORT = os.getenv("PORT", "8000")
         self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
         self.USER_TOKEN = None
-        self.ROOT_DIR = os.path.join(Path.home(), ".ravian")
+        self.ROOT_DIR = os.path.join(Path.home(), ".daxagent")
         self.USER_EMAIL = os.getenv("email_username")
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
         self.USER_NAME = os.getenv("user_name")
-        self.AG2AI_PYTHON_PATH = os.getenv("AG2AI_PYTHON_PATH", "python")
+        # Default to the .venv in project root if it exists, otherwise "python"
+        _default_venv = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            ".venv",
+        )
+        self.AG2AI_PYTHON_PATH = os.getenv(
+            "AG2AI_PYTHON_PATH",
+            _default_venv if os.path.isdir(_default_venv) else "python",
+        )
         self.CHROME_EXECUTABLE_PATH = os.getenv(
             "CHROME_EXECUTABLE_PATH",
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -76,16 +81,33 @@ class Settings:
         self.OMNI_COLLECTION = os.getenv("OMNI_COLLECTION", "omni")
         self.EMAIL_COLLECTION = os.getenv("EMAIL_COLLECTION", "email_manager")
         self.BROWSER_COLLECTION = os.getenv("BROWSER_COLLECTION", "browser_manager")
-        self.PYTHON_DEV_COLLECTION = os.getenv(
-            "PYTHON_DEV_COLLECTION", "python_developer"
-        )
-        self.FILE_FINDER_COLLECTION = os.getenv("FILE_FINDER_COLLECTION", "file_finder")
-        self.IMAGE_GENERATOR_COLLECTION = os.getenv(
-            "IMAGE_GENERATOR_COLLECTION", "image_generator"
-        )
         self.SOFTWARE_DEV_COLLECTION = os.getenv(
             "SOFTWARE_DEV_COLLECTION", "software_developer"
         )
+
+        # Agent runtime (personas): "openai" runs them on the chat-completions model from
+        # configs/llm_model_mapping.json (gpt-5.6-luna); "anthropic" runs them on the Claude Agent SDK.
+        self.AGENT_PROVIDER = (os.getenv("DAXAGENT_AGENT_PROVIDER") or "anthropic").strip().lower()
+        self.AGENT_MODEL = os.getenv("DAXAGENT_AGENT_MODEL") or ("claude-sonnet-5" if self.AGENT_PROVIDER == "anthropic" else None)
+        self.AGENT_MAX_OUTPUT_TOKENS = int(os.getenv("DAXAGENT_AGENT_MAX_OUTPUT_TOKENS", "0") or 0)  # 0 = runner default
+        self.AGENT_MAX_TURNS = int(os.getenv("DAXAGENT_AGENT_MAX_TURNS", "0") or 0)  # 0 = persona default
+        self.AGENT_EFFORT = os.getenv("DAXAGENT_AGENT_EFFORT") or None  # low | medium | high | xhigh | max
+        self.AGENT_MAX_BUDGET_USD = float(os.getenv("DAXAGENT_AGENT_MAX_BUDGET_USD", "0") or 0) or None
+
+        # LLM Provider API Keys
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        self.TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+        self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+        self.BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
+        self.COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY")
+
+        # User Profile
+        self.USER_FIRST_NAME = os.getenv("USER_FIRST_NAME", "")
+        self.USER_LAST_NAME = os.getenv("USER_LAST_NAME", "")
+        self.USER_DOB = os.getenv("USER_DOB", "")
+        self.USER_GENDER = os.getenv("USER_GENDER", "")
+        self.USER_COUNTRY = os.getenv("USER_COUNTRY", "")
 
     def get_date_time_now(self) -> datetime:
         """Get the current date and time in UTC timezone.
@@ -175,19 +197,19 @@ class CapabilityType(Enum):
         OMNI: Main orchestration capability.
         EMAIL_MANAGER: Email sending and management capability.
         BROWSER_MANAGER: Web browser automation capability.
-        PYTHON_DEVELOPER: Python code development capability.
-        FILE_FINDER: File search and management capability.
-        IMAGE_GENERATOR: Image generation capability.
     """
 
     CHAT = "chat"
     OMNI = "omni"
     EMAIL_MANAGER = "email_sender"
     BROWSER_MANAGER = "web_browser"
-    PYTHON_DEVELOPER = "python_coder"
-    FILE_FINDER = "file_finder"
-    IMAGE_GENERATOR = "image_generator"
     SOFTWARE_DEVELOPER = "software_developer"
+    ML_ENGINEER = "ml_engineer"
+    LEAD_FINDER = "lead_finder"
+    BUYER_FINDER = "buyer_finder"
+    CONTACT_ENRICHER = "contact_enricher"
+    CAMPAIGN_BUILDER = "campaign_builder"
+    OUTREACH = "outreach"
 
     @classmethod
     def from_string(cls, capability_name: str):
@@ -224,11 +246,8 @@ class CapabilityType(Enum):
             CapabilityType.OMNI: settings.OMNI_COLLECTION,
             CapabilityType.EMAIL_MANAGER: settings.EMAIL_COLLECTION,
             CapabilityType.BROWSER_MANAGER: settings.BROWSER_COLLECTION,
-            CapabilityType.PYTHON_DEVELOPER: settings.PYTHON_DEV_COLLECTION,
-            CapabilityType.FILE_FINDER: settings.FILE_FINDER_COLLECTION,
-            CapabilityType.IMAGE_GENERATOR: settings.IMAGE_GENERATOR_COLLECTION,
             CapabilityType.SOFTWARE_DEVELOPER: settings.SOFTWARE_DEV_COLLECTION,
-        }[self]
+        }.get(self, self.value)  # personas use their own name as collection
 
     @classmethod
     def from_collection(cls, collection_name: str):

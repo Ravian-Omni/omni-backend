@@ -30,15 +30,15 @@ router = APIRouter()
 @router.post("/new_chat")
 async def create_omni_chat(
     request: Request,
-    user_id: str = "default_user",
+    user_id: str = "local_user",
     chat_dir: str = None,
 ):
     """Create a new general chat session.
 
     Args:
         request: The FastAPI request object.
-        user_id: User identifier. Defaults to "default_user".
-        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/ravian.
+        user_id: User identifier. Defaults to "local_user".
+        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/daxagent.
 
     Returns:
         dict: Created chat document containing chat_id, user_id, and timestamps.
@@ -47,7 +47,7 @@ async def create_omni_chat(
         HTTPException: If chat creation fails with appropriate status code.
     """
     try:
-        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "ravian")
+        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "daxagent")
         return await ChatService.create_omni_chat(user_id, chat_dir)
     except HTTPException:
         raise
@@ -62,7 +62,7 @@ async def create_omni_chat(
 async def create_capability_chat(
     request: Request,
     capability_name: str = Query(..., description="Capability name"),
-    user_id: str = "default_user",
+    user_id: str = "local_user",
     chat_dir: str = None,
 ):
     """Create a new capability-specific chat session.
@@ -70,8 +70,8 @@ async def create_capability_chat(
     Args:
         request: The FastAPI request object.
         capability_name: Name of the capability (e.g., browser, email, file_finder).
-        user_id: User identifier. Defaults to "default_user".
-        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/ravian.
+        user_id: User identifier. Defaults to "local_user".
+        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/daxagent.
 
     Returns:
         dict: Created capability chat document with chat_id, capability_id, and metadata.
@@ -80,7 +80,7 @@ async def create_capability_chat(
         HTTPException: If capability is invalid or chat creation fails.
     """
     try:
-        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "ravian")
+        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "daxagent")
         return await ChatService.create_capability_chat(
             capability_name, user_id, chat_dir
         )
@@ -97,12 +97,14 @@ async def create_capability_chat(
 async def get_omni_chat_history(
     user_id: str = Path(..., description="User ID"),
     chat_id: str = Path(..., description="Chat ID"),
+    capability: str = Query("omni", description="Chat collection/capability type"),
 ):
     """Get a specific chat by user_id and chat_id.
 
     Args:
         user_id: User identifier.
         chat_id: Chat session identifier.
+        capability: Collection name (omni, chats, etc.).
 
     Returns:
         SimplifiedChatHistory: Chat history containing chat_id, chat_dir, and raw_messages.
@@ -111,7 +113,7 @@ async def get_omni_chat_history(
         HTTPException: 404 if chat not found, 500 if retrieval fails.
     """
     try:
-        return await ChatService.get_omni_chat_history(user_id, chat_id)
+        return await ChatService.get_omni_chat_history(user_id, chat_id, capability)
     except HTTPException:
         raise
     except Exception as e:
@@ -194,15 +196,15 @@ async def get_capability_chat_history(
 @router.post("/chat_mode/new_chat")
 async def create_chat_mode_session(
     request: Request,
-    user_id: str = "default_user",
+    user_id: str = "local_user",
     chat_dir: str = None,
 ):
     """Create a new chat mode session.
 
     Args:
         request: The FastAPI request object.
-        user_id: User identifier. Defaults to "default_user".
-        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/ravian.
+        user_id: User identifier. Defaults to "local_user".
+        chat_dir: Directory path for storing chat data. Defaults to ROOT_DIR/daxagent.
 
     Returns:
         dict: Created chat document containing chat_id, user_id, and timestamps.
@@ -211,7 +213,7 @@ async def create_chat_mode_session(
         HTTPException: If chat creation fails with appropriate status code.
     """
     try:
-        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "ravian")
+        chat_dir = chat_dir or os.path.join(settings.ROOT_DIR, "daxagent")
         return await ChatService.create_chat_mode_session(user_id, chat_dir)
     except HTTPException:
         raise

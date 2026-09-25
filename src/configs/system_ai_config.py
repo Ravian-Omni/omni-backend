@@ -5,12 +5,10 @@ including groupchat settings, individual agent configurations, and LLM settings.
 Uses singleton pattern to ensure consistent configuration across the application.
 """
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
-
-from src.configs.routes import RoutesConfig
-from src.utilities.api_client import api_client
-from src.utilities.async_helpers import async_to_sync
 
 
 @dataclass
@@ -168,7 +166,7 @@ class GroupchatConfigurationManager:
             self.global_settings: dict[str, Any] = {}
             self.api_client = None
             GroupchatConfigurationManager._initialized = True
-            async_to_sync(self.load_configurations_from_api())
+            self.load_configurations()
 
     @classmethod
     def get_instance(cls) -> "GroupchatConfigurationManager":
@@ -189,38 +187,30 @@ class GroupchatConfigurationManager:
         cls._instance = None
         cls._initialized = False
 
-    async def load_configurations_from_api(self) -> None:
-        """Load all configurations from API.
+    def load_configurations(self) -> None:
+        """Load all configurations from local JSON file.
 
-        Fetch configurations from the API and parse them. Falls back to default
-        configurations if API fetch fails.
-
-        Raises:
-            Logs error if API fetch fails, then loads defaults.
+        Falls back to default configurations if file read fails.
         """
         try:
-            api_response = await self._fetch_all_configs_from_api()
+            config_path = (
+                Path(__file__).parent.parent.parent
+                / "configs"
+                / "agent_configurations.json"
+            )
+            with open(config_path, "r") as f:
+                api_response = json.load(f)
             self._parse_and_store_configurations(api_response)
         except Exception as e:
-            print(f"Error loading configurations from API: {e}")
+            print(f"Error loading configurations: {e}")
             self._load_default_configurations()
 
-    async def _fetch_all_configs_from_api(self) -> dict[str, Any]:
-        """Fetch all configurations from the API.
+    async def reload_configurations(self) -> None:
+        """Reload all configurations from file.
 
-        Currently returns hardcoded configuration data. In production, this should
-        make an actual API call to fetch configurations.
-
-        Returns:
-            Dictionary containing all groupchat configurations.
+        Fetch fresh configurations, replacing current configurations.
         """
-        # Replace this with your actual API call
-        result = await api_client.get(RoutesConfig.API_AGENT_CONFIGURATIONS)
-        result = result.standard_response()
-        if not result.get("success"):
-            raise Exception(f"Failed: {result.get('message', 'Unknown error')}")
-
-        return result.get("data")
+        self.load_configurations()
         """return {
             "omni": {
                 "groupchat_settings": {"max_round": 500},
@@ -551,9 +541,3 @@ class GroupchatConfigurationManager:
         """
         return groupchat_key in self.configurations
 
-    async def reload_configurations(self) -> None:
-        """Reload all configurations from API.
-
-        Fetch fresh configurations from the API, replacing current configurations.
-        """
-        await self.load_configurations_from_api()

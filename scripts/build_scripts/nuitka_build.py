@@ -30,10 +30,6 @@ def build_with_nuitka():
         "--include-package=src",
         "--include-package=src.capabilities",
         "--include-package=src.capabilities.browser_manager",
-        "--include-package=src.capabilities.email_manager",
-        "--include-package=src.capabilities.file_finder",
-        "--include-package=src.capabilities.image_generator",
-        "--include-package=src.capabilities.python_developer",
         "--include-package=src.configs",
         "--include-package=src.managers",
         "--include-package=src.routers",
@@ -116,13 +112,13 @@ def build_with_nuitka():
         "--prefer-source-code",
         # Output configuration
         "--output-dir=dist",
-        "--output-filename=ravian",
+        "--output-filename=daxagent",
         # Metadata
-        "--company-name=Ravian AI PVT LTD",
-        "--product-name=Ravian",
+        "--company-name=DAXAGENT PVT LTD",
+        "--product-name=DAXAGENT",
         "--file-version=1.0.0",
         "--product-version=1.0.0",
-        "--file-description=Ravian AI",
+        "--file-description=DAXAGENT",
         # Platform specific
         "--windows-console-mode=attach" if sys.platform == "win32" else "",
         (

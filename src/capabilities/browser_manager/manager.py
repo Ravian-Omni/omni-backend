@@ -14,15 +14,15 @@ import aiohttp
 # AutoGen imports
 import autogen
 import certifi
-import requests
 from autogen import AssistantAgent, UserProxyAgent
 
 # Browser-use imports
-from browser_use import ActionResult, Browser, BrowserConfig, Controller
-from browser_use.browser.context import BrowserContextConfig
+from browser_use import ActionResult, Controller
+from browser_use.llm import ChatOpenAI as BrowserUseChatOpenAI
+from langchain_openai import AzureChatOpenAI as ChatAzureOpenAI
+from langchain_openai import ChatOpenAI
 from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from loguru import logger
 from tavily import AsyncTavilyClient
 
@@ -191,7 +191,7 @@ class BrowserManager:
         # Setup directories
         self.browser_data_dir = (
             ensure_path(browser_data_dir) if browser_data_dir else None
-        ) or str(Path.home() / "browser_data")
+        ) or str(Path.home() / "browser_data" / self.context.capability_id)
 
         if self.save_results:
             self.results_dir = ensure_path(
@@ -214,8 +214,8 @@ class BrowserManager:
         # Initialize vision LLM
         browser_llm = self.browser_llm_config.get("config_list", [])[0]
         if "api_type" in browser_llm.keys() and browser_llm.get("api_type") == "azure":
-            self.vision_llm = AzureChatOpenAI(
-                azure_deployment=browser_llm.get("model"),
+            self.vision_llm = ChatAzureOpenAI(
+                model=browser_llm.get("model"),
                 temperature=browser_llm.get("temperature", 0.1),
                 api_key=browser_llm.get("api_key"),
                 azure_endpoint=browser_llm.get("base_url"),
@@ -223,11 +223,22 @@ class BrowserManager:
             )
 
         else:
-            self.vision_llm = ChatOpenAI(
-                model_name=browser_llm.get("model"),
-                temperature=browser_llm.get("temperature", 0.1),
-                api_key=browser_llm.get("api_key"),
+            # browser-use requires its own LLM class (it reads `.provider`);
+            # a langchain ChatOpenAI fails inside the Agent with AttributeError.
+            llm_kwargs = {
+                "model": browser_llm.get("model"),
+                "api_key": browser_llm.get("api_key"),
+            }
+            reasoning_effort = (browser_llm.get("extra_body") or {}).get(
+                "reasoning_effort"
             )
+            if reasoning_effort:
+                # gpt-5 models only allow tool calls with reasoning_effort="none",
+                # and reject a temperature other than the default.
+                llm_kwargs["reasoning_effort"] = reasoning_effort
+            else:
+                llm_kwargs["temperature"] = browser_llm.get("temperature", 0.1)
+            self.vision_llm = BrowserUseChatOpenAI(**llm_kwargs)
 
         # Browser session management
         self.browser_session = None
@@ -252,24 +263,20 @@ class BrowserManager:
             )
 
     def _get_user_country(self) -> str:
-        """Get user's country from IP address."""
-        try:
-            response = requests.get(RoutesConfig.IPINFO_URL, timeout=5)
-            data = response.json()
-            country_code = data.get("country")
-
-            country = next(
-                (
-                    c
-                    for c in country_codes
-                    if c["alpha_2"] == country_code or c["alpha_3"] == country_code
-                ),
-                None,
-            )
-            return country["name"] if country else f"Unknown ({country_code})"
-        except Exception as e:
-            print(f"Failed to get country: {e}")
+        """Get user's country from local settings."""
+        country_code = settings.USER_COUNTRY
+        if not country_code:
             return "Unknown"
+
+        country = next(
+            (
+                c
+                for c in country_codes
+                if c["alpha_2"] == country_code or c["alpha_3"] == country_code
+            ),
+            None,
+        )
+        return country["name"] if country else f"Unknown ({country_code})"
 
     async def _initialize_browser_session(self) -> BrowserSession:
         """Initialize browser session with optimized configuration."""
@@ -283,18 +290,8 @@ class BrowserManager:
             )
 
             self.browser_session = BrowserSession(browser_profile=browser_profile)
-            await self.browser_session.start()
 
         return self.browser_session
-
-    def _create_browser(self) -> Browser:
-        """Create browser instance with simplified configuration."""
-        return Browser(
-            config=BrowserConfig(
-                headless=self.headless,
-                new_context_config=BrowserContextConfig(highlight_elements=False),
-            )
-        )
 
     async def get_search_tool(self, query: str) -> str:
         """API-based search tool using Tavily."""
@@ -871,7 +868,7 @@ class BrowserManager:
             browser_session = await self._initialize_browser_session()
 
             # Setup controller with credentials handler
-            @self.controller.action("Ask user for credentials")
+            @self.controller.registry.action(description="Ask user for credentials")
             async def ask_human_local(question: str) -> ActionResult:
                 # answer = input(f'\n{question}\nInput: ')
                 answer = await self.context.manager_kwargs["input_function"](question)
@@ -880,23 +877,18 @@ class BrowserManager:
             # Create agent with minimal configuration and cancellation support
             agent = StreamingAgent(
                 task=task_goal,
-                browser=self._create_browser(),
                 browser_session=browser_session,
-                max_failures=3,  # Reduced from 5
-                retry_delay=2,  # Reduced from 3
+                max_failures=3,
                 use_vision=True,
-                generate_gif=(
-                    False if not self.save_results else self.browser_gif
-                ),  # Disabled to reduce file generation
-                max_input_tokens=180000,  # Reduced from 180000
-                validate_output=True,
+                generate_gif=(False if not self.save_results else self.browser_gif),
                 llm=self.vision_llm,
                 controller=self.controller,
+                # calculate_cost is set by StreamingAgent itself; passing it here
+                # too forwards it via **kwargs and duplicates the argument.
                 session_id=self.context.chat_id,
                 user_id=self.context.user_id,
                 ws_manager=ws_manager,
                 cancellation_token=self.context.cancellation_token,
-                # save_conversation_path=None if not self.save_results else self.results_dir,
             )
 
             # Run the agent
@@ -981,7 +973,14 @@ class BrowserManager:
         """Register functions with simplified descriptions."""
 
         async def browser_search_function_wrapper(
-            task_goal: str, starting_url: str = None
+            task_goal: Annotated[
+                str,
+                "The complete task for the browser, stated in full and including any URL to visit, e.g. 'Open https://example.com and report the exact page title'. Never omit the URL mentioned by the user.",
+            ],
+            starting_url: Annotated[
+                str,
+                "The URL to open first, e.g. 'https://example.com'. Provide it whenever the task mentions a specific site.",
+            ] = None,
         ):
             """Browser automation function."""
             return await self.get_browser_search_function(task_goal, starting_url)
@@ -1054,7 +1053,12 @@ class BrowserManager:
             or "default"
         )
         llm_browser_reader = LLMConfigManager.get_config(llm_config_name)
-        llm_browser_reader["config_list"][0]["tool_choice"] = {"type": "any"}
+        # "required" works for OpenAI; Anthropic uses {"type": "any"}
+        provider = llm_browser_reader["config_list"][0].get("model", "")
+        if "claude" in provider:
+            llm_browser_reader["config_list"][0]["tool_choice"] = {"type": "any"}
+        else:
+            llm_browser_reader["config_list"][0]["tool_choice"] = "required"
         return AssistantAgent(
             name="browser_reader",
             llm_config=llm_browser_reader,
@@ -1142,55 +1146,19 @@ class BrowserManager:
 
         return groupchat, manager
 
-    async def _cleanup_event_bus(self):
-        """Clean up EventBus instances to prevent conflicts."""
-        try:
-            # Check if the browser session has an event bus or agent
-            if hasattr(self.browser_session, "agent"):
-                agent = self.browser_session.agent
-                if hasattr(agent, "event_bus"):
-                    # Try to stop or clean up the event bus
-                    if hasattr(agent.event_bus, "stop"):
-                        await agent.event_bus.stop()
-                    elif hasattr(agent.event_bus, "close"):
-                        await agent.event_bus.close()
-                    elif hasattr(agent.event_bus, "cleanup"):
-                        await agent.event_bus.cleanup()
-
-            # Also check for global EventBus registry cleanup
-            if hasattr(self.browser_session, "_cleanup_event_system"):
-                await self.browser_session._cleanup_event_system()
-
-        except Exception as e:
-            print(f"Warning: Could not clean up EventBus: {e}")
-
     async def close_browser_session(self) -> bool:
-        """Attempt to close browser gracefully using the session's built-in methods."""
+        """Close browser session using CDP stop() method."""
         if self.browser_session is None:
             return True
 
         try:
-            await self._cleanup_event_bus()
-            # Try the standard close method first
-            if hasattr(self.browser_session, "close"):
-                await self.browser_session.close()
-
-            # Then try kill method
-            if hasattr(self.browser_session, "kill"):
-                await self.browser_session.kill()
-
-            # Try to close the browser if it has a browser attribute
-            if (
-                hasattr(self.browser_session, "browser")
-                and self.browser_session.browser
-            ):
-                await self.browser_session.browser.close()
-
+            await self.browser_session.stop()
             self.browser_session = None
             return True
 
         except Exception as e:
-            print(f"Error during graceful browser closure: {e}")
+            logger.warning(f"Error during browser closure: {e}")
+            self.browser_session = None
             return False
 
     async def __aenter__(self):

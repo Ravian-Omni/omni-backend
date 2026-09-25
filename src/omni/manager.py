@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import uuid
 from collections import defaultdict
 from string import Template
 from typing import Annotated, Any
@@ -10,35 +11,69 @@ from autogen import UserProxyAgent
 from loguru import logger
 
 from src.capabilities.browser_manager.manager import BrowserManager
-from src.capabilities.email_manager.manager import EmailManager
-from src.capabilities.file_finder.manager import FileFinder
-from src.capabilities.image_generator.manager import ImageGenerator
-from src.capabilities.python_developer.manager import PythonDeveloper
+from src.capabilities.software_developer.manager import SoftwareDeveloper
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
 from src.omni import prompts
+from src.agent_runtime import PERSONAS, run_persona, specialists
+from src.agent_runtime.prompts import (
+    BUYER_FINDER_DESCRIPTION,
+    CAMPAIGN_BUILDER_DESCRIPTION,
+    CONTACT_ENRICHER_DESCRIPTION,
+    LEAD_FINDER_DESCRIPTION,
+    ML_ENGINEER_DESCRIPTION,
+    OUTREACH_DESCRIPTION,
+)
 from src.omni.capabilities_descriptions import (
     email_manager_description,
-    file_finder_description,
-    image_generator_description,
-    python_coder_description,
+    software_developer_description,
     web_browser_description,
 )
+from src.utilities.custom_manager import ChatContext, create_capability_chat
 from src.omni.capability_manager import CapabilityConfig, CapabilityManager
 from src.omni.memory import OmniMemory
 from src.omni.response_format import (
     AgentSelectionResponse,
     CapabilityRoutingResponse,
+    ClarifierResponse,
     PlannerResponse,
     QuestionClassification,
 )
+from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
+from src.mcp_client import is_connected, list_tools, options, server_names
+from src.mcp_client.registry import register_mcp_tools
 from src.utilities.async_helpers import async_to_sync
-from src.utilities.storage import a_speak, update_chat_history
+from src.database import answer_decision, log_decision, update_chat_history
+from src.utilities.storage import a_speak
 
 today_date = dt.now()
+
+
+async def _mcp_planner_context() -> str:
+    """Describe the connected MCP servers for the planner's system message.
+
+    The planner routes by capability name, and MCP tools are not capabilities:
+    like Composio tools they are called by name on agent_caller. Naming them
+    here keeps the planner from reaching for web_browser instead.
+    """
+    from src.mcp_client.config import reserved_servers
+
+    sections = []
+    for server in reserved_servers():
+        note = options(server).get("planner_note")
+        if not note or not await is_connected(server):
+            continue
+        try:
+            names = ", ".join(t["name"] for t in await list_tools(server))
+        except Exception as e:
+            logger.warning(f"Could not describe MCP server '{server}' to planner: {e}")
+            continue
+        display = options(server).get("display_name", server)
+        sections.append(f"\n\n## {display} (connected)\n{note}Tools: {names}.\n")
+    return "".join(sections)
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):
@@ -146,13 +181,17 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         return self._calculate_agent_usage_delta(sender, sender.name)
 
     async def _send_websocket_message(self, message_data: dict) -> None:
-        """Send message to WebSocket clients."""
+        """Send message to WebSocket clients.
+
+        Sends with source='OMNI' and content as the full message_data dict,
+        matching the format the frontend expects for omni mode messages.
+        """
         try:
             websocket_manager = await get_websocket_manager()
             await websocket_manager.send_chat_message(
                 session_id=self.chat_id,
                 content=message_data,
-                source=CapabilityType.OMNI.value.upper(),
+                source="OMNI",
             )
         except Exception as e:
             logger.error(f"WebSocket send failed for chat_id {self.chat_id}: {e}")
@@ -163,7 +202,7 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             if agent_name == "manual_verification":
                 await a_speak(content)
             elif agent_name == "process_completion_agent":
-                await a_speak("Hey there! Ravian finished your task!")
+                await a_speak("Hey there! DAXAGENT finished your task!")
         except Exception as e:
             logger.error(f"Voice alert failed for agent {agent_name}: {e}")
 
@@ -217,7 +256,11 @@ class OmniGroupChatManager(autogen.GroupChatManager):
 
         # Process async operations
         # asyncio.create_task(self._handle_voice_alert(message_data["name"], message_data["content"]))
-        async_to_sync(self._send_websocket_message(websocket_message))
+        caller_prose = sender.name == "agent_caller" and not (isinstance(message, dict) and message.get("tool_calls"))
+        if not caller_prose:
+            # A caller message without a tool call is restated by the conversation
+            # agent; forwarding both showed every question twice.
+            async_to_sync(self._send_websocket_message(websocket_message))
         async_to_sync(
             update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION)
         )
@@ -297,6 +340,102 @@ class CustomUserProxyAgent(UserProxyAgent):
         # return await aioconsole.ainput(prompt)
 
 
+class FormProxyAgent(CustomUserProxyAgent):
+    """User proxy that shows the clarifier's questions as a form card and returns the answers.
+
+    The card is the same ``decision_card`` message the personas use, so the
+    frontend renders it with the other cards, and the answer is logged and
+    written to the chat history like every other decision.
+    """
+
+    def __init__(self, *args, chat_id: str = "", omni=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.chat_id = chat_id
+        self.omni = omni
+
+    @staticmethod
+    def _latest_form(messages: list[dict]) -> dict | None:
+        for message in reversed(messages):
+            if message.get("name") in ("clarifier", "manual_verification"):
+                try:
+                    data = json.loads(message.get("content") or "{}")
+                except (TypeError, ValueError):
+                    return None
+                return data if isinstance(data, dict) else None
+        return None
+
+    @staticmethod
+    def _answers_text(form: dict, reply: Any) -> tuple[str, str]:
+        """Render the reply as text for the agents, plus a one-line summary."""
+        questions = form.get("questions") or []
+        if isinstance(reply, str):
+            return f"User verification answer: {reply}", reply[:80]
+        if not isinstance(reply, dict) or reply.get("action") in ("reject", "skip"):
+            return (
+                "The user skipped the questions. Proceed with the stated assumptions and sensible defaults; do not ask again.",
+                "skipped",
+            )
+        values = reply.get("values") or {}
+        lines = []
+        for q in questions:
+            value = values.get(q.get("id"))
+            if value in (None, "", []):
+                value = q.get("default")
+            if isinstance(value, list):
+                labels = {o.get("value"): o.get("label") for o in q.get("options") or []}
+                value = ", ".join(str(labels.get(v, v)) for v in value)
+            elif q.get("options"):
+                labels = {o.get("value"): o.get("label") for o in q.get("options") or []}
+                value = labels.get(value, value)
+            lines.append(f"- {q.get('label')}: {value if value not in (None, '') else '(not provided)'}")
+        note = reply.get("text") or reply.get("note")
+        text = "User verification answers:\n" + "\n".join(lines)
+        if note:
+            text += f"\nAdditional note from the user: {note}"
+        if form.get("assumptions"):
+            text += "\nAssumptions the user saw and accepted:\n" + "\n".join(f"- {a}" for a in form["assumptions"])
+        return text, f"answered {len(lines)} question{'s' if len(lines) != 1 else ''}"
+
+    async def a_get_human_input(self, prompt: str) -> str:
+        messages = self.omni.groupchat.messages if self.omni is not None else []
+        form = self._latest_form(messages)
+        if not form or not form.get("questions"):
+            return await super().a_get_human_input(prompt)
+        asked_by = next((m.get("name") for m in reversed(messages) if m.get("name") in ("clarifier", "manual_verification")), "clarifier")
+        card = {
+            "card": "form",
+            "title": "A few details before I plan" if asked_by == "clarifier" else "Your call",
+            "message": form.get("intro") or "",
+            "questions": form.get("questions") or [],
+            "assumptions": form.get("assumptions") or [],
+            "asked_by": asked_by,
+            "task_id": getattr(self.omni, "task_id", None),
+        }
+        decision_id = await log_decision(self.chat_id, card["task_id"], "user_verification", "form", card)
+        card["id"] = decision_id
+        input_function = getattr(self, "input_function", None) or getattr(self.omni, "input_function", None)
+        if input_function is None:
+            raise RuntimeError("user_form has no input function; the WebSocket route must call omni.set_input_function")
+        reply = await input_function(json.dumps(card), input_type="decision_card", source="user_verification")
+        text, summary = self._answers_text(form, reply)
+        await answer_decision(decision_id, reply if isinstance(reply, dict | str) else str(reply))
+        try:
+            await update_chat_history(
+                self.chat_id,
+                {
+                    "role": "assistant",
+                    "name": "user_verification",
+                    "raw_message": {"type": "decision_card", **card, "answered": True, "answer": reply, "answer_summary": summary},
+                    "usage": {},
+                    "task_id": card["task_id"],
+                },
+                settings.OMNI_COLLECTION,
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist verification card: {e}")
+        return text
+
+
 class Omni:
     """Main Omni orchestrator for multi-agent task execution and capability management."""
 
@@ -304,14 +443,14 @@ class Omni:
         self,
         chat_id: str,
         user_id: str = "default_user",
-        chat_dir: str = os.path.join(settings.ROOT_DIR, "ravian"),
+        chat_dir: str = os.path.join(settings.ROOT_DIR, "daxagent"),
     ):
         self.user_id = user_id
         self.chat_id = chat_id
         self.chat_dir = chat_dir
         self.cancellation_token = None
         self.task_id = None
-        self.llm_config = LLMConfigManager.get_config("default")
+        self.llm_config = LLMConfigManager.get_config("gpt_4_1_mini")
         self.groupchat_config = (
             GroupchatConfigurationManager.get_instance().get_groupchat_configuration(
                 "omni"
@@ -328,13 +467,233 @@ class Omni:
             memory=self.memory,
         )
 
+        self._composio_initialized = False
         self.agents = self.get_agents()
         self._register_functions()
         self.get_chat_manager()
 
+    @classmethod
+    async def create(
+        cls,
+        chat_id: str,
+        user_id: str = "default_user",
+        chat_dir: str = None,
+    ) -> "Omni":
+        """Async factory method that initializes Omni with Composio tools.
+
+        Args:
+            chat_id: Unique chat session identifier.
+            user_id: User identifier for Composio tool access.
+            chat_dir: Directory for chat files.
+
+        Returns:
+            Fully initialized Omni instance with Composio tools registered.
+        """
+        if chat_dir is None:
+            chat_dir = os.path.join(settings.ROOT_DIR, "daxagent")
+        instance = cls(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        await instance.initialize_composio_tools_async()
+        await instance.register_mcp_specialists()
+        return instance
+
+    def _persona_function(self, persona_name: str):
+        """A callable the caller agent can invoke to run one persona."""
+
+        async def persona_wrapper(
+            query: Annotated[
+                str,
+                "The complete task for this agent: goal, inputs (ids, dates, artifact ids), constraints and the output wanted",
+            ]
+        ) -> Annotated[str, "The agent's summary and artifact ids"]:
+            return await self.run_persona_capability(persona_name, query)
+
+        persona_wrapper.__name__ = persona_name
+        return persona_wrapper
+
+    async def register_mcp_specialists(self) -> int:
+        """Register one capability per connected-app specialist and tell the planner about them."""
+        try:
+            personas = await specialists.refresh()
+        except Exception as e:
+            logger.warning(f"Specialists unavailable: {e}")
+            return 0
+        if not personas:
+            return 0
+        lines = []
+        for name, persona in personas.items():
+            autogen.agentchat.register_function(
+                self._persona_function(name),
+                caller=self.agent_caller,
+                executor=self.agent_executor,
+                name=name,
+                description=persona.description,
+            )
+            lines.append(f"- {name} ({persona.display_name}): {persona.description}")
+        block = (
+            "\n\n## Connected-app specialists\n"
+            "These are capabilities exactly like lead_finder: assign a task to one by its name. "
+            "Each owns one connected app and asks the user before spending or sending.\n" + "\n".join(lines) + "\n"
+        )
+        for agent in (self.planner, self.agent_router, self.clarifier):
+            agent.update_system_message(agent.system_message + block)
+        logger.info(f"Registered {len(personas)} MCP specialist(s): {', '.join(personas)}")
+        return len(personas)
+
+    async def initialize_composio_tools_async(self) -> int:
+        """Initialize Composio tools and register them with agent_caller/agent_executor.
+
+        Returns:
+            Number of Composio tools registered.
+        """
+        if self._composio_initialized:
+            logger.debug(f"Omni {self.chat_id} Composio already initialized")
+            return 0
+
+        try:
+            composio_tool_manager = ComposioToolManager(
+                user_id=self.user_id,
+                chat_agent=self.agent_caller,
+                agent_executor=self.agent_executor,
+            )
+            tool_count = await composio_tool_manager.register_all_tools_async()
+            self._composio_initialized = True
+            logger.info(
+                f"Registered {tool_count} Composio tools for omni session {self.chat_id}"
+            )
+
+            # Update planner with connected/available app info
+            try:
+                apps_info = await composio_tool_manager.get_user_connected_apps_async(self.user_id)
+                connected_apps = apps_info.get("app_names", [])
+
+                app_capabilities = {
+                    "GMAIL": "email — send, read, search, reply, forward emails",
+                    "GOOGLECALENDAR": "calendar — create events, check schedule, manage calendar",
+                    "GOOGLESHEETS": "spreadsheets — create, read, update spreadsheets",
+                    "GOOGLEDRIVE": "file storage — upload, download, share files",
+                    "SLACK": "messaging — send messages, manage channels",
+                    "ZOOM": "meetings — schedule and manage video meetings",
+                    "DISCORD": "chat — send messages, manage servers",
+                    "OUTLOOK": "email — Microsoft email and calendar",
+                    "ONEDRIVE": "storage — Microsoft cloud file storage",
+                    "TEAMS": "collaboration — Microsoft Teams chat and meetings",
+                    "GITHUB": "code — manage repos, issues, pull requests",
+                    "GITLAB": "devops — code repos and CI/CD",
+                    "LINEAR": "issues — create and manage issues/projects",
+                    "JIRA": "projects — agile project and issue tracking",
+                    "SALESFORCE": "CRM — sales and customer management",
+                    "HUBSPOT": "CRM — marketing and sales automation",
+                    "PIPEDRIVE": "sales — pipeline and deal management",
+                    "ZOHOCRM": "CRM — customer relationship management",
+                    "APOLLO": "sales intelligence — find prospects, contacts and company data, run outreach sequences",
+                    "ZOOMINFO": "sales intelligence — B2B contact and company data, enrichment and prospecting",
+                    "NOTION": "docs — create/edit pages and databases",
+                    "AIRTABLE": "data — database and spreadsheet hybrid",
+                    "MONDAY": "work — project management and workflows",
+                    "CANVA": "design — visual content creation",
+                    "TWITTER": "social — post tweets, manage account",
+                    "LINKEDIN": "professional — networking and content",
+                    "FACEBOOK": "social — page management and posts",
+                    "WHATSAPP": "messaging — business communication",
+                    "INSTANTLY": "outreach — email outreach automation",
+                    "ZENDESK": "support — customer support and ticketing",
+                    "PAGERDUTY": "ops — incident management and on-call",
+                    "POSTHOG": "analytics — product analytics",
+                    "SNOWFLAKE": "data — cloud data warehouse",
+                    "RAMP": "finance — corporate card and expenses",
+                    "STRAVA": "fitness — activity tracking",
+                }
+                all_apps = list(app_capabilities.keys())
+                not_connected = [a for a in all_apps if a not in connected_apps]
+
+                app_context = "\n\n## App Integration Status\n"
+
+                if connected_apps:
+                    app_context += "### Connected Apps (tools available for agent_caller):\n"
+                    for app in connected_apps:
+                        desc = app_capabilities.get(app, f"{app.lower()} — connected")
+                        app_context += f"- **{app}**: {desc}\n"
+                    app_context += (
+                        "\nFor tasks involving connected apps, use the corresponding capability name "
+                        "(e.g., 'email_sender' for Gmail, 'google_calendar' for Google Calendar). "
+                        "Do NOT use 'ml_engineer' or 'software_developer' for tasks these apps can handle directly.\n"
+                    )
+
+                if not_connected:
+                    app_context += "\n### Available to Connect (NOT yet connected):\n"
+                    for app in not_connected:
+                        desc = app_capabilities.get(app, f"{app.lower()}")
+                        app_context += f"- **{app}**: {desc}\n"
+
+                app_context += (
+                    "\nCRITICAL RULE: If a user's task requires an app that is NOT connected, "
+                    "you MUST use 'manual_verification' capability to tell the user: "
+                    "\"This task requires [App Name] to be connected. Please connect it in Settings > Connections, "
+                    "then try again.\" Do NOT attempt the task with ml_engineer, software_developer or any other workaround.\n"
+                )
+
+                self.planner.update_system_message(self.planner.system_message + app_context)
+                logger.info(f"Updated planner: {len(connected_apps)} connected, {len(not_connected)} available to connect")
+            except Exception as e:
+                logger.warning(f"Failed to update planner with app info: {e}")
+
+            try:
+                # Guardrails go to conversation_agent: it speaks to the user, whereas
+                # agent_caller only emits tool calls and could not ask for confirmation.
+                tool_count += await register_mcp_tools(
+                    self.agent_caller, self.agent_executor, self.conversation_agent,
+                                    only=reserved_servers(),
+                )
+                self.planner.update_system_message(
+                    self.planner.system_message + await _mcp_planner_context()
+                )
+            except Exception as e:
+                logger.warning(f"MCP tool registration failed: {e}")
+
+            return tool_count
+        except Exception as e:
+            logger.warning(f"Composio tool init failed (offline?): {e}")
+            return 0
+
+    async def connect_app(self, app_name: str) -> dict:
+        """Connect a Composio app and register its tools in the live session.
+
+        Args:
+            app_name: App name to connect (e.g., 'GMAIL', 'SLACK').
+
+        Returns:
+            Dict with success status, app name, and tool count.
+        """
+        logger.info(f"Connecting app {app_name} for omni session {self.chat_id}")
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.agent_caller,
+            agent_executor=self.agent_executor,
+        )
+        return await composio_tool_manager.connect_app_async(app_name)
+
+    async def disconnect_app(self, app_name: str) -> dict:
+        """Disconnect a Composio app and remove its tools from cache.
+
+        Args:
+            app_name: App name to disconnect (e.g., 'GMAIL', 'SLACK').
+
+        Returns:
+            Dict with success status and removed tool count.
+        """
+        logger.info(f"Disconnecting app {app_name} for omni session {self.chat_id}")
+        composio_tool_manager = ComposioToolManager(
+            user_id=self.user_id,
+            chat_agent=self.agent_caller,
+            agent_executor=self.agent_executor,
+        )
+        return await composio_tool_manager.disconnect_app_async(app_name)
+
     def set_input_function(self, input_function):
         """Set the custom input function for user interactions."""
         self.input_function = input_function
+        if getattr(self, "user_form", None) is not None:
+            self.user_form.set_input_function(input_function)
         return self.input_function
 
     def _set_cancellation_token(self, cancellation_token):
@@ -412,22 +771,6 @@ class Omni:
             logger.error(f"Error finding {capability_name} call ID: {e}")
             return None
 
-    async def get_image_generator(
-        self, query: Annotated[str, "The detailed image generation prompt"]
-    ):
-        """Execute the image generator capability."""
-        call_id = self.find_call_id("image_generator", query)
-        self.image_gen_config = CapabilityConfig(
-            name=CapabilityType.IMAGE_GENERATOR.value,
-            collection=settings.IMAGE_GENERATOR_COLLECTION,
-            manager_class=ImageGenerator,
-            completion_agent_name="process_completion",
-            task_id=self.task_id,
-            cancellation_token=self.cancellation_token,
-        )
-        return await self.capability_manager.execute_capability(
-            query, self.image_gen_config, call_id
-        )
 
     async def get_web_browser(
         self,
@@ -440,7 +783,9 @@ class Omni:
         "The complete search query with all the details like subject relationship with the message",
     ]:
         """Execute the web browser capability."""
-        call_id = self.find_call_id("web_browser", query)
+        # execute_capability refuses an empty call_id, and find_call_id returns None
+        # whenever the recorded tool arguments don't contain the query verbatim.
+        call_id = self.find_call_id("web_browser", query) or str(uuid.uuid4())
         self.web_browser_config = CapabilityConfig(
             name=CapabilityType.BROWSER_MANAGER.value,
             collection=settings.BROWSER_COLLECTION,
@@ -455,125 +800,177 @@ class Omni:
             query, self.web_browser_config, call_id
         )
 
-    async def get_python_coder(
-        self,
-        query: Annotated[
-            str,
-            "The complete  query with all the details, on what work we have to do and what we have to return for other agents to work on",
-        ],
-    ) -> Annotated[str, "The results"]:
-        """Execute the Python coder capability."""
-        call_id = self.find_call_id("python_coder", query)
+
+    async def run_persona_capability(self, name: str, query: str):
+        """Run one persona (software_developer, ml_engineer, lead_finder, ...) on the agent runtime.
+
+        Personas are Claude Agent SDK sessions rather than AutoGen groupchats, so
+        they are driven directly instead of through CapabilityManager.
+        """
+        cm = self.capability_manager
         websocket_manager = await get_websocket_manager()
-        self.python_coder_config = CapabilityConfig(
-            name=CapabilityType.PYTHON_DEVELOPER.value,
-            collection=settings.PYTHON_DEV_COLLECTION,
-            manager_class=PythonDeveloper,
-            completion_agent_name="process_completion_agent",
+        return await run_persona(
+            name,
+            query,
+            user_id=cm.user_id,
+            chat_id=cm.chat_id,
+            chat_dir=cm.chat_dir,
+            omni_memory=cm.memory,
+            websocket_manager=websocket_manager,
+            call_id=self.find_call_id(name, query) or str(uuid.uuid4()),
             task_id=self.task_id,
             cancellation_token=self.cancellation_token,
-            manager_kwargs={"websocket_manager": websocket_manager},
-        )
-        return await self.capability_manager.execute_capability(
-            query, self.python_coder_config, call_id
         )
 
-    async def get_email_sender(
-        self, query: Annotated[str, "The complete user query"]
-    ) -> dict:
-        """Execute the email sender capability."""
-        call_id = self.find_call_id("email_sender", query)
-        self.email_sender_config = CapabilityConfig(
-            name=CapabilityType.EMAIL_MANAGER.value,
-            collection=settings.EMAIL_COLLECTION,
-            manager_class=EmailManager,
-            completion_agent_name="process_completion_agent",
-            task_id=self.task_id,
-            cancellation_token=self.cancellation_token,
-            manager_kwargs={"input_function": self.input_function},
-        )
-        return await self.capability_manager.execute_capability(
-            query, self.email_sender_config, call_id
-        )
-
-    async def get_file_finder(self, query: Annotated[str, "The search query"]):
-        """Execute the file finder capability."""
-        call_id = self.find_call_id("file_finder", query)
-        self.file_finder_config = CapabilityConfig(
-            name=CapabilityType.FILE_FINDER.value,
-            collection=settings.FILE_FINDER_COLLECTION,
-            manager_class=FileFinder,
-            completion_agent_name="process_completion",
-            task_id=self.task_id,
-            cancellation_token=self.cancellation_token,
-            use_chat_messages=False,
-        )
-        return await self.capability_manager.execute_capability(
-            query, self.file_finder_config, call_id
-        )
+    async def get_software_developer(self, query: str):
+        """Execute the software developer persona."""
+        return await self.run_persona_capability("software_developer", query)
 
     def _register_functions(self):
 
         # Wrapper functions before registring to agents
 
-        async def image_generator_wrapper(
-            query: Annotated[str, "The detailed image generation prompt"]
-        ):
-            return await self.get_image_generator(query)
 
         async def web_browser_wrapper(
             query: Annotated[
                 str,
                 "The complete search query with all the details like subject relationship with the message",
             ]
-        ) -> Annotated[
-            str,
-            "The complete search query with all the details like subject relationship with the message",
-        ]:
+        ) -> Annotated[str, "The search results"]:
+            """Web search via Tavily, falling back to browser-use automation.
+
+            Tavily answers plain lookups in about a second; browser-use drives a
+            real Chrome browser and handles everything else (a specific URL to
+            open, interaction, or any Tavily failure).
+            """
+            tavily_key = getattr(settings, "TAVILY_API_KEY", None)
+            if tavily_key:
+                try:
+                    import httpx
+
+                    logger.info(f"Executing Tavily search for: {query[:100]}")
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            "https://api.tavily.com/search",
+                            json={
+                                "api_key": tavily_key,
+                                "query": query,
+                                "max_results": 5,
+                                "search_depth": "basic",
+                                "include_answer": True,
+                                "include_raw_content": False,
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+
+                    results = [
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "content": r.get("content", "")[:300],
+                        }
+                        for r in data.get("results", [])
+                    ]
+                    logger.info(f"Tavily search returned {len(results)} results")
+                    return json.dumps({
+                        "status": "success",
+                        "query": query,
+                        "answer": data.get("answer", ""),
+                        "results": results,
+                        "source": "tavily",
+                    })
+                except Exception as e:
+                    logger.warning(f"Tavily search failed ({e}); using browser-use")
+
             return await self.get_web_browser(query)
 
-        async def python_coder_wrapper(
-            query: Annotated[
-                str,
-                "The complete search query with all the details what work we have to do and what we have to return for other agents to work on",
-            ]
-        ) -> Annotated[str, "The results"]:
-            return await self.get_python_coder(query)
 
         async def email_sender_wrapper(
-            query: Annotated[str, "The complete user query"]
+            query: Annotated[str, "The complete user query for email operations"]
         ):
-            return await self.get_email_sender(query)
+            """Email capability via Composio Gmail. Executes directly or returns connect prompt."""
+            try:
+                from composio import Composio
 
-        async def file_finder_wrapper(query: Annotated[str, "The search query"]):
-            return await self.get_file_finder(query)
+                composio_api_key = LLMConfigManager.get_config("composio_api_key")
+                api_key = composio_api_key.get("config_list", [])[0].get("api_key")
+                if not api_key:
+                    return json.dumps({
+                        "error": "Composio API key not set. Please set it in Settings.",
+                        "action_required": "set_api_key",
+                    })
 
-        autogen.agentchat.register_function(
-            python_coder_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="python_coder",
-            # description="This tool will be used to write any sort of python code.",
-            description=python_coder_description,
-        )
+                composio_client = Composio(api_key=api_key)
+
+                # Verify active Gmail connection exists
+                connections = composio_client.connected_accounts.list(user_ids=[self.user_id])
+                gmail_active = any(
+                    c.toolkit and c.toolkit.slug.lower() == "gmail" and c.status == "ACTIVE"
+                    for c in connections.items
+                )
+                if not gmail_active:
+                    return json.dumps({
+                        "error": "Gmail is not connected. Please connect Gmail via Composio first.",
+                        "action_required": "connect_app",
+                        "app": "GMAIL",
+                        "instructions": "Use the sidebar to connect Gmail, or send: {\"type\": \"connect_app\", \"app\": \"GMAIL\"}",
+                    })
+
+                # Use LLM to extract email fields from the query
+                import openai as _openai
+                oai_key = getattr(settings, "OPENAI_API_KEY", None)
+                if not oai_key:
+                    return json.dumps({"error": "OpenAI API key not set, needed to parse email query."})
+
+                oai = _openai.OpenAI(api_key=oai_key)
+                extraction = oai.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": "Extract email fields from the user query. Return JSON with: recipient_email, subject, body. If not specified, use reasonable defaults. Body should be plain text."},
+                        {"role": "user", "content": query},
+                    ],
+                )
+                email_fields = json.loads(extraction.choices[0].message.content)
+                logger.info(f"Extracted email fields: {email_fields}")
+
+                result = composio_client.tools.execute(
+                    slug="GMAIL_SEND_EMAIL",
+                    user_id=self.user_id,
+                    arguments={
+                        "recipient_email": email_fields.get("recipient_email", ""),
+                        "subject": email_fields.get("subject", "No Subject"),
+                        "body": email_fields.get("body", ""),
+                        "user_id": "me",
+                    },
+                    dangerously_skip_version_check=True,
+                )
+                logger.info(f"GMAIL_SEND_EMAIL result: {result}")
+                return json.dumps({
+                    "status": "sent",
+                    "message": f"Email sent to {email_fields.get('recipient_email', '')}",
+                    "subject": email_fields.get("subject", ""),
+                    "result": str(result)[:500],
+                })
+            except Exception as e:
+                logger.error(f"Email send via Composio failed: {e}")
+                return json.dumps({
+                    "error": f"Failed to send email: {str(e)}",
+                    "query": query,
+                })
 
         autogen.agentchat.register_function(
             email_sender_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
             name="email_sender",
-            # description="This tool will be used to send emails as per the user's request.",
             description=email_manager_description,
         )
 
-        autogen.agentchat.register_function(
-            file_finder_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="file_finder",
-            # description="This tool will be used to find any file as per the user's request.",
-            description=file_finder_description,
-        )
+        # python_coder is not registered: software_developer handles all code and
+        # data work. get_python_coder() remains available to re-enable it.
+
 
         autogen.agentchat.register_function(
             web_browser_wrapper,
@@ -584,14 +981,55 @@ class Omni:
             description=web_browser_description,
         )
 
+        async def software_developer_wrapper(
+            query: Annotated[
+                str,
+                "The complete coding task: what to build, the platform/language, the required features and how the result should be delivered",
+            ]
+        ) -> Annotated[str, "The results"]:
+            return await self.get_software_developer(query)
+
         autogen.agentchat.register_function(
-            image_generator_wrapper,
+            software_developer_wrapper,
             caller=self.agent_caller,
             executor=self.agent_executor,
-            name="image_generator",
-            # description="This tool will be used to generate images form textual input.",
-            description=image_generator_description,
+            name="software_developer",
+            description=software_developer_description,
         )
+
+        # Personas on the agent runtime. Each is one function the caller can invoke;
+        # the persona asks the user for approvals and inputs through decision cards.
+        persona_descriptions = {
+            "ml_engineer": ML_ENGINEER_DESCRIPTION,
+            "lead_finder": LEAD_FINDER_DESCRIPTION,
+            "buyer_finder": BUYER_FINDER_DESCRIPTION,
+            "contact_enricher": CONTACT_ENRICHER_DESCRIPTION,
+            "campaign_builder": CAMPAIGN_BUILDER_DESCRIPTION,
+            "outreach": OUTREACH_DESCRIPTION,
+        }
+
+        def _make_persona_wrapper(persona_name: str):
+            async def persona_wrapper(
+                query: Annotated[
+                    str,
+                    "The complete task for this persona: goal, inputs (artifact ids, files), constraints and the output wanted",
+                ]
+            ) -> Annotated[str, "The persona's summary and artifact ids"]:
+                return await self.run_persona_capability(persona_name, query)
+
+            persona_wrapper.__name__ = persona_name
+            return persona_wrapper
+
+        for persona_name, description in persona_descriptions.items():
+            if persona_name not in PERSONAS:
+                continue
+            autogen.agentchat.register_function(
+                _make_persona_wrapper(persona_name),
+                caller=self.agent_caller,
+                executor=self.agent_executor,
+                name=persona_name,
+                description=description,
+            )
 
     def get_judge_question(self):
         """Create and configure the question judge agent."""
@@ -715,6 +1153,33 @@ class Omni:
             system_message=prompts.prob_status_checker,
         )
 
+    def _llm_config_for(self, agent_name: str, fallback: str = "gpt_4_1_mini"):
+        try:
+            name = self.groupchat_config.get_agent_config(agent_name).llm_config or fallback
+        except Exception:
+            name = fallback
+        return LLMConfigManager.get_config(name)
+
+    def get_clarifier(self):
+        """Create the intake agent that asks for missing inputs before planning."""
+        llm_config = self._llm_config_for("clarifier")
+        llm_config["response_format"] = ClarifierResponse
+        return autogen.AssistantAgent(
+            name="clarifier",
+            llm_config=llm_config,
+            system_message=prompts.clarifier,
+        )
+
+    def get_user_form(self):
+        """Create the proxy that shows clarifier/verification questions as a form card."""
+        return FormProxyAgent(
+            name="user_form",
+            human_input_mode="ALWAYS",
+            code_execution_config=False,
+            chat_id=self.chat_id,
+            omni=self,
+        )
+
     def get_manual_verification(self):
         """Create and configure the manual verification agent."""
         llm_config_name = (
@@ -722,10 +1187,11 @@ class Omni:
             or "default"
         )
         llm_config_mini = LLMConfigManager.get_config(llm_config_name)
+        llm_config_mini["response_format"] = ClarifierResponse
         return autogen.AssistantAgent(
             name="manual_verification",
             llm_config=llm_config_mini,
-            system_message="Ask the question to the user and wait for the response. ",
+            system_message=prompts.manual_verification,
         )
 
     def get_user_input(self):
@@ -753,6 +1219,39 @@ class Omni:
             system_message=prompts.process_completion,
         )
 
+    @staticmethod
+    def _has_pending_plan(messages: list) -> bool:
+        """Check whether an approved plan is still waiting to be executed.
+
+        Scans backwards for the first meaningful marker:
+        - process_completion_agent: the workflow already closed out, nothing pending
+        - get_user_acceptance: the user approved a plan, keep looking for that plan
+        - planner_agent: the plan itself; pending when it was approved and its
+          overall_status is not "completed"
+
+        Args:
+            messages: Group chat messages, oldest first.
+
+        Returns:
+            True if an approved plan still has work left to do.
+        """
+        approved = False
+        for msg in reversed(messages):
+            name = msg.get("name")
+            if name == "process_completion_agent":
+                return False
+            if name == "get_user_acceptance":
+                approved = True
+            elif name == "planner_agent":
+                try:
+                    status = json.loads(msg.get("content") or "{}").get(
+                        "overall_status"
+                    )
+                except (TypeError, ValueError):
+                    return False
+                return approved and status != "completed"
+        return False
+
     # dynamic, query classification and agent selection  conditional chat routing for task agent and manual verification
     def custom_speaker_selection_func(self, last_speaker: Any, groupchat: Any) -> Any:
         """Select the next speaker based on conversation state and agent responses."""
@@ -773,8 +1272,8 @@ class Omni:
                 return groupchat.agent_by_name("judge_question")
             if last_speaker.name in ["judge_question"]:
                 if "task_oriented" in messages[-1]["content"]:
-                    # if it is a task oriented question then route to planner agent
-                    return groupchat.agent_by_name("planner_agent")
+                    # ask for missing inputs first; the planner runs after the answers
+                    return groupchat.agent_by_name("clarifier")
                 # if it is a general conversation then route to conversation agent
                 if "conversation" in messages[-1]["content"]:
                     return groupchat.agent_by_name("conversation_agent")
@@ -788,9 +1287,24 @@ class Omni:
                 elif "process_completion" in messages[-1]["content"]:
                     return groupchat.agent_by_name("process_completion_agent")
 
+            # clarifier: show the form when it has questions, otherwise plan straight away
+            if last_speaker.name == "clarifier":
+                try:
+                    form = json.loads(messages[-1]["content"])
+                except (TypeError, ValueError):
+                    form = {}
+                if form.get("needs_input") and form.get("questions"):
+                    return groupchat.agent_by_name("user_form")
+                return groupchat.agent_by_name("planner_agent")
+
+            # the form's answers go to whoever asked: intake -> planner, mid-plan -> aligner
+            if last_speaker.name == "user_form":
+                asked_by = next((m.get("name") for m in reversed(messages[:-1]) if m.get("name") in ("clarifier", "manual_verification")), "clarifier")
+                return groupchat.agent_by_name("planner_agent" if asked_by == "clarifier" else "agent_aligner")
+
             # inner loop planner agent will report back to aligner agent
             if last_speaker.name in ["planner_agent"]:
-                if len(messages) >= 2 and messages[-2]["name"] == "judge_question":
+                if len(messages) >= 2 and messages[-2]["name"] in ("judge_question", "clarifier", "user_form"):
                     # prompt = json.dumps({"agent":"get_user_acceptance", "prompt":"Please confirm if you want to proceed with the plan generated by the planner agent."})
                     # answer = async_to_sync(self.input_function(prompt))
                     return groupchat.agent_by_name("get_user_acceptance")
@@ -803,24 +1317,47 @@ class Omni:
             # if last_speaker.name in ["user_input"]:
             #     return groupchat.agent_by_name("agent_aligner")
 
-            # inner loop manual verification agent will report back to aligner agent
+            # manual verification now produces a form; the user_form proxy shows it
             if last_speaker.name in ["manual_verification"]:
+                try:
+                    form = json.loads(messages[-1]["content"])
+                except (TypeError, ValueError):
+                    form = {}
+                if form.get("questions"):
+                    return groupchat.agent_by_name("user_form")
                 return groupchat.agent_by_name("user_input")
             if last_speaker.name in ["user_input"]:
                 return groupchat.agent_by_name("agent_aligner")
 
             # how the sequential processes will get called
             if last_speaker.name == "agent_router":
+                # Nothing to run means an input is missing: ask through a form
+                # instead of letting the caller write prose the user must parse.
+                try:
+                    routing = json.loads(messages[-1]["content"])
+                except (TypeError, ValueError):
+                    routing = {}
+                assignments = routing.get("task_assignments") if isinstance(routing, dict) else None
+                if not assignments or all(
+                    str(a.get("capability", "")).lower() in ("manual_verification", "user_verification")
+                    for a in assignments if isinstance(a, dict)
+                ):
+                    return groupchat.agent_by_name("manual_verification")
                 return groupchat.agent_by_name("agent_caller")
-            if last_speaker.name == "agent_caller" and messages[-1].get(
-                "content", None
-            ):
-                return groupchat.agent_by_name("conversation_agent")
             if last_speaker.name == "agent_caller":
-                return groupchat.agent_by_name("agent_executor")
+                # If agent_caller made a tool call, route to executor
+                if messages[-1].get("tool_calls"):
+                    return groupchat.agent_by_name("agent_executor")
+                # If agent_caller gave a text response (no tool call), route to conversation
+                return groupchat.agent_by_name("conversation_agent")
             if last_speaker.name == "agent_executor":
                 return groupchat.agent_by_name("planner_agent")
             if last_speaker.name == "chat_manager":
+                # A plan that was approved but never finished must resume execution.
+                # Otherwise a short reply like "ok" is classified as small talk and
+                # the accepted plan is never carried out.
+                if self._has_pending_plan(messages):
+                    return groupchat.agent_by_name("agent_aligner")
                 return groupchat.agent_by_name("judge_question")
 
             return None
@@ -835,6 +1372,8 @@ class Omni:
         self.judge_question = self.get_judge_question()
         self.conversation_agent = self.get_conversation_agent()
         self.planner = self.get_planner()
+        self.clarifier = self.get_clarifier()
+        self.user_form = self.get_user_form()
         self.agent_aligner = self.get_agent_aligner()
         self.agent_router = self.get_agent_router()
         self.agent_caller = self.get_agent_caller()
@@ -846,6 +1385,8 @@ class Omni:
         return [
             self.judge_question,
             self.conversation_agent,
+            self.clarifier,
+            self.user_form,
             self.planner,
             self.agent_aligner,
             self.agent_router,

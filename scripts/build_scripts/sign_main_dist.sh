@@ -49,7 +49,7 @@ load_env
 # Use absolute paths to avoid issues with working directory
 DIST_FOLDER_NAME="main.dist"
 DIST_FOLDER="$PROJECT_ROOT/dist/$DIST_FOLDER_NAME"
-BINARY_NAME="ravian"                       # Name of your main executable
+BINARY_NAME="daxagent"                       # Name of your main executable
 
 # Load signing variables from environment (set in .env)
 SIGNING_IDENTITY="${SIGNING_IDENTITY}"

@@ -14,11 +14,11 @@ import autogen
 from loguru import logger
 
 from src.configs.datetime_utils import dt
-from src.configs.routes import RoutesConfig
+from src.database import create_capability_chat  # noqa: F401
+from src.database import update_chat_history_by_context as update_chat_history  # noqa: F401
 from src.dependencies import get_websocket_manager
 from src.managers.cancellation_token import CancellationToken
 from src.omni.memory import OmniMemory
-from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
 
 
@@ -60,135 +60,6 @@ class ChatContext:
         """Initialize manager_kwargs to empty dict if not provided."""
         if self.manager_kwargs is None:
             self.manager_kwargs = {}
-
-
-async def create_capability_chat(context: ChatContext) -> dict[str, str]:
-    """Create a new capability chat session in the database.
-
-    Initialize a new chat document with all necessary metadata and store it
-    in the database using the capability's collection.
-
-    Args:
-        context: ChatContext containing all chat identifiers and configuration.
-
-    Returns:
-        Dictionary containing the created chat_id.
-
-    Raises:
-        Exception: If database chat creation fails.
-
-    Example:
-        >>> context = ChatContext(
-        ...     user_id="user123",
-        ...     chat_id="chat456",
-        ...     capability_name="search"
-        ... )
-        >>> result = await create_capability_chat(context)
-        >>> print(result["chat_id"])
-        chat456
-    """
-    chat_document = {
-        "user_id": context.user_id,
-        "chat_id": context.chat_id,
-        "call_id": context.call_id,
-        "capability_id": context.capability_id,
-        "messages": [],
-        "raw_messages": [],
-        "created_at": dt.now(),
-        "updated_at": dt.now(),
-    }
-
-    # Create database record
-    create_chat = await api_client.post(
-        RoutesConfig.API_CREATE_OMNI_CHAT,
-        params={"capability": context.collection_name},
-        data=chat_document,
-    )
-    create_chat = create_chat.standard_response()
-    if not create_chat.get("success"):
-        raise Exception(
-            f"Failed to create capbility_chat: {create_chat.get('message', 'Unknown error')}"
-        )
-
-    create_chat.get("data")
-    # await mongodb.insert_one(context.collection_name, chat_document)
-
-    # Return standardized response using Pydantic model
-    return {"chat_id": context.chat_id}
-
-
-async def update_chat_history(context: ChatContext, message: dict[str, Any]) -> bool:
-    """Update chat history in MongoDB.
-
-    Args:
-        context: Chat context with all identifiers.
-        message: Message data to store.
-
-    Returns:
-        True if update was successful.
-    """
-    try:
-        # Extract message fields safely
-        raw_message = {
-            k: message.get(k)
-            for k in ["role", "name", "raw_message", "usage", "task_id"]
-            if k in message
-        }
-        content_message = {
-            k: message.get(k) for k in ["role", "name", "content"] if k in message
-        }
-
-        raw_message["timestamp"] = dt.now_iso()  # Add timestamp to raw message
-
-        # Build push operations
-        push_operations = {"raw_messages": raw_message}
-        if content_message.get("content"):
-            push_operations["messages"] = content_message
-
-        # Prepare update document
-        update_document = {
-            "$push": push_operations,
-            "$set": {"updated_at": dt.now()},
-        }
-
-        # Execute update
-        filter_criteria = {
-            "user_id": context.user_id,
-            "chat_id": context.chat_id,
-            "call_id": context.call_id,
-            "capability_id": context.capability_id,
-        }
-
-        update_result = await api_client.post(
-            RoutesConfig.API_UPDATE_OMNI_CHAT,
-            params={"capability": context.collection_name},
-            data={"filter_criteria": filter_criteria, "document": update_document},
-        )
-        update_result = update_result.standard_response()
-        if not update_result.get("success"):
-            raise Exception(
-                f"Failed to update chat history: {update_result.get('message', 'Unknown error')}"
-            )
-
-        result = update_result.get("data")
-        # result = await mongodb_service.update_one(
-        #     context.collection_name,
-        #     filter_criteria,
-        #     update_document
-        # )
-
-        logger.info(
-            f"Chat history updated - chat_id: {context.chat_id}, "
-            f"call_id: {context.call_id}, capability: {context.capability_name}, "
-            f"modified: {result}"
-        )
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Failed to update chat history: {e}")
-        # return False
-        raise e
 
 
 class CustomGroupChatManager(autogen.GroupChatManager):
@@ -370,11 +241,18 @@ class CustomGroupChatManager(autogen.GroupChatManager):
             Exception: If WebSocket send operation fails.
         """
         try:
+            import json as _json
+
             websocket_manager = await get_websocket_manager()
+            content = message.get("content", "") if isinstance(message, dict) else str(message)
+            # Skip messages with no meaningful content (e.g. tool call messages)
+            if content is None or content == "":
+                return
+            source = message.get("name", self.context.capability_name) if isinstance(message, dict) else self.context.capability_name
             await websocket_manager.send_chat_message(
                 session_id=self.context.chat_id,
-                content=message,
-                source=self.context.capability_name,
+                content=content if isinstance(content, str) else _json.dumps(content),
+                source=source,
             )
         except Exception as e:
             logger.error(f"WebSocket send failed: {e}")

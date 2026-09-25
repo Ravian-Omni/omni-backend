@@ -58,10 +58,6 @@ def build_with_nuitka():
         "--include-package=src",
         "--include-package=src.capabilities",
         "--include-package=src.capabilities.browser_manager",
-        "--include-package=src.capabilities.email_manager",
-        "--include-package=src.capabilities.file_finder",
-        "--include-package=src.capabilities.image_generator",
-        "--include-package=src.capabilities.python_developer",
         "--include-package=src.configs",
         "--include-package=src.managers",
         "--include-package=src.routers",
@@ -145,15 +141,15 @@ def build_with_nuitka():
         # OUTPUT CONFIGURATION
         # ============================================================
         "--output-dir=dist",
-        "--output-filename=ravian",
+        "--output-filename=daxagent",
         # ============================================================
         # METADATA
         # ============================================================
-        "--company-name=Ravian AI PVT LTD",
-        "--product-name=Ravian AI",
+        "--company-name=DAXAGENT PVT LTD",
+        "--product-name=DAXAGENT",
         "--file-version=1.0.0",
         "--product-version=1.0.0",
-        "--file-description=Ravian AI - Browser Automation & AI Assistant",
+        "--file-description=DAXAGENT - Browser Automation & AI Assistant",
         # ============================================================
         # PLATFORM SPECIFIC
         # ============================================================

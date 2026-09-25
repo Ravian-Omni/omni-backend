@@ -112,7 +112,7 @@ async def _send_error(websocket: WebSocket, chat_id: str, message: str) -> None:
 
 def get_default_chat_dir() -> str:
     """Get the default chat directory path."""
-    return os.path.join(settings.ROOT_DIR, "ravian")
+    return os.path.join(settings.ROOT_DIR, "daxagent")
 
 
 async def load_software_dev_history(chat_id: str, user_id: str) -> dict | None:
@@ -587,25 +587,12 @@ async def create_software_dev_chat(
         chat_dir = ensure_path(chat_dir or get_default_chat_dir())
         chat_id = str(uuid.uuid4())
 
-        chat_document = {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "chat_dir": chat_dir,
-            "call_id": "Individual",
-            "capability_id": chat_id,
-            "messages": [],
-            "raw_messages": [],
-            "created_at": dt.now(),
-            "updated_at": dt.now(),
-        }
+        from src.services.chat_service import ChatService
 
-        # response = await api_client.post(
-        #     RoutesConfig.API_CREATE_OMNI_CHAT,
-        #     params={"capability": settings.SOFTWARE_DEV_COLLECTION},
-        #     data=chat_document,
-        # )
-        # result = response.standard_response()
-        result = {"success": True, "data": chat_document}  # Placeholder
+        chat_document = await ChatService.create_capability_chat(
+            "software_developer", user_id, chat_dir
+        )
+        result = {"success": True, "data": chat_document}
 
         if not result.get("success"):
             raise HTTPException(

@@ -14,80 +14,12 @@ from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
 from src.chat.tools.together_image import FluxImageGenerator
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
-from src.configs.routes import RoutesConfig
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
+from src.database import update_chat_history
+from src.mcp_client.registry import register_mcp_tools
 from src.dependencies import get_websocket_manager
-from src.utilities.api_client import api_client
 from src.utilities.async_helpers import async_to_sync
-
-# Import tool registration functions
-
-
-async def update_chat_history(
-    chat_id: str, message: dict, collection_name: str
-) -> bool:
-    """Update chat history in MongoDB with message data.
-
-    Args:
-        chat_id: Unique identifier for the chat session
-        message: Message dictionary containing role, name, content, and raw_message
-        collection_name: MongoDB collection name for the capability
-
-    Returns:
-        bool: True if update was successful
-
-    Raises:
-        Exception: If MongoDB operation fails
-    """
-    try:
-
-        # Extract required fields for different message types
-        required_fields = ["role", "name", "raw_message", "usage", "task_id"]
-        content_fields = ["role", "name", "content"]
-
-        raw_message_data = {
-            field: message[field] for field in required_fields if field in message
-        }
-        content_message_data = {
-            field: message[field] for field in content_fields if field in message
-        }
-
-        raw_message_data["timestamp"] = dt.now_iso()  # Add timestamp to raw message
-        # Build push operations
-        push_operations = {"raw_messages": raw_message_data}
-
-        # Only add to messages if content exists and is not empty
-        if content_message_data.get("content"):
-            push_operations["messages"] = content_message_data
-
-        # Prepare update document
-        update_document = {
-            "$push": push_operations,
-            "$set": {"updated_at": dt.now()},
-        }
-
-        # Execute update operation
-        filter_criteria = {"chat_id": chat_id}
-        update_result = await api_client.post(
-            RoutesConfig.API_UPDATE_CHAT,
-            params={"capability": collection_name},
-            data={"filter_criteria": filter_criteria, "document": update_document},
-        )
-        update_result = update_result.standard_response()
-        if not update_result.get("success"):
-            raise Exception(f"Failed: {update_result.get('message', 'Unknown error')}")
-
-        update_result = update_result.get("data")
-
-        # Log the actual result, not the task object
-        logger.info(f"MongoDB update completed for chat_id: {chat_id}")
-
-        return update_result
-
-    except Exception as e:
-        logger.error(f"Failed to update chat history for chat_id {chat_id}: {str(e)}")
-        raise
 
 
 class GroupChatManager(autogen.GroupChatManager):
@@ -336,7 +268,7 @@ class Chat:
         self,
         chat_id: str,
         user_id: str = "default_user",
-        chat_dir: str = os.path.join(settings.ROOT_DIR, "ravian"),
+        chat_dir: str = os.path.join(settings.ROOT_DIR, "daxagent"),
     ):
         self.user_id = user_id
         self.chat_id = chat_id
@@ -378,11 +310,37 @@ class Chat:
             Fully initialized Chat instance with all tools registered
         """
         if chat_dir is None:
-            chat_dir = os.path.join(settings.ROOT_DIR, "ravian")
+            chat_dir = os.path.join(settings.ROOT_DIR, "daxagent")
 
         instance = cls(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
         await instance.initialize_tools_async()
         return instance
+
+    MAX_TOOLS = 128  # OpenAI rejects requests with more tools than this
+
+    def _enforce_tool_limit(self) -> None:
+        """Keep the tool list under the model's limit: local and MCP tools first, then app tools round-robin."""
+        llm_config = self.chat_agent.llm_config or {}
+        tools = llm_config.get("tools") or []
+        if len(tools) <= self.MAX_TOOLS:
+            return
+        name = lambda t: t.get("function", {}).get("name", "")
+        is_app = lambda n: n[:1].isupper()  # Composio slugs are upper-case (GMAIL_..., GOOGLECALENDAR_...)
+        core = [t for t in tools if not is_app(name(t))]
+        by_app: dict[str, list] = {}
+        for t in tools:
+            if is_app(name(t)):
+                by_app.setdefault(name(t).split("_")[0], []).append(t)
+        kept, room = list(core), self.MAX_TOOLS - len(core)
+        queues = [list(v) for v in by_app.values()]
+        while room > 0 and any(queues):
+            for q in queues:
+                if q and room > 0:
+                    kept.append(q.pop(0))
+                    room -= 1
+        dropped = len(tools) - len(kept)
+        llm_config["tools"] = kept
+        logger.warning(f"Chat {self.chat_id}: {len(tools)} tools exceed the model limit; dropped {dropped} app tools")
 
     async def initialize_tools_async(self) -> int:
         """Initialize Composio tools asynchronously.
@@ -399,16 +357,66 @@ class Chat:
 
         logger.info(f"Initializing Composio tools for chat {self.chat_id}")
 
-        composio_tool_manager = ComposioToolManager(
-            user_id=self.user_id,
-            chat_agent=self.chat_agent,
-            agent_executor=self.agent_executor,
-        )
+        try:
+            composio_tool_manager = ComposioToolManager(
+                user_id=self.user_id,
+                chat_agent=self.chat_agent,
+                agent_executor=self.agent_executor,
+            )
+            tool_count = await composio_tool_manager.register_all_tools_async()
+        except Exception as e:
+            # No COMPOSIO_API_KEY (or offline): run chat without Composio app tools
+            logger.warning(f"Composio tool init failed (offline?): {e}")
+            self._initialized = True
+            return 0
 
-        tool_count = await composio_tool_manager.register_all_tools_async()
         self._initialized = True
 
         logger.info(f"Registered {tool_count} Composio tools for chat {self.chat_id}")
+
+        try:
+            tool_count += await register_mcp_tools(self.chat_agent, self.agent_executor)
+        except Exception as e:
+            # A remote MCP server being down must not stop the chat starting
+            logger.warning(f"MCP tool registration failed: {e}")
+
+        self._enforce_tool_limit()
+
+        # Update chat agent with connected app awareness
+        try:
+            apps_info = await composio_tool_manager.get_user_connected_apps_async(self.user_id)
+            connected_apps = apps_info.get("app_names", [])
+
+            all_supported = [
+                "GMAIL", "GOOGLECALENDAR", "GOOGLESHEETS", "GOOGLEDRIVE",
+                "SLACK", "ZOOM", "DISCORD", "OUTLOOK", "ONEDRIVE", "TEAMS",
+                "GITHUB", "GITLAB", "LINEAR", "JIRA",
+                "SALESFORCE", "HUBSPOT", "PIPEDRIVE", "ZOHOCRM",
+                "APOLLO", "ZOOMINFO",
+                "NOTION", "AIRTABLE", "MONDAY", "CANVA",
+                "TWITTER", "LINKEDIN", "FACEBOOK", "WHATSAPP", "INSTANTLY",
+                "ZENDESK", "PAGERDUTY", "POSTHOG", "SNOWFLAKE", "RAMP", "STRAVA",
+            ]
+            not_connected = [a for a in all_supported if a not in connected_apps]
+
+            app_context = "\n\n## App Connection Status\n"
+            if connected_apps:
+                app_context += f"**Connected apps (tools available):** {', '.join(connected_apps)}\n"
+            if not_connected:
+                app_context += f"**Available to connect (not yet connected):** {', '.join(not_connected)}\n"
+                app_context += (
+                    "\nWhen a user asks for something that requires a non-connected app "
+                    "(e.g., Google Calendar for scheduling, GitHub for code repos, Slack for messaging), "
+                    "tell the user: \"This requires [App Name] to be connected. "
+                    "You can connect it in **Settings > Connections**.\" "
+                    "Be specific about which app they need.\n"
+                )
+
+            self.chat_agent.update_system_message(self.chat_agent.system_message + app_context)
+            logger.info(f"Updated chat agent: {len(connected_apps)} connected, {len(not_connected)} available")
+        except Exception as e:
+            logger.warning(f"Failed to update chat agent with app info: {e}")
+
         return tool_count
 
     @staticmethod
@@ -562,39 +570,123 @@ class Chat:
                 "Search mode: 'comprehensive' (detailed results with extra snippets), 'quick' (fast basic results), 'recent' (time-filtered results)",
             ] = "comprehensive",
         ):
-            """Brave Search API tool with comprehensive result formatting.
+            """Web search tool using Tavily API.
 
             Args:
                 query: Search query
-                search_type: "quick" (basic), "comprehensive" (detailed), "recent" (with freshness filter)
-                count: Number of results (1-20)
-                freshness: Time filter - "pd", "pw", "pm", "py"
-                country: Country code
-                safesearch: Safe search level
+                search_type: "quick" (basic), "comprehensive" (detailed)
             """
-            # Initialize client with SSL verification enabled by default
-            # If you encounter SSL certificate errors, you can disable verification with verify_ssl=False
-            # However, this is NOT recommended for production environments
-            client = BraveSearchClient(verify_ssl=True)
-            search_tool = BraveSearchTool(client)
+            import httpx
 
-            # Perform search
-            return await search_tool.search(query=query, search_type=search_type)
+            tavily_key = settings.TAVILY_API_KEY
+            if not tavily_key:
+                return json.dumps({"error": "Tavily API key not set. Please set it via Settings > API Keys."})
+
+            try:
+                max_results = 3 if search_type == "quick" else 5
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(
+                        "https://api.tavily.com/search",
+                        json={
+                            "api_key": tavily_key,
+                            "query": query,
+                            "max_results": max_results,
+                            "include_answer": True,
+                            "search_depth": "basic" if search_type == "quick" else "advanced",
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                answer = data.get("answer", "")
+                results = data.get("results", [])
+                formatted = []
+                for r in results:
+                    formatted.append(f"**{r.get('title', '')}**\n{r.get('url', '')}\n{r.get('content', '')[:200]}")
+
+                return json.dumps({
+                    "status": "success",
+                    "query": query,
+                    "answer": answer,
+                    "results": formatted,
+                    "source": "tavily",
+                })
+            except Exception as e:
+                return json.dumps({"error": f"Search failed: {str(e)}", "query": query})
+
+        def file_search_tool(
+            filename: Annotated[str, "The filename or pattern to search for (e.g., 'report.pdf', '*.md', 'Backend_PRD')"],
+            directory: Annotated[str, "Directory to search in. Use '~' for home directory, '/' for entire system. Defaults to home directory."] = "~",
+            max_results: Annotated[int, "Maximum number of results to return"] = 20,
+        ) -> str:
+            """Search for files on the local filesystem by name or pattern."""
+            import os
+            import glob
+            import time
+
+            search_dir = os.path.expanduser(directory)
+            if not os.path.isdir(search_dir):
+                return json.dumps({"error": f"Directory not found: {search_dir}"})
+
+            results = []
+            search_pattern = filename
+
+            # If no wildcards, add them for partial matching
+            if "*" not in search_pattern and "?" not in search_pattern:
+                search_pattern = f"*{search_pattern}*"
+
+            try:
+                for root, dirs, files in os.walk(search_dir):
+                    # Skip hidden dirs and common large directories
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in (
+                        'node_modules', '__pycache__', '.git', 'venv', '.venv', 'Library', '.Trash'
+                    )]
+                    for f in files:
+                        if glob.fnmatch.fnmatch(f.lower(), search_pattern.lower()):
+                            filepath = os.path.join(root, f)
+                            try:
+                                stat = os.stat(filepath)
+                                size_kb = stat.st_size / 1024
+                                modified = time.strftime('%Y-%m-%d %H:%M', time.localtime(stat.st_mtime))
+                                results.append({
+                                    "name": f,
+                                    "path": filepath,
+                                    "size": f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB",
+                                    "modified": modified,
+                                })
+                            except OSError:
+                                results.append({"name": f, "path": filepath})
+
+                            if len(results) >= max_results:
+                                break
+                    if len(results) >= max_results:
+                        break
+            except PermissionError:
+                pass
+
+            if not results:
+                return json.dumps({"status": "no_results", "message": f"No files matching '{filename}' found in {search_dir}", "query": filename})
+
+            return json.dumps({
+                "status": "success",
+                "query": filename,
+                "directory": search_dir,
+                "results_count": len(results),
+                "files": results,
+            })
 
         if self.groupchat_config.function_descriptions:
-            if "image_generator" in self.groupchat_config.function_descriptions.keys():
-                image_generator = self.groupchat_config.function_descriptions.get(
-                    "image_generator"
-                )
-                autogen.agentchat.register_function(
-                    flux_image_generator_wrapper,
+            if "file_search" in self.groupchat_config.function_descriptions.keys():
+                file_search_desc = self.groupchat_config.function_descriptions.get("file_search")
+                autogen.register_function(
+                    file_search_tool,
                     caller=self.chat_agent,
                     executor=self.agent_executor,
-                    name="image_generator",
+                    name="file_search",
                     description=(
-                        image_generator.get("description")
-                        if image_generator.get("description")
-                        else "This tool will be used to generate images based on the information."
+                        file_search_desc.get("description")
+                        if file_search_desc.get("description")
+                        else "Search for files on the local filesystem by filename or pattern. Use this when a user asks to find, locate, or search for files on their computer."
                     ),
                 )
             if "web_api_search" in self.groupchat_config.function_descriptions.keys():
@@ -680,7 +772,7 @@ class Chat:
         )
         self.manager = GroupChatManager(
             groupchat=self.groupchat,
-            llm_config=self.llm_config,
+            llm_config=False,  # Custom speaker selection, no LLM needed for manager
             human_input_mode="ALWAYS",
             chat_id=self.chat_id,
             task_id=self.task_id,

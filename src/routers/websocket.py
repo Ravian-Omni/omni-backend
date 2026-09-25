@@ -213,8 +213,8 @@ async def _handle_messages(
                     process_id=message.get("process_id"),
                 )
 
-            # === CONNECT_APP: Connect a new Composio app (chat mode only) ===
-            elif msg_type == "connect_app" and mode == "chat":
+            # === CONNECT_APP: Connect a new Composio app (chat/omni mode) ===
+            elif msg_type == "connect_app" and mode in ("chat", "omni"):
                 app_name = message.get("app")
                 if not app_name:
                     await websocket.send_json(
@@ -248,8 +248,8 @@ async def _handle_messages(
                         }
                     )
 
-            # === DISCONNECT_APP: Disconnect a Composio app (chat mode only) ===
-            elif msg_type == "disconnect_app" and mode == "chat":
+            # === DISCONNECT_APP: Disconnect a Composio app (chat/omni mode) ===
+            elif msg_type == "disconnect_app" and mode in ("chat", "omni"):
                 app_name = message.get("app")
                 if not app_name:
                     await websocket.send_json(
@@ -297,7 +297,7 @@ async def _handle_messages(
 async def omni_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
+    user_id: str = "local_user",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """WebSocket endpoint for Omni multi-capability AI chat."""
@@ -338,7 +338,7 @@ async def omni_websocket(
             }
         )
 
-        omni = Omni(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        omni = await Omni.create(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
         await websocket.send_json(
             {
@@ -355,6 +355,7 @@ async def omni_websocket(
         omni.judge_question.update_system_message(
             omni.judge_question.system_message + context
         )
+        omni.clarifier.update_system_message(omni.clarifier.system_message + context)
 
         # Resume history
         if messages:
@@ -365,6 +366,7 @@ async def omni_websocket(
         input_func = ws_manager._create_input_func(chat_id)
         omni.user_input.set_input_function(input_func)
         omni.get_user_acceptance.set_input_function(input_func)
+        omni.user_form.set_input_function(input_func)
         omni.set_input_function(input_func)
 
         await websocket.send_json(
@@ -402,7 +404,7 @@ async def omni_websocket(
 async def chat_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "f1d36dfa-4091-703f-c5bf-601c56ea20f3",
+    user_id: str = "local_user",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
     """WebSocket endpoint for Chat mode AI conversations."""
@@ -503,7 +505,7 @@ async def chat_websocket(
 async def capability_websocket(
     websocket: WebSocket,
     chat_id: str,
-    user_id: str = "default_user",
+    user_id: str = "local_user",
     capability_name: str = "email_sender",
     ws_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
@@ -514,7 +516,12 @@ async def capability_websocket(
         collection_name = capability.collection
         class_instance = CAPABILITY_CLASS_MAP.get(capability_name)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        if not capability_name.startswith("mcp_"):
+            raise HTTPException(status_code=400, detail=str(e))
+        from src.services.websocket_service import get_capability_class
+
+        collection_name = capability_name
+        class_instance = get_capability_class(capability_name)
 
     if class_instance is None:
         raise HTTPException(
