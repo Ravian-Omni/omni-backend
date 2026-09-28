@@ -134,10 +134,32 @@ def is_enabled(server: str) -> bool:
 
 
 async def set_enabled(server: str, enabled: bool) -> None:
+    await _save_flag(server, enabled)
+
+
+def in_mode(server: str, mode: str) -> bool:
+    """The user's per-mode switch ("chat" or "task") for the server; on by default."""
+    return _flags.get(f"{mode}:{server}", True)
+
+
+async def set_mode(server: str, mode: str, on: bool) -> None:
+    await _save_flag(f"{mode}:{server}", on)
+
+
+async def _save_flag(key: str, on: bool) -> None:
+    global _flags_version
     from src.database import save_mcp_server_flag
 
-    await save_mcp_server_flag(server, enabled)
-    _flags[server] = enabled
+    await save_mcp_server_flag(key, on)
+    _flags[key] = on
+    _flags_version += 1
+
+
+_flags_version = 0  # bumped on every switch change, so open sessions rebuild their tool list
+
+
+def flags_version() -> int:
+    return _flags_version
 
 
 def enabled_servers() -> list[str]:
@@ -150,4 +172,5 @@ def reserved_servers() -> list[str]:
 
 def specialist_eligible(server: str) -> bool:
     """Servers that get their own sub-agent: enabled, not reserved, not opted out."""
-    return is_enabled(server) and not is_reserved(server) and options(server).get("specialist", True) is not False
+    return is_enabled(server) and in_mode(server, "task") and not is_reserved(server) \
+        and options(server).get("specialist", True) is not False

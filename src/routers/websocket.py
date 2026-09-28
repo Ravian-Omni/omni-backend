@@ -17,7 +17,8 @@ from loguru import logger
 from src.chat.manager import Chat
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
-from src.configs.settings import CapabilityType
+from src.configs.settings import CapabilityType, settings
+from src.database import update_chat_history
 from src.dependencies import get_websocket_manager
 from src.managers.connection import WebSocketManager
 from src.omni.manager import Omni
@@ -153,6 +154,11 @@ async def _handle_messages(
             message = json.loads(raw_message)
             msg_type = message.get("type")
 
+            # === USER_NOTE: a message sent while agents are working ===
+            # With nothing running it is simply the next task.
+            if msg_type == "user_note" and not ws_manager.is_running(chat_id):
+                message, msg_type = {"type": "start", "task": message.get("text"), "files": []}, "start"
+
             # === START: Begin chat stream ===
             if msg_type == "start":
                 logger.info(f"Start request for {mode} session {chat_id}")
@@ -176,6 +182,18 @@ async def _handle_messages(
                     )
 
                 _create_tracked_task(coro, websocket, chat_id, f"{mode}_stream")
+
+            elif msg_type == "user_note":
+                text = str(message.get("text") or "").strip()
+                if text:
+                    ws_manager.add_note(chat_id, text)
+                    collection = {"omni": "omni", "chat": settings.CHAT_COLLECTION}.get(mode)
+                    if collection:  # raw history only: AutoGen's resume rejects unknown speakers
+                        await update_chat_history(chat_id, {
+                            "role": "user", "name": "user", "usage": {},
+                            "raw_message": {"role": "user", "content": text, "type": "user_note"},
+                            "task_id": getattr(instance, "task_id", None),
+                        }, collection)
 
             # === STOP: Cancel current session ===
             elif msg_type == "stop":
@@ -400,6 +418,20 @@ async def omni_websocket(
 # =============================================================================
 
 
+def _sdk_chat(chat_id: str, user_id: str, chat_dir: str, ws_manager: WebSocketManager):
+    """Chat mode on the persona runtime: one assistant with every connected tool."""
+    from src.agent_runtime.session import PersonaSession
+    from src.omni.memory import OmniMemory
+    from src.utilities.custom_manager import ChatContext
+
+    context = ChatContext(
+        user_id=user_id, chat_id=chat_id, chat_dir=chat_dir, call_id=None, capability_id=None,
+        capability_name="assistant", collection_name=settings.CHAT_COLLECTION, omni_memory=OmniMemory(),
+        manager_kwargs={"websocket_manager": ws_manager},
+    )
+    return PersonaSession(context, "assistant")
+
+
 @router.websocket("/chat/{chat_id}")
 async def chat_websocket(
     websocket: WebSocket,
@@ -414,6 +446,7 @@ async def chat_websocket(
         return
 
     logger.info(f"WebSocket connected for chat session {chat_id}")
+    chat = None
 
     try:
         await websocket.send_json(
@@ -445,7 +478,10 @@ async def chat_websocket(
         )
 
         # Use async factory method for non-blocking tool registration
-        chat = await Chat.create(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
+        if settings.CHAT_ENGINE == "sdk":
+            chat = _sdk_chat(chat_id, user_id, chat_dir, ws_manager)
+        else:
+            chat = await Chat.create(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
 
         await websocket.send_json(
             {
@@ -459,7 +495,10 @@ async def chat_websocket(
         user_details = await get_user_details()
         user_context = extract_user_summary(user_details)
         context = build_user_context(user_context)
-        chat.chat_agent.update_system_message(chat.chat_agent.system_message + context)
+        if isinstance(chat, Chat):
+            chat.chat_agent.update_system_message(chat.chat_agent.system_message + context)
+        else:
+            chat.load_custom_instructions(context)
 
         # Resume history
         if messages:
@@ -467,7 +506,10 @@ async def chat_websocket(
 
         # Set up input functions
         input_func = ws_manager._create_input_func(chat_id)
-        chat.agent_executor.set_input_function(input_func)
+        if isinstance(chat, Chat):
+            chat.agent_executor.set_input_function(input_func)
+        else:
+            chat.start_warm_up()  # connect the SDK and its apps while the user types
         chat.set_input_function(input_func)
 
         await websocket.send_json(
@@ -494,6 +536,11 @@ async def chat_websocket(
     finally:
         LLMConfigManager.clear_cache()
         await ws_manager.disconnect(chat_id)
+        if chat is not None and not isinstance(chat, Chat):
+            try:  # stop the SDK client process, but never hold up a server reload or shutdown
+                await asyncio.wait_for(chat.cleanup(), timeout=5)
+            except Exception as e:
+                logger.warning(f"Chat session cleanup for {chat_id} cut short: {e!r}")
 
 
 # =============================================================================

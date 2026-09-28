@@ -11,7 +11,6 @@ from loguru import logger
 from src.chat import prompts
 from src.chat.tools.brave import BraveSearchClient, BraveSearchTool
 from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
-from src.chat.tools.together_image import FluxImageGenerator
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
@@ -547,18 +546,7 @@ class Chat:
         )
 
     def _register_local_functions(self):
-        """Register local tools (image generation, web search) for the chat manager."""
-
-        def flux_image_generator_wrapper(
-            query: Annotated[str, "The image generation prompt"],
-            filename: Annotated[str, "The filename to save the image as"],
-            width: Annotated[int, "Width of the image"] = 512,
-            height: Annotated[int, "Height of the image"] = 512,
-        ):
-            generator = FluxImageGenerator(output_dir=self.chat_dir)
-            return generator.generate_image(
-                prompt=query, filename=filename, width=width, height=height
-            )
+        """Register local tools (web search, file search) for the chat manager."""
 
         async def search_tool_wrapper(
             query: Annotated[

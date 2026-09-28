@@ -63,6 +63,8 @@ class WebSocketManager:
         self.active_executor: dict = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
         self._stop_flags: dict[str, bool] = {}
+        # Messages the user sent while a run was going; agents pick them up at their next step.
+        self._notes: dict[str, list[str]] = {}
 
         # Thread-safety locks for concurrent access
         self._connections_lock = asyncio.Lock()
@@ -326,6 +328,7 @@ class WebSocketManager:
                 self._cancellation_tokens.get(session_id, None)
             )
             omni.set_task_id(str(uuid.uuid4()))
+            await omni.refresh_user_context()
             task = asyncio.create_task(
                 omni.manager.a_initiate_chat(
                     omni.manager,
@@ -361,7 +364,14 @@ class WebSocketManager:
                         "timestamp": dt.now_iso(),
                     },
                 )
+                # Notes that arrived after the last agent finished become the next task.
+                if notes := self.take_notes(session_id):
+                    await self._send_message(session_id, {"type": "run_started", "timestamp": dt.now_iso()})
+                    asyncio.create_task(self.start_chat_stream(
+                        session_id, {"type": "start", "task": "\n\n".join(notes), "files": []}, omni
+                    ))
             else:
+                self.take_notes(session_id)  # a stopped run drops its notes
                 await self._send_message(
                     session_id,
                     {
@@ -605,6 +615,17 @@ class WebSocketManager:
             await self._input_responses[session_id].put(response)
         else:
             logger.warning(f"Received input response for inactive session {session_id}")
+
+    def is_running(self, session_id: str) -> bool:
+        task = self._active_tasks.get(session_id)
+        return bool(task and not task.done())
+
+    def add_note(self, session_id: str, text: str) -> None:
+        self._notes.setdefault(session_id, []).append(text)
+
+    def take_notes(self, session_id: str) -> list[str]:
+        """Hand over (and forget) the notes waiting for this session's agents."""
+        return self._notes.pop(session_id, [])
 
     async def stop_session(
         self, session_id: str, reason: str = "Session stopped"

@@ -168,7 +168,7 @@ planner = """
         ]
       },
       "ml_engineer": {
-        "description": "ML Engineer: analytics, charts, lead scoring, segmentation and model training on data files or artifacts",
+        "description": "Data Analyst (ml_engineer): analytics, charts, lead scoring, segmentation and model training on data files or artifacts",
         "abilities": [
           "Profiles and cleans CSV/Excel/JSON/parquet data and lead lists",
           "Trains and evaluates models (lead scoring, lookalike, segmentation, forecasting) and scores records",
@@ -248,6 +248,8 @@ planner = """
       "clarification_rule": "User verification already happened before you (the answers are in the chat). NEVER create a task whose capability is manual_verification just to collect inputs. Use manual_verification only for a decision that depends on results (e.g. choosing the enrichment scope once a lead list exists). The first task is always real work (lead_finder, ml_engineer, ...).",
       "persona_approvals_rule": "lead_finder, buyer_finder, contact_enricher, campaign_builder and outreach already ask the user themselves (list review, credit approval, send approval) while they run. Do NOT add separate manual_verification tasks for those reviews; one task per persona is enough.",
       "feasibility_rule": "Do not plan steps the capabilities cannot do (booking calendar slots, using intent data). Say so in overall_strategy and plan the nearest achievable outcome.",
+      "user_update_rule": "A capability result may end with 'USER UPDATE': the user changed the request while that step ran, and the capability already applied it. Treat the update as superseding the original request: rewrite the affected tasks to match it, mark them done when the result already satisfies the update, and never re-run the original version.",
+      "meeting_rule": "When Outreach reports interested replies, or the user asks to book meetings with contacts, plan a task for the connected Google Calendar specialist (an mcp_*googlecalendar capability, if listed) to find free slots and create the event with a Meet link; Outreach drafts the reply with those slots. Without a calendar specialist, say that Google Calendar needs connecting.",
       "sales_routing_rule": "Finding companies, businesses, prospects, leads, dental offices, restaurants, any 'find N <kind of business> in <place>' is ALWAYS lead_finder (Data Axle), never web_browser and never software_developer. People/decision makers at those companies: buyer_finder. Full contact details: contact_enricher. Charts, maps and other visuals of results are produced by the persona that owns the data (every persona can save interactive charts and maps); never plan a software_developer or web_browser task to 'show on a map', 'chart' or 'visualize' results."
     },
     "critical_instructions": {
@@ -846,7 +848,7 @@ Analyze the user input and classify as:
      - `📊 Data Analysis`: For files/structured data
      - `✉️ Email API`: When "send" or "notify" requested
      - `🎯 Sales personas`: find leads, find buyers, enrich contacts, build campaigns, run outreach (Data Axle + Gmail)
-     - `🧠 ML Engineer`: analytics, lead scoring, model training
+     - `🧠 Data Analyst`: analytics, lead scoring, model training
   3. Output structured results
 
 **Output Format**:

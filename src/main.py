@@ -22,6 +22,7 @@ from starlette.middleware.cors import CORSMiddleware
 from src.configs.settings import settings
 from src.dependencies import init_managers
 from src.routers.agents import router as agents_router
+from src.routers.campaigns import router as campaigns_router
 from src.routers import chat
 from src.routers import settings as settings_router
 from src.routers import mcp, share, software_developer, websocket
@@ -132,6 +133,7 @@ app.include_router(
     responses={404: {"description": "Not found"}},
 )
 app.include_router(agents_router, prefix="/agents", tags=["Agent Runtime"])
+app.include_router(campaigns_router, prefix="/campaigns", tags=["Campaigns"])
 
 
 # @app.get("/")

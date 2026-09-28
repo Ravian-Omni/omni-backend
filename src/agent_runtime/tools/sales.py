@@ -10,6 +10,7 @@ from loguru import logger
 from src.agent_runtime import sic
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
+from src.agent_runtime.tools.context import server_of as _server_of
 
 
 def _text(payload: Any) -> dict:
@@ -38,9 +39,26 @@ async def _credit_balance(server: str) -> int | None:
         return None
 
 
-def _server_of(full_tool: str) -> str:
-    parts = full_tool.split("__")
-    return parts[1] if len(parts) >= 3 and parts[0] == "mcp" else "daxagent"
+async def gmail_call(user_id: str, slug: str, arguments: dict) -> Any:
+    """Run one Composio Gmail action for the user; raises when Gmail is not connected."""
+    import asyncio
+
+    from composio import Composio
+
+    from src.configs.llm_configs_manager import LLMConfigManager
+
+    key = LLMConfigManager.get_config("composio_api_key").get("config_list", [{}])[0].get("api_key")
+    if not key:
+        raise RuntimeError("Composio API key not set. Add it in Settings.")
+    client = Composio(api_key=key)
+    connections = await asyncio.to_thread(client.connected_accounts.list, user_ids=[user_id])
+    if not any(c.toolkit and c.toolkit.slug.lower() == "gmail" and c.status == "ACTIVE" for c in connections.items):
+        raise RuntimeError("Gmail is not connected. Ask the user to connect Gmail in Settings, then try again.")
+    return await asyncio.to_thread(
+        client.tools.execute, slug=slug, user_id=user_id, arguments=arguments, dangerously_skip_version_check=True
+    )
+
+
 
 
 def build(ctx: ToolContext):
@@ -85,7 +103,7 @@ def build(ctx: ToolContext):
             balance_before=balance, detail=args.get("reason", ""),
         )
         if decision.approved:
-            ctx.spend_allowance[full] = count
+            ctx.spend_allowance[full] = ctx.spend_allowance.get(full, 0) + count  # approvals add up
             return _text({"approved": True, "tool": full.split("__")[-1], "calls_allowed": count, "balance_before": balance})
         return _text({"approved": False, "message": "The user declined the credit spend. Do not call the tool; report and offer a smaller batch."})
 
@@ -116,7 +134,8 @@ def build(ctx: ToolContext):
             subject=args.get("subject", ""), body_preview=args.get("body_preview", ""), detail=args.get("reason", ""),
         )
         if decision.approved:
-            ctx.send_allowance[f"mcp__daxagent__{tool_name}"] = len(recipients)
+            # Any send tool may deliver the approved batch (Outreach's Gmail tool or Gmail's own).
+            ctx.send_allowance["*"] = ctx.send_allowance.get("*", 0) + len(recipients)
             return _text({"approved": True, "sends_allowed": len(recipients), "tool": tool_name})
         return _text({"approved": False, "message": "The user declined this batch. Send nothing; report and ask what to change."})
 
@@ -185,59 +204,69 @@ def build(ctx: ToolContext):
         return _text({"approved": d.approved, "excluded_ids": excluded, "remaining_rows": payload["row_count"] - len(excluded), "note": d.text})
 
     # ---- Gmail through Composio -------------------------------------------------
-    def _composio():
-        from composio import Composio
-
-        from src.configs.llm_configs_manager import LLMConfigManager
-
-        cfg = LLMConfigManager.get_config("composio_api_key")
-        key = cfg.get("config_list", [])[0].get("api_key")
-        if not key:
-            raise RuntimeError("Composio API key not set. Add it in Settings.")
-        return Composio(api_key=key)
-
     async def _gmail_execute(slug: str, arguments: dict) -> dict:
-        import asyncio
-
-        client = _composio()
-        connections = await asyncio.to_thread(client.connected_accounts.list, user_ids=[ctx.user_id])
-        active = any(c.toolkit and c.toolkit.slug.lower() == "gmail" and c.status == "ACTIVE" for c in connections.items)
-        if not active:
-            return _error("Gmail is not connected. Ask the user to connect Gmail in Settings, then try again.")
-        result = await asyncio.to_thread(
-            client.tools.execute, slug=slug, user_id=ctx.user_id, arguments=arguments, dangerously_skip_version_check=True
-        )
+        try:
+            result = await gmail_call(ctx.user_id, slug, arguments)
+        except RuntimeError as e:
+            return _error(str(e))
         return _text(result if isinstance(result, dict | list | str) else str(result))
+
+    async def _send(slug: str, arguments: dict, args: dict, status: str) -> dict:
+        """Run a send or draft; with plan_id, log it to the campaign's send log as it happens."""
+        try:
+            result = await gmail_call(ctx.user_id, slug, arguments)
+        except RuntimeError as e:
+            return _error(str(e))
+        if args.get("plan_id") and isinstance(result, dict) and result.get("successful"):
+            from src.agent_runtime.tools.campaign import record
+
+            data = result.get("data") or {}
+            thread = (data.get("response_data") or data).get("threadId") or args.get("thread_id")
+            await record(ctx, args["plan_id"], {"to": args["to"].lower(), "step": args.get("step"), "status": status, "thread_id": thread})
+        return _text(result if isinstance(result, dict | list | str) else str(result))
+
+    CAMPAIGN_FIELDS = {
+        "plan_id": {"type": "string", "description": "From render_campaign; logs the send to the campaign's send log"},
+        "step": {"type": "integer", "description": "From render_campaign"},
+    }
 
     @tool(
         "gmail_send_email",
-        "Send one email through the user's connected Gmail. Requires request_send_approval first.",
+        "Send one email through the user's connected Gmail. Requires request_send_approval first. "
+        "Pass thread_id (from render_campaign) to send a follow-up as a reply in the same thread.",
         {
             "type": "object",
             "properties": {
                 "to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"},
                 "cc": {"type": "array", "items": {"type": "string"}}, "bcc": {"type": "array", "items": {"type": "string"}},
                 "is_html": {"type": "boolean"},
+                "thread_id": {"type": "string", "description": "Reply in this thread (follow-up steps)"},
+                **CAMPAIGN_FIELDS,
             },
             "required": ["to", "subject", "body"],
         },
     )
     async def gmail_send_email(args: dict) -> dict:
+        if args.get("thread_id"):
+            return await _send("GMAIL_REPLY_TO_THREAD", {
+                "thread_id": args["thread_id"], "recipient_email": args["to"], "message_body": args["body"],
+                "user_id": "me", "is_html": bool(args.get("is_html")),
+            }, args, "sent")
         arguments = {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me",
                      "is_html": bool(args.get("is_html"))}
         if args.get("cc"):
             arguments["cc"] = args["cc"]
         if args.get("bcc"):
             arguments["bcc"] = args["bcc"]
-        return await _gmail_execute("GMAIL_SEND_EMAIL", arguments)
+        return await _send("GMAIL_SEND_EMAIL", arguments, args, "sent")
 
     @tool(
         "gmail_create_draft",
         "Create a Gmail draft (not sent) in the user's connected Gmail. Requires request_send_approval with draft_only.",
-        {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "is_html": {"type": "boolean"}}, "required": ["to", "subject", "body"]},
+        {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "is_html": {"type": "boolean"}, **CAMPAIGN_FIELDS}, "required": ["to", "subject", "body"]},
     )
     async def gmail_create_draft(args: dict) -> dict:
-        return await _gmail_execute("GMAIL_CREATE_EMAIL_DRAFT", {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me", "is_html": bool(args.get("is_html"))})
+        return await _send("GMAIL_CREATE_EMAIL_DRAFT", {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me", "is_html": bool(args.get("is_html"))}, args, "drafted")
 
     @tool(
         "gmail_search_emails",

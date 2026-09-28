@@ -8,10 +8,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from src.database import load_mcp_tool_classes, save_mcp_tool_class
+from src.database import load_mcp_tool_classes, save_mcp_server_flag, save_mcp_tool_class
 from src.mcp_client import auth_type, call_tool, is_connected, list_tools, options, server_names, server_url
 from src.mcp_client.classify import TOOL_CLASSES, classify_tool
-from src.mcp_client.config import add_server, is_bundled, is_enabled, is_reserved, remove_server, set_enabled, specialist_eligible
+from src.mcp_client.config import (
+    add_server, in_mode, is_bundled, is_enabled, is_reserved, remove_server, set_enabled, set_mode, specialist_eligible,
+)
 from src.agent_runtime import specialists
 from src.agent_runtime.specialists import specialist_name
 from src.mcp_client.discovery import discover
@@ -48,6 +50,8 @@ async def _describe(name: str) -> dict[str, Any]:
         "bundled": is_bundled(name),
         "connected": await is_connected(name),
         "enabled": is_enabled(name),
+        "chat": in_mode(name, "chat"),
+        "task": in_mode(name, "task"),
         "reserved": is_reserved(name),
         "specialist": specialist_name(name) if specialist_eligible(name) else None,
     }
@@ -156,6 +160,8 @@ async def create_server(body: NewServer):
 
 class ServerUpdate(BaseModel):
     enabled: bool | None = Field(default=None, description="Switch the server on or off for chat, tasks and personas")
+    chat: bool | None = Field(default=None, description="Offer the server in chat mode")
+    task: bool | None = Field(default=None, description="Offer the server in task mode (agents and its specialist)")
     display_name: str | None = None
     description: str | None = None
     personas: list[str] | None = None
@@ -171,6 +177,9 @@ async def update_server(server: str, body: ServerUpdate):
     enabled = fields.pop("enabled", None)
     if enabled is not None:
         await set_enabled(server, enabled)
+    for mode in ("chat", "task"):
+        if (on := fields.pop(mode, None)) is not None:
+            await set_mode(server, mode, on)
     if fields:
         if is_bundled(server):
             raise HTTPException(status_code=400, detail="Bundled servers are edited in configs/mcp_servers.json (only the on/off switch is stored)")
@@ -191,7 +200,10 @@ async def delete_server(server: str):
     _require(server)
     if is_bundled(server):
         raise HTTPException(status_code=400, detail="Bundled servers cannot be removed, only disconnected")
-    composio_id = (options(server).get("composio") or {}).get("server_id")
+    composio = options(server).get("composio") or {}
+    composio_id = composio.get("server_id")
+    for toolkit in composio.get("toolkits") or []:
+        await save_mcp_server_flag(_dismissed_key(toolkit), False)  # the connection sync must not bring it back
     await forget_tokens(server)
     await remove_server(server)
     if composio_id:
@@ -376,6 +388,10 @@ async def composio_toolkits():
     return {"toolkits": sorted(by_toolkit.values(), key=lambda t: (not t["connected"], t["toolkit"]))}
 
 
+# Toolkits that find email addresses; Contact Enricher gets them, since Data Axle returns none.
+EMAIL_FINDERS = {"apollo", "hunter", "crustdata", "snov", "dropcontact", "findymail"}
+
+
 class ComposioServer(BaseModel):
     toolkits: list[str] = Field(..., min_length=1, description="Composio toolkit slugs, e.g. ['hubspot', 'apollo']")
     name: str | None = None
@@ -394,6 +410,8 @@ async def create_composio_server(body: ComposioServer):
     import asyncio
 
     client, api_key = _composio_client()
+    for toolkit in body.toolkits:
+        await save_mcp_server_flag(_dismissed_key(toolkit), True)  # an explicit add re-enables the sync for it
     listing = await composio_toolkits()
     known = {t["toolkit"]: t for t in listing["toolkits"]}
     metas: dict[str, Any] = {}
@@ -463,8 +481,9 @@ async def create_composio_server(body: ComposioServer):
         "header": "x-api-key",
         "composio": {"server_id": server_id, "toolkits": body.toolkits, "user_id": COMPOSIO_MCP_USER},
     }
-    if body.personas:
-        daxagent["personas"] = body.personas
+    personas = body.personas or (["contact_enricher"] if set(body.toolkits) & EMAIL_FINDERS else None)
+    if personas:
+        daxagent["personas"] = personas
     await add_server(slug, {"url": url, "daxagent": daxagent})
     await store_static_token(slug, api_key)
     logger.info(f"Composio MCP server '{slug}' registered ({server_id}) for {body.toolkits}")
@@ -475,3 +494,63 @@ async def create_composio_server(body: ComposioServer):
     except Exception as e:
         described["tools_error"] = str(e)
     return described
+
+
+def _dismissed_key(toolkit: str) -> str:
+    return f"composio-dismissed:{toolkit}"
+
+
+async def sync_composio_servers() -> dict[str, list[str]]:
+    """Give each ACTIVE OAuth connection in Composio its own MCP server, bound to that connection.
+
+    A connection made or renewed in Composio then reaches chat mode and becomes a task-mode
+    specialist without a manual "Add from Composio". A server bound to an older auth config
+    (whose connection expired) is re-pointed in place, keeping its name and settings. Apps the
+    user removed, apps inside a multi-app server, and API-key connections are left alone.
+    """
+    import asyncio
+
+    import httpx
+
+    from src.database import load_mcp_server_flags
+
+    client, api_key = _composio_client()
+    conns = await asyncio.to_thread(client.connected_accounts.list, user_ids=[COMPOSIO_MCP_USER])
+    active: dict[str, set[str]] = {}
+    for c in conns.items:
+        if c.status == "ACTIVE" and str(getattr(c.auth_config, "auth_scheme", "")).upper().startswith("OAUTH"):
+            active.setdefault(c.toolkit.slug, set()).add(c.auth_config.id)
+    async with httpx.AsyncClient(timeout=20) as http:
+        r = await http.get("https://backend.composio.dev/api/v3/mcp/servers", headers={"x-api-key": api_key}, params={"limit": 100})
+    r.raise_for_status()  # an error body must never read as "nothing is bound"
+    bound_to = {s["id"]: set(s.get("auth_config_ids") or []) for s in r.json()["items"]}
+    flags = await load_mcp_server_flags()
+    ours, covered = {}, set()
+    for name in server_names():
+        comp = options(name).get("composio") or {}
+        covered.update(comp.get("toolkits") or [])
+        if len(comp.get("toolkits") or []) == 1:
+            ours[comp["toolkits"][0]] = (name, comp.get("server_id"), bound_to.get(comp.get("server_id")))
+    result: dict[str, list[str]] = {"created": [], "rebound": [], "unchanged": []}
+    for toolkit, ids in active.items():
+        name, server_id, bound = ours.get(toolkit, (None, None, None))
+        if name and (bound is None or ids & bound):  # bound, or not in the listing (never guess)
+            result["unchanged"].append(toolkit)
+        elif name:
+            await asyncio.to_thread(client.mcp.update, server_id, toolkits=[{"toolkit": toolkit, "auth_config_id": sorted(ids)[0]}])
+            result["rebound"].append(toolkit)
+        elif toolkit in covered or flags.get(_dismissed_key(toolkit)) is False:
+            result["unchanged"].append(toolkit)
+        else:
+            await create_composio_server(ComposioServer(toolkits=[toolkit]))
+            result["created"].append(toolkit)
+    if result["created"] or result["rebound"]:
+        await specialists.refresh()  # once more, after every new server answers
+    logger.info(f"Composio sync: {result}")
+    return result
+
+
+@router.post("/composio/sync")
+async def composio_sync():
+    """Match MCP servers to the user's active OAuth connections in Composio."""
+    return await sync_composio_servers()

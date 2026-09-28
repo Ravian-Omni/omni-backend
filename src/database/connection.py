@@ -134,6 +134,15 @@ CREATE TABLE IF NOT EXISTS artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_chat_id ON artifacts(chat_id);
 
+-- What each user tells the agents to know and do (memory, per-agent instructions, workflows).
+CREATE TABLE IF NOT EXISTS user_prefs (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS geocode_cache (
     place TEXT PRIMARY KEY,
     lat REAL,

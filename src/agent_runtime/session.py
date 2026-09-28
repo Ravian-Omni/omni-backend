@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.agent_runtime import prefs
 from src.agent_runtime.decisions import DecisionCards
 from src.agent_runtime.personas import Persona, get_persona
 from src.agent_runtime.tools import ToolContext, build_server, full_name
@@ -25,7 +26,9 @@ from src.configs.datetime_utils import dt
 from src.configs.settings import settings
 from src.database import update_chat_history, update_chat_history_by_context
 from src.managers.cancellation_token import CancellationToken
-from src.mcp_client import auth_headers, is_connected, list_tools, options, server_names, server_url
+from src.agent_runtime.tools.context import server_of
+from src.mcp_client import auth_headers, call_tool, is_connected, list_tools, options, server_names, server_url
+from src.mcp_client.client import warm
 from src.mcp_client.classify import classify_tool
 from src.mcp_client.config import personas_for
 from src.database import load_mcp_tool_classes
@@ -33,6 +36,10 @@ from src.utilities.custom_manager import ChatContext
 from src.utilities.storage import ensure_path
 
 _RESULT_PREVIEW = 4000
+_NOTE_INTRO = (
+    "The user sent this while you were working. Take it into account now; "
+    "if it changes the task, adjust, and say so in your reply:\n"
+)
 
 
 def _python_executable() -> str:
@@ -59,6 +66,18 @@ def _result_text(content: Any) -> str:
         else:
             parts.append(str(block))
     return "\n".join(parts)
+
+
+def _routed(server: str, tool: str):
+    """Handler for an app tool served by the built-in server: calls the app over its kept-open connection."""
+
+    async def handler(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return {"content": [{"type": "text", "text": await call_tool(server, tool, args)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"{tool} failed: {e}"}], "is_error": True}
+
+    return handler
 
 
 class PersonaManager:
@@ -91,6 +110,13 @@ class PersonaManager:
         return None, last
 
 
+def _settings_version() -> tuple[int, int]:
+    """Changes in Settings (memory, agent instructions, server switches); a change rebuilds the client."""
+    from src.mcp_client.config import flags_version
+
+    return prefs.version(), flags_version()
+
+
 class PersonaSession:
     """Runs one persona for one chat."""
 
@@ -109,6 +135,10 @@ class PersonaSession:
         self._client_lock = asyncio.Lock()
         self._tool_names: dict[str, str] = {}
         self._remote_tools: dict[str, list[dict[str, Any]]] = {}  # server -> tool schemas (OpenAI runner)
+        self._stale = False  # a connection changed: rebuild the client (and its tool list) before the next turn
+        self._notes_seen: list[str] = []  # user notes delivered during the current turn
+        self._primed = False  # the current SDK client has seen this chat (else the history is replayed)
+        self._warm_task: asyncio.Task | None = None
         self._usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
 
         self.working_directory = ensure_path(os.path.join(context.chat_dir, "workspace"))
@@ -148,14 +178,17 @@ class PersonaSession:
         classes: dict[str, str] = {}
         if not self.persona.remote_mcp:
             return servers, classes
-        from src.mcp_client.config import is_enabled, is_reserved
+        from src.mcp_client.config import in_mode, is_enabled, is_reserved
 
+        mode = "chat" if self.persona.name == "assistant" else "task"  # chat mode runs only the assistant
+        wanted: list[str] = []
+        self._remote_tools = {}
         for name in server_names():
-            if not is_enabled(name):
+            if not is_enabled(name) or not in_mode(name, mode):
                 continue
             if self.persona.mcp_servers is not None:
                 # specialists (and any persona with an explicit list) get exactly their servers
-                if name not in self.persona.mcp_servers:
+                if "*" not in self.persona.mcp_servers and name not in self.persona.mcp_servers:
                     continue
             else:
                 # job personas: the reserved servers plus servers assigned to them by name;
@@ -165,14 +198,21 @@ class PersonaSession:
                     continue
                 if allowed is not None and self.persona.name not in allowed and not is_reserved(name):
                     continue
+            wanted.append(name)
+
+        async def probe(name: str):
             if not await is_connected(name):
-                continue
+                return None
             try:
-                headers = await auth_headers(name)
-                tools = await list_tools(name)
+                return name, await auth_headers(name), await list_tools(name)
             except Exception as e:
                 logger.warning(f"Skipping MCP server '{name}' for {self.persona.name}: {e}")
+                return None
+
+        for found in await asyncio.gather(*(probe(n) for n in wanted)):  # in parallel: each is a network round trip
+            if not found:
                 continue
+            name, headers, tools = found
             servers[name] = {"type": "http", "url": server_url(name), **({"headers": headers} if headers else {})}
             self._remote_tools[name] = tools
             overrides = await load_mcp_tool_classes(name)
@@ -181,6 +221,26 @@ class PersonaSession:
                     t["name"], t["description"], t.get("annotations"), overrides.get(t["name"])
                 )
         return servers, classes
+
+    def _routed_tools(self, remote_classes: dict[str, str]) -> tuple[list, dict[str, str]]:
+        """App tools served through the built-in server, keeping each tool's read/spend/send class.
+
+        The CLI then connects to no app server at start (that took ~4 s per session); the
+        backend calls the apps over connections it keeps open.
+        """
+        from claude_agent_sdk import SdkMcpTool
+
+        tools, classes = [], {}
+        for server, schemas in self._remote_tools.items():
+            warm(server)
+            alias = server.removeprefix("composio-")
+            for t in schemas:
+                name = f"{alias}__{t['name']}"
+                tools.append(SdkMcpTool(name=name, description=t["description"],
+                                        input_schema=t["input_schema"] or {"type": "object", "properties": {}},
+                                        handler=_routed(server, t["name"])))
+                classes[full_name(name)] = remote_classes.get(f"mcp__{server}__{t['name']}", "read")
+        return tools, classes
 
     def _system_prompt(self, remote_notes: str) -> str:
         text = self.persona.system_prompt.format(
@@ -194,28 +254,28 @@ class PersonaSession:
         return text + remote_notes
 
     async def _build_options(self):
-        from claude_agent_sdk import ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
-        server, dax_names, dax_classes = build_server(self.tool_context)
+        self._built_for = _settings_version()
         remote, remote_classes = await self._remote_servers()
-        self.tool_context.remote_tool_classes = remote_classes
-        self._classes = {**dax_classes, **remote_classes}
+        routed, routed_classes = self._routed_tools(remote_classes)
+        server, dax_names, dax_classes = build_server(self.tool_context, routed)
+        dax_classes.update(routed_classes)  # spend/send app tools stay behind the approval gate
+        self.tool_context.remote_tool_classes = routed_classes
+        self._classes = dax_classes
 
-        # Hide only the spend/send tools a persona was not given; read-only helpers stay
-        # available so a call for one never ends in a permission denial mid-run.
-        hidden = [
-            full_name(n) for n in dax_names
-            if n not in self.persona.daxagent_tools and dax_classes.get(full_name(n)) != "read"
-        ]
+        # Nothing is hidden: a hidden tool the model still calls ends in a hard denial mid-run.
+        # Spend/send tools stay out of `allowed`, so every call goes through the approval gate.
         allowed = list(self.persona.builtin_tools)
         allowed += [full_name(n) for n in dax_names if dax_classes.get(full_name(n)) == "read"]
-        allowed += [name for name, cls in remote_classes.items() if cls == "read"]
 
         notes = ""
         for name in remote:
-            note = options(name).get("system_prompt_append")
+            # persona_prompt_append: the server's rules written for agents that have approval cards
+            note = options(name).get("persona_prompt_append") or options(name).get("system_prompt_append")
             if note:
                 notes += note
+        notes += await prefs.prompt_notes(self.context.user_id, self.persona.name)  # Settings > Memory and Agents
         api_key = settings.ANTHROPIC_API_KEY or os.environ.get("ANTHROPIC_API_KEY", "")
         model = getattr(settings, "AGENT_MODEL", None) or "claude-sonnet-5"
         self._budget = float(getattr(settings, "AGENT_MAX_BUDGET_USD", None) or self.persona.max_budget_usd or 0) or None
@@ -223,11 +283,14 @@ class PersonaSession:
             system_prompt=self._system_prompt(notes),
             tools=list(self.persona.builtin_tools),
             allowed_tools=allowed,
-            disallowed_tools=hidden,
-            mcp_servers={"daxagent": server, **remote},
+            mcp_servers={"daxagent": server},  # app tools are routed through it (see _routed_tools)
             strict_mcp_config=True,
             permission_mode="default",
             can_use_tool=self._permission_gate,
+            hooks={  # user notes sent mid-run reach the agent at its next step
+                "PostToolUse": [HookMatcher(hooks=[self._note_after_tool])],
+                "Stop": [HookMatcher(hooks=[self._note_before_stop])],
+            },
             cwd=self.working_directory,
             add_dirs=[self.file_location, self.artifacts_dir],
             env={"ANTHROPIC_API_KEY": api_key},
@@ -258,21 +321,21 @@ class PersonaSession:
 
         cls = self._class_of(tool_name)
         short = tool_name.split("__")[-1]
-        server = tool_name.split("__")[1] if tool_name.startswith("mcp__") else "builtin"
+        server = server_of(tool_name) if tool_name.startswith("mcp__") else "builtin"
         if cls == "read":
             return PermissionResultAllow(updated_input=input_data)
         allowance = self.tool_context.spend_allowance if cls == "spend" else self.tool_context.send_allowance
         key = tool_name if tool_name in self._classes else next((k for k in self._classes if k.endswith("__" + short)), tool_name)
-        if allowance.get(key, 0) > 0:
-            allowance[key] -= 1
-            return PermissionResultAllow(updated_input=input_data)
-        if cls == "spend":
-            decision = await self.decisions.confirm_spend(
-                tool=short, server=server, count=1, credits=1, detail=json.dumps(input_data)[:300],
-            )
-            if decision.approved:
+        for k in (key, "*"):  # "*" = an approved send batch, whichever send tool the agent then uses
+            if allowance.get(k, 0) > 0:
+                allowance[k] -= 1
                 return PermissionResultAllow(updated_input=input_data)
-            return PermissionResultDeny(message="The user declined this credit spend. Do not retry it; report and ask what to do.")
+        if cls == "spend":
+            # One card per batch, never one per call: the agent asks for the whole batch first.
+            return PermissionResultDeny(message=(
+                f"No credit approval for this call, and nothing was spent. Call request_spend_approval once with "
+                f"tool={short} and the total number of records you will enrich; after the user approves, retry the calls."
+            ))
         recipients = [str(input_data.get(k)) for k in ("to", "recipient_email", "recipient", "email") if input_data.get(k)]
         decision = await self.decisions.confirm_send(
             tool=short, server=server, channel="email" if "mail" in short.lower() else short,
@@ -317,7 +380,10 @@ class PersonaSession:
             own = dict(message)
             if content:
                 own["content"] = content
-            await update_chat_history_by_context(self.context, own)
+            if self.context.call_id:
+                await update_chat_history_by_context(self.context, own)
+            else:  # chat mode: its row carries no call/capability id to filter on
+                await update_chat_history(self.context.chat_id, own, self.context.collection_name)
         except Exception as e:
             logger.warning(f"[{self.persona.name}] history write failed: {e}")
         if self.mirror_collection:
@@ -395,6 +461,15 @@ class PersonaSession:
         """Run the persona on one user message; returns its final text."""
         if self._check_cancellation():
             raise asyncio.CancelledError("Operation cancelled before start")
+        # An approval covers the turn it was given in, never a later one.
+        self.tool_context.spend_allowance.clear()
+        self.tool_context.send_allowance.clear()
+        self._notes_seen = []
+        if notes := self._take_notes():
+            user_message = f"{user_message}\n\n{_NOTE_INTRO}{notes}"
+        if self._stale or (self._client is not None and getattr(self, "_built_for", None) != _settings_version()):
+            await self._drop_client()  # the next call builds a client with the current tools and prompt
+            self._stale = False
         await self._ensure_ws()
         await self._ensure_chat_record()
         await self._persist("user", "user", {"role": "user", "content": user_message}, content=user_message)
@@ -409,7 +484,7 @@ class PersonaSession:
         if self._history[:-1]:
             # The SDK session keeps its own context while connected; for a fresh
             # connection we replay the stored history as context.
-            if self._client is None:
+            if not self._primed:
                 previous = "\n\n".join(
                     f"[{m['role']}] {m['content']}" for m in self._history[:-1] if m.get("content")
                 )[-12000:]
@@ -434,6 +509,7 @@ class PersonaSession:
         await self._persist("assistant", self.persona.name, started_event)
         try:
             await client.query(prompt)
+            self._primed = True
             async for msg in client.receive_response():
                 if isinstance(msg, SystemMessage):
                     if msg.subtype == "init":
@@ -534,7 +610,46 @@ class PersonaSession:
             "assistant", self.persona.name, {"role": "assistant", "content": final_text, "final": True},
             content=None, usage=self._usage.copy(),
         )
+        if self._notes_seen:  # the orchestrator must learn the request changed, or it redoes the old version
+            final_text += "\n\nUSER UPDATE (sent while this step ran; it supersedes the original request):\n" + "\n".join(
+                f"- {n}" for n in self._notes_seen)
         return final_text
+
+    # --------------------------------------------------------- user notes
+    def _take_notes(self) -> str:
+        """Messages the user sent while this run was going, as one block ('' when none)."""
+        take = getattr(self.websocket_manager, "take_notes", None)
+        notes = take(self.context.chat_id) if take else []
+        self._notes_seen += notes
+        return "\n".join(f"- {n}" for n in notes)
+
+    async def _note_after_tool(self, input_data: Any, tool_use_id: str | None, context: Any) -> dict:
+        notes = self._take_notes()
+        if not notes:
+            return {}
+        logger.info(f"[{self.persona.name}] delivering user note after a tool call")
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _NOTE_INTRO + notes}}
+
+    async def _note_before_stop(self, input_data: Any, tool_use_id: str | None, context: Any) -> dict:
+        notes = self._take_notes()
+        if not notes:
+            return {}
+        logger.info(f"[{self.persona.name}] user note arrived as the run was ending; continuing")
+        return {"decision": "block", "reason": _NOTE_INTRO + notes}
+
+    # --------------------------------------------------------- connections
+    async def connect_app(self, app_name: str) -> dict:
+        """An app was connected or disconnected in Composio: sync servers; the next turn sees the change."""
+        try:
+            from src.routers.mcp import sync_composio_servers
+
+            await sync_composio_servers()
+        except Exception as e:
+            logger.warning(f"[{self.persona.name}] Composio sync after '{app_name}' skipped: {e}")
+        self._stale = True
+        return {"success": True, "app": app_name}
+
+    disconnect_app = connect_app
 
     # --------------------------------------------------------- compatibility
     def set_task_id(self, task_id: str) -> None:
@@ -575,13 +690,32 @@ class PersonaSession:
         target = process_id or self.tool_registry.command_executor.get_current_process_id()
         return bool(target and self.tool_registry.command_executor.resize_pty(target, cols, rows))
 
-    async def cleanup(self) -> None:
+    def start_warm_up(self) -> None:
+        """Start the SDK client and its tool servers in the background, before the first message (~10 s saved)."""
+
+        async def warm() -> None:
+            try:
+                await self._ensure_ws()
+                await self._ensure_client()
+            except Exception as e:
+                logger.warning(f"[{self.persona.name}] warm-up failed; the first message starts the client: {e}")
+
+        self._warm_task = asyncio.create_task(warm())
+
+    async def _drop_client(self) -> None:
+        """Stop the SDK client; the next turn starts a fresh one with the current tools."""
+        if self._warm_task and not self._warm_task.done():
+            self._warm_task.cancel()
+        self._primed = False
         if self._client is not None:
             try:
                 await self._client.disconnect()
             except Exception as e:
                 logger.debug(f"[{self.persona.name}] disconnect: {e}")
             self._client = None
+
+    async def cleanup(self) -> None:
+        await self._drop_client()
         await self.tool_registry.cleanup()
         await self.terminal_manager.cleanup_all()
 

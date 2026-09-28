@@ -50,4 +50,7 @@ async def run_persona(
         return f"error: {name} failed: {e}"
     finally:
         if session is not None:
-            await session.cleanup()
+            try:  # never let a stuck CLI shutdown hold up the orchestrator or a server reload
+                await asyncio.wait_for(session.cleanup(), timeout=5)
+            except Exception as e:
+                logger.warning(f"{name} session cleanup cut short: {e!r}")

@@ -12,12 +12,13 @@ from typing import Any
 
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
+from src.database import get_artifact as db_get_artifact
 from src.database import list_artifacts as db_list_artifacts
 from src.database import save_artifact as db_save_artifact
 
 KINDS = (
     "lead_list", "buyer_map", "enriched_contacts", "campaign_plan", "send_log",
-    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "other",
+    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "snippets", "other",
 )
 
 # Visual kinds ship their data with the chat event so the UI can draw them at once.
@@ -35,6 +36,23 @@ def load(ctx: ToolContext, artifact_id: str) -> dict[str, Any]:
         raise FileNotFoundError(f"No artifact '{artifact_id}' in this chat")
     with open(path) as f:
         return json.load(f)
+
+
+async def load_record(chat_id: str, artifact_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """An artifact's record and payload by id, checked against the chat."""
+    record = await db_get_artifact(artifact_id)
+    if not record or record["chat_id"] != chat_id or not os.path.exists(record["path"]):
+        raise FileNotFoundError(f"No artifact '{artifact_id}' in this chat")
+    with open(record["path"]) as f:
+        return record, json.load(f)
+
+
+async def save_payload(record: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Rewrite an artifact in place (a user edit from the Console)."""
+    payload["row_count"] = record["row_count"] = len(payload.get("rows", []))
+    with open(record["path"], "w") as f:
+        json.dump(payload, f, indent=1, default=str)
+    await db_save_artifact(record)
 
 
 def _columns(rows: list[dict], given: list[str] | None) -> list[str]:
@@ -56,8 +74,9 @@ async def write(
     source: str = "",
     artifact_id: str | None = None,
     meta: dict[str, Any] | None = None,
+    announce: bool = True,
 ) -> dict[str, Any]:
-    """Create or replace an artifact and announce it to the chat."""
+    """Create or replace an artifact and (unless announce is False) show it in the chat."""
     artifact_id = artifact_id or f"{kind}-{uuid.uuid4().hex[:8]}"
     os.makedirs(ctx.artifacts_dir, exist_ok=True)
     columns = _columns(rows, columns)
@@ -75,10 +94,13 @@ async def write(
         "source": source,
         "created_at": dt.now_iso(),
     }
-    payload = {**record, "columns": columns, "rows": rows, "meta": meta or {}}
+    meta = {**(meta or {}), "rev": int((meta or {}).get("rev") or 0) + 1}  # lets the Console spot agent edits
+    payload = {**record, "columns": columns, "rows": rows, "meta": meta}
     with open(record["path"], "w") as f:
         json.dump(payload, f, indent=1, default=str)
     await db_save_artifact(record)
+    if not announce:
+        return record
     preview = rows[:VISUAL_PREVIEW_ROWS] if record["kind"] in VISUAL_KINDS else rows[:10]
     await ctx.emit(
         {
@@ -167,6 +189,7 @@ def build(ctx: ToolContext):
                 "artifact_id": {"type": "string"},
                 "rows": {"type": "array", "items": {"type": "object"}, "description": "Full replacement rows"},
                 "remove_ids": {"type": "array", "items": {"type": "integer"}, "description": "_id values to drop"},
+                "base_rev": {"type": "integer", "description": "meta.rev from your read_artifact; required with rows"},
                 "title": {"type": "string"},
             },
             "required": ["artifact_id"],
@@ -177,6 +200,10 @@ def build(ctx: ToolContext):
             payload = load(ctx, args["artifact_id"])
         except FileNotFoundError as e:
             return _error(str(e))
+        rev = int((payload.get("meta") or {}).get("rev") or 0)
+        if args.get("rows") is not None and int(args.get("base_rev") or 0) != rev:
+            # The user may have edited it in the Console since you read it; replacing rows would lose that.
+            return _error(f"'{payload['id']}' changed since you read it (now rev {rev}). read_artifact again and reapply your change with base_rev {rev}.")
         rows = args.get("rows") if args.get("rows") is not None else payload["rows"]
         if args.get("remove_ids"):
             drop = set(args["remove_ids"])

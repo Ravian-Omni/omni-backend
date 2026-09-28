@@ -63,7 +63,7 @@ def _make_caller(server: str, tool: str, input_schema: dict[str, Any]):
     return run
 
 
-async def register_mcp_tools(chat_agent, agent_executor, prompt_agent=None, only: list[str] | None = None) -> int:
+async def register_mcp_tools(chat_agent, agent_executor, prompt_agent=None, only: list[str] | None = None, mode: str = "chat") -> int:
     """Register every connected MCP server's tools; return how many were added.
 
     Servers that have not been signed in are skipped, so chat works normally
@@ -76,16 +76,17 @@ async def register_mcp_tools(chat_agent, agent_executor, prompt_agent=None, only
             (guardrails such as the Data Axle credit gate). Defaults to
             chat_agent; Omni passes the agent that talks to the user, since
             there the caller is not user-facing.
+        mode: "chat" or "task"; servers the user switched off for that mode are skipped.
     """
     prompt_agent = prompt_agent or chat_agent
     registered = 0
     # Composio-bridged MCP servers expose the same tools chat mode already has from the
     # Composio SDK; registering them twice doubles the tool list for nothing.
     existing = _registered_names(chat_agent)
-    from src.mcp_client.config import is_enabled
+    from src.mcp_client.config import in_mode, is_enabled
 
     for server in server_names():
-        if not is_enabled(server) or (only is not None and server not in only):
+        if not is_enabled(server) or not in_mode(server, mode) or (only is not None and server not in only):
             continue
         bridged = [t.upper() for t in ((options(server).get("composio") or {}).get("toolkits") or [])]
         have_apps = {n.split("_")[0] for n in existing if n and n[:1].isupper()}

@@ -26,6 +26,7 @@ COMMON_TOOLS = [
     "list_artifacts",
     "read_artifact",
     "update_artifact",
+    "remember",
 ]
 
 
@@ -61,7 +62,7 @@ def _register(p: Persona) -> Persona:
 
 _register(Persona(
     name="software_developer",
-    display_name="Software Developer",
+    display_name="Growth Engineer",
     tagline="Writes and runs code in your workspace",
     description=prompts.SOFTWARE_DEVELOPER_DESCRIPTION,
     system_prompt=prompts.SOFTWARE_DEVELOPER,
@@ -73,8 +74,8 @@ _register(Persona(
 
 _register(Persona(
     name="ml_engineer",
-    display_name="ML Engineer",
-    tagline="Analytics, lead scoring and model training on your data",
+    display_name="Data Analyst",
+    tagline="Analysis, charts, lead scoring and segments from your data",
     description=prompts.ML_ENGINEER_DESCRIPTION,
     system_prompt=prompts.ML_ENGINEER,
     builtin_tools=CODING_BUILTINS,
@@ -138,6 +139,22 @@ _register(Persona(
         "review_with_user", *COMMON_TOOLS,
     ],
     remote_mcp=True,
+))
+
+_register(Persona(
+    name="assistant",
+    display_name="DAXAGENT",
+    tagline="Chat mode: answers and acts with every connected tool",
+    description="Chat-mode assistant; not offered to the task planner.",
+    system_prompt=prompts.ASSISTANT,
+    builtin_tools=READ_ONLY_BUILTINS,
+    daxagent_tools=[
+        "sic_lookup", "review_with_user", "ask_user_for_data", "request_spend_approval", "request_send_approval",
+        "gmail_send_email", "gmail_create_draft", "gmail_search_emails", *COMMON_TOOLS,
+    ],
+    remote_mcp=True,
+    mcp_servers=["*"],  # every enabled, connected server
+    max_turns=30,
 ))
 
 SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_builder", "outreach"]

@@ -500,6 +500,35 @@ async def list_artifacts(chat_id: str) -> list[dict]:
     return [dict(zip(keys, r)) for r in await cursor.fetchall()]
 
 
+async def recent_artifacts(user_id: str, limit: int = 20) -> list[dict]:
+    """A user's latest artifacts across chats, newest first (send logs left out)."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT kind, title, row_count FROM artifacts
+           WHERE kind != 'send_log' AND chat_id IN (SELECT chat_id FROM chats WHERE user_id = ?)
+           ORDER BY created_at DESC LIMIT ?""",
+        (user_id, limit),
+    )
+    return [{"kind": r[0], "title": r[1], "rows": r[2]} for r in await cursor.fetchall()]
+
+
+async def load_pref(user_id: str, key: str, default: Any = None) -> Any:
+    """One of the user's stored preferences (JSON), or the default."""
+    db = await get_db()
+    cursor = await db.execute("SELECT value FROM user_prefs WHERE user_id = ? AND key = ?", (user_id, key))
+    row = await cursor.fetchone()
+    return json.loads(row[0]) if row else default
+
+
+async def save_pref(user_id: str, key: str, value: Any) -> None:
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO user_prefs (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
+        (user_id, key, json.dumps(value), dt.now_iso()),
+    )
+    await db.commit()
+
+
 async def get_geocode(place: str) -> dict | None:
     """Cached coordinates for a normalised place key; lat/lng are None for a known miss."""
     db = await get_db()

@@ -642,7 +642,7 @@ class Omni:
                 # agent_caller only emits tool calls and could not ask for confirmation.
                 tool_count += await register_mcp_tools(
                     self.agent_caller, self.agent_executor, self.conversation_agent,
-                                    only=reserved_servers(),
+                                    only=reserved_servers(), mode="task",
                 )
                 self.planner.update_system_message(
                     self.planner.system_message + await _mcp_planner_context()
@@ -698,6 +698,19 @@ class Omni:
 
     def _set_cancellation_token(self, cancellation_token):
         self.cancellation_token = cancellation_token
+
+    async def refresh_user_context(self) -> None:
+        """Give the clarifier and planner the user's saved memory as it is now (Settings > Memory), once per run."""
+        from src.agent_runtime import prefs
+
+        try:
+            notes = await prefs.memory_notes(self.user_id)
+            agents = (self.clarifier, self.planner)
+            self._base_prompts = getattr(self, "_base_prompts", None) or {a.name: a.system_message for a in agents}
+            for agent in agents:
+                agent.update_system_message(self._base_prompts[agent.name] + notes)
+        except Exception as e:
+            logger.warning(f"Planner memory not refreshed: {e}")
 
     def set_task_id(self, task_id):
         """Set the current task ID for tracking."""

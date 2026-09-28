@@ -38,3 +38,21 @@ class ToolContext:
             if full.endswith("__" + short_or_full):
                 return full
         return None
+
+
+def server_of(full_tool: str) -> str:
+    """The server behind a tool name.
+
+    mcp__<server>__<tool> for a server the CLI connects to, or
+    mcp__daxagent__<alias>__<tool> for an app tool routed through the built-in server
+    (alias = the server name without its "composio-" prefix).
+    """
+    parts = full_tool.split("__")
+    if len(parts) < 3 or parts[0] != "mcp":
+        return "daxagent"
+    if len(parts) >= 4 and parts[1] == "daxagent":
+        from src.mcp_client.config import server_names
+
+        alias = parts[2]
+        return alias if alias in server_names() else f"composio-{alias}"
+    return parts[1]

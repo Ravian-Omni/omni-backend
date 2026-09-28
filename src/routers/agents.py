@@ -1,15 +1,18 @@
-"""Read endpoints for the agent runtime: personas, artifacts, decision log."""
+"""Agent runtime endpoints: personas, artifacts (read, download, user edits), decision log."""
 
 import csv
 import io
 import json
 import os
 import re
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel, ValidationError
 
-from src.agent_runtime import PERSONAS
+from src.agent_runtime import PERSONAS, prefs
+from src.agent_runtime.tools.artifacts import load_record, save_payload
 from src.database import get_artifact, list_artifacts, list_decisions
 
 router = APIRouter()
@@ -41,6 +44,41 @@ async def refresh_personas():
     return {"specialists": list(built)}
 
 
+class PrefValue(BaseModel):
+    value: Any
+
+
+def _pref_key(key: str) -> None:
+    if key not in prefs.SCHEMAS:
+        raise HTTPException(status_code=404, detail=f"Unknown setting '{key}' (use {', '.join(prefs.SCHEMAS)})")
+
+
+@router.get("/prefs/{key}")
+async def get_prefs(key: str, user_id: str = "local_user"):
+    """The user's saved memory, per-agent instructions or workflows."""
+    _pref_key(key)
+    return {"value": await prefs.get(user_id, key)}
+
+
+@router.put("/prefs/{key}")
+async def put_prefs(key: str, body: PrefValue, user_id: str = "local_user"):
+    """Replace one of them; new chats and tasks pick the change up."""
+    _pref_key(key)
+    try:
+        return {"value": await prefs.put(user_id, key, body.value)}
+    except ValidationError as e:
+        err = e.errors()[0]
+        raise HTTPException(status_code=422, detail=f"{'.'.join(map(str, err['loc']))}: {err['msg']}")
+
+
+@router.get("/suggestions")
+async def starter_prompts(mode: str = "chat", user_id: str = "local_user"):
+    """Fill-in-the-blank starter prompts for the home screen, written from the user's own work."""
+    from src.agent_runtime.suggestions import suggestions
+
+    return {"templates": await suggestions(user_id, mode)}
+
+
 @router.get("/artifacts/{chat_id}")
 async def artifacts(chat_id: str):
     """Artifacts saved in a chat, newest first (metadata only)."""
@@ -59,6 +97,31 @@ async def artifact(chat_id: str, artifact_id: str, offset: int = 0, limit: int =
     rows = payload.get("rows", [])
     return {**record, "columns": payload.get("columns", []), "meta": payload.get("meta", {}),
             "offset": offset, "rows": rows[offset : offset + limit]}
+
+
+class ArtifactEdit(BaseModel):
+    rows: list[dict[str, Any]] | None = None
+    meta: dict[str, Any] | None = None  # merged into the existing meta
+    base_rev: int | None = None  # the rev the editor loaded; a mismatch means someone else saved since
+
+
+@router.patch("/artifacts/{chat_id}/{artifact_id}")
+async def edit_artifact(chat_id: str, artifact_id: str, body: ArtifactEdit):
+    """Save a user edit (Console) to an artifact's rows or meta."""
+    try:
+        record, payload = await load_record(chat_id, artifact_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    meta = payload.setdefault("meta", {})
+    rev = int(meta.get("rev") or 0)
+    if body.base_rev is not None and body.base_rev != rev:
+        raise HTTPException(status_code=409, detail={"message": "Changed since you loaded it", "rev": rev})
+    if body.rows is not None:
+        payload["rows"] = body.rows
+    meta.update(body.meta or {})
+    meta["rev"] = rev + 1
+    await save_payload(record, payload)
+    return {"rev": meta["rev"], "row_count": record["row_count"]}
 
 
 @router.get("/decisions/{chat_id}")

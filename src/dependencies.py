@@ -7,6 +7,7 @@ This module provides:
 - Custom exception handling for manager operations
 """
 
+import asyncio
 from fastapi import HTTPException, status
 from loguru import logger
 
@@ -95,6 +96,29 @@ async def init_managers() -> None:
             # Clear LLM config cache so it rebuilds with the restored keys
             from src.configs.llm_configs_manager import LLMConfigManager
             LLMConfigManager.clear_cache()
+
+        # Connections made or renewed in Composio since the last run (in the background: network)
+        async def _sync_composio():
+            try:
+                from src.routers.mcp import sync_composio_servers
+
+                await sync_composio_servers()
+            except Exception as e:
+                logger.warning(f"Composio connection sync skipped: {e}")
+
+        asyncio.create_task(_sync_composio())
+
+        async def _prefetch_tools():  # the first chat then skips the ~3 s tool listing
+            from src.mcp_client import is_connected, list_tools, server_names
+
+            for name in server_names():
+                try:
+                    if await is_connected(name):
+                        await list_tools(name)
+                except Exception as e:
+                    logger.debug(f"Tool prefetch for {name} skipped: {e}")
+
+        asyncio.create_task(_prefetch_tools())
 
         # Restore persisted user profile into settings
         _PROFILE_ATTR_MAP = {

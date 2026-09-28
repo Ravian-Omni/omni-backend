@@ -89,6 +89,7 @@ class Settings:
         # configs/llm_model_mapping.json (gpt-5.6-luna); "anthropic" runs them on the Claude Agent SDK.
         self.AGENT_PROVIDER = (os.getenv("DAXAGENT_AGENT_PROVIDER") or "anthropic").strip().lower()
         self.AGENT_MODEL = os.getenv("DAXAGENT_AGENT_MODEL") or ("claude-sonnet-5" if self.AGENT_PROVIDER == "anthropic" else None)
+        self.CHAT_ENGINE = (os.getenv("DAXAGENT_CHAT_ENGINE") or "sdk").strip().lower()  # sdk | autogen
         self.AGENT_MAX_OUTPUT_TOKENS = int(os.getenv("DAXAGENT_AGENT_MAX_OUTPUT_TOKENS", "0") or 0)  # 0 = runner default
         self.AGENT_MAX_TURNS = int(os.getenv("DAXAGENT_AGENT_MAX_TURNS", "0") or 0)  # 0 = persona default
         self.AGENT_EFFORT = os.getenv("DAXAGENT_AGENT_EFFORT") or None  # low | medium | high | xhigh | max

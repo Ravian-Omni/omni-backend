@@ -7,7 +7,7 @@ which calls to stop for a card.
 
 from claude_agent_sdk import create_sdk_mcp_server
 
-from src.agent_runtime.tools import artifacts, sales, viz, workspace
+from src.agent_runtime.tools import artifacts, campaign, memory, sales, viz, workspace
 from src.agent_runtime.tools.context import ToolContext
 
 SERVER_NAME = "daxagent"
@@ -23,8 +23,9 @@ def full_name(short: str) -> str:
     return f"mcp__{SERVER_NAME}__{short}"
 
 
-def build_server(ctx: ToolContext):
-    tools = [*workspace.build(ctx), *artifacts.build(ctx), *viz.build(ctx), *sales.build(ctx)]
+def build_server(ctx: ToolContext, extra: list | tuple = ()):
+    """extra: more tools to serve, e.g. connected-app tools routed through this server."""
+    tools = [*workspace.build(ctx), *artifacts.build(ctx), *viz.build(ctx), *campaign.build(ctx), *sales.build(ctx), *memory.build(ctx), *extra]
     server = create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0", tools=tools)
     names = [t.name for t in tools]
     classes = {full_name(n): TOOL_CLASSES.get(n, "read") for n in names}
