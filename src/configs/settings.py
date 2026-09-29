@@ -88,7 +88,7 @@ class Settings:
         # Agent runtime (personas): "openai" runs them on the chat-completions model from
         # configs/llm_model_mapping.json (gpt-5.6-luna); "anthropic" runs them on the Claude Agent SDK.
         self.AGENT_PROVIDER = (os.getenv("DAXAGENT_AGENT_PROVIDER") or "anthropic").strip().lower()
-        self.AGENT_MODEL = os.getenv("DAXAGENT_AGENT_MODEL") or ("claude-sonnet-5" if self.AGENT_PROVIDER == "anthropic" else None)
+        self.AGENT_MODEL = os.getenv("DAXAGENT_AGENT_MODEL") or ("claude-haiku-4-5-20251001" if self.AGENT_PROVIDER == "anthropic" else None)
         self.CHAT_ENGINE = (os.getenv("DAXAGENT_CHAT_ENGINE") or "sdk").strip().lower()  # sdk | autogen
         self.AGENT_MAX_OUTPUT_TOKENS = int(os.getenv("DAXAGENT_AGENT_MAX_OUTPUT_TOKENS", "0") or 0)  # 0 = runner default
         self.AGENT_MAX_TURNS = int(os.getenv("DAXAGENT_AGENT_MAX_TURNS", "0") or 0)  # 0 = persona default
@@ -209,6 +209,7 @@ class CapabilityType(Enum):
     LEAD_FINDER = "lead_finder"
     BUYER_FINDER = "buyer_finder"
     CONTACT_ENRICHER = "contact_enricher"
+    CAMPAIGN_STRATEGIZER = "campaign_strategizer"
     CAMPAIGN_BUILDER = "campaign_builder"
     OUTREACH = "outreach"
 

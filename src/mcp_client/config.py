@@ -138,8 +138,8 @@ async def set_enabled(server: str, enabled: bool) -> None:
 
 
 def in_mode(server: str, mode: str) -> bool:
-    """The user's per-mode switch ("chat" or "task") for the server; on by default."""
-    return _flags.get(f"{mode}:{server}", True)
+    """The user's per-mode switch ("chat" or "task") for the server; defaults to the server's `modes` (both)."""
+    return _flags.get(f"{mode}:{server}", mode in options(server).get("modes", ("chat", "task")))
 
 
 async def set_mode(server: str, mode: str, on: bool) -> None:

@@ -156,6 +156,7 @@ def _get_db_path() -> str:
     """Get the database file path, creating the directory if needed."""
     db_dir = settings.ROOT_DIR
     os.makedirs(db_dir, exist_ok=True)
+    os.chmod(db_dir, 0o700)  # it holds sign-in tokens and API keys: only this user may read it
     return os.path.join(db_dir, "daxagent.db")
 
 

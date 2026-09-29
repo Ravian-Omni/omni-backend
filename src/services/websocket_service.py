@@ -29,7 +29,7 @@ CAPABILITY_CLASS_MAP = {
     "software_developer": SoftwareDeveloper,
     **{
         name: persona_capability_class(name)
-        for name in ("ml_engineer", "lead_finder", "buyer_finder", "contact_enricher", "campaign_builder", "outreach")
+        for name in ("ml_engineer", "lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach")
     },
 }
 

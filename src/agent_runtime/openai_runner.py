@@ -16,7 +16,8 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from src.agent_runtime.tools import build_server, files, full_name
+from src.agent_runtime import prefs
+from src.agent_runtime.tools import all_tools, build_server, files, full_name
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import settings
@@ -26,6 +27,11 @@ from src.mcp_client.config import options as server_options
 RESULT_PREVIEW = 4000        # chars of a tool result shown in the UI
 RESULT_FOR_MODEL = 40_000    # chars of a tool result fed back to the model
 RETRYABLE_ATTEMPTS = 3
+MAX_TOOLS = 128  # OpenAI's limit per request
+NOTE_INTRO = (
+    "The user sent this while you were working. Take it into account now; "
+    "if it changes the task, adjust, and say so in your reply:\n"
+)
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
 HISTORY_CHARS = 12_000
 
@@ -89,11 +95,7 @@ class OpenAIRunner:
         """Build the tool table; returns the system-prompt notes of the remote servers."""
         s = self.s
         _, dax_names, dax_classes = build_server(s.tool_context)
-        # Re-create the in-process tools to get their handlers (build_server only returns the SDK config).
-        from src.agent_runtime.tools import artifacts, sales, viz, workspace
-
-        in_process = [*workspace.build(s.tool_context), *artifacts.build(s.tool_context), *viz.build(s.tool_context), *sales.build(s.tool_context)]
-        for t in in_process:
+        for t in all_tools(s.tool_context):  # the same list the SDK server serves
             fname = full_name(t.name)
             cls = dax_classes.get(fname, "read")
             # Same visibility rule as the SDK path: hide only spend/send tools the persona lacks.
@@ -110,11 +112,18 @@ class OpenAIRunner:
         s.tool_context.remote_tool_classes = remote_classes
         s._classes = {**dax_classes, **remote_classes}
         notes = ""
+        # OpenAI takes at most 128 tools: the in-process and file tools come first, then each app gets an equal share.
+        room = max(0, MAX_TOOLS - len(self.tools))
+        share = room // max(1, len(remote))
         for server in remote:
-            note = server_options(server).get("system_prompt_append")
+            note = server_options(server).get("persona_prompt_append") or server_options(server).get("system_prompt_append")
             if note:
                 notes += note
-            for t in s._remote_tools.get(server, []):
+            schemas = s._remote_tools.get(server, [])
+            if len(schemas) > share:
+                logger.warning(f"[{s.persona.name}] {server}: offering {share} of {len(schemas)} tools (OpenAI allows {MAX_TOOLS})")
+                notes += f"\n\nOnly the first {share} tools of {server} are available in this run.\n"
+            for t in schemas[:share]:
                 fname = f"mcp__{server}__{t['name']}"
                 name = _safe_name(f"{server}__{t['name']}")
                 if name in self.tools:
@@ -222,6 +231,7 @@ class OpenAIRunner:
             raise RuntimeError("OPENAI_API_KEY is not set; the persona runtime cannot reach the model")
         client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg.get("base_url") or None)
         notes = await self._collect_tools()
+        notes += await prefs.prompt_notes(s.context.user_id, s.persona.name)  # Settings > Memory and Agents
         specs = [t.spec() for t in self.tools.values()]
         logger.info(f"[{s.persona.name}] openai runner: model={cfg['model']} tools={len(specs)}")
 
@@ -282,6 +292,8 @@ class OpenAIRunner:
                     tools_called += 1
                     result = await self._run_tool(c.id, c.function.name, c.function.arguments or "")
                     messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
+                if user_notes := s._take_notes():  # sent mid-run: the model sees it before its next step
+                    messages.append({"role": "user", "content": NOTE_INTRO + user_notes})
             else:
                 note = f"\n\n**{s.persona.display_name} stopped at the turn limit for this persona ({max_turns}).** What was produced so far is kept (artifacts, files); ask to continue for the rest."
             if note:
@@ -313,6 +325,8 @@ class OpenAIRunner:
                 logger.debug(f"[{s.persona.name}] could not emit finish status: {e}")
 
         final_text = (texts[-1] if texts else "No response generated.") + note
+        if s._notes_seen:  # the orchestrator must learn the request changed, or it redoes the old version
+            final_text += "\n\nUSER UPDATE (sent while this step ran; it supersedes the original request):\n" + "\n".join(f"- {n}" for n in s._notes_seen)
         s._history.append({"role": "assistant", "content": final_text})
         await s._persist("assistant", s.persona.name, {"role": "assistant", "content": final_text, "final": True}, content=None, usage=s._usage.copy())
         return final_text

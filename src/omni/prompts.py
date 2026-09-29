@@ -197,6 +197,13 @@ planner = """
           "Saves an enriched_contacts artifact with names, phones, emails, websites, revenue"
         ]
       },
+      "campaign_strategizer": {
+        "description": "Campaign Strategizer: reads market intelligence on the user's competitors (KnightWatch) and saves a strategy artifact (where we win, pricing angle, objections, messaging, offer) with every fact cited; needs KnightWatch connected",
+        "abilities": [
+          "Matches the campaign to the competitors KnightWatch tracks",
+          "Saves a strategy artifact that campaign_builder writes from"
+        ]
+      },
       "campaign_builder": {
         "description": "Campaign Builder: segments enriched contacts and writes the outbound sequence (subjects, bodies, timing) in the user's voice; sends nothing",
         "abilities": [
@@ -468,6 +475,11 @@ We have the below mentioned capabilities. Based on the plan made by planner, ana
 - Use when real contact details are needed, after lead_finder/buyer_finder.
 </contact_enricher>
 
+<campaign_strategizer>
+- Reads market intelligence on the user's competitors (KnightWatch battlecards, report cards, dated events) and saves a strategy artifact with the campaign's angle; every fact cited.
+- Use before campaign_builder when a campaign is planned and KnightWatch is connected, or when the user asks how to position against competitors.
+</campaign_strategizer>
+
 <campaign_builder>
 - Writes the outbound campaign: segments, sequence, subjects and bodies, saved as a campaign_plan artifact. Sends nothing.
 - Use when the user wants messaging or a campaign written for enriched contacts.
@@ -709,7 +721,7 @@ MANDATORY EXECUTION PROCESS:
 EXECUTION REQUIREMENTS:
 - For web_browser: Perform actual web searches, extract real information
 - For software_developer: Write and run the code or analysis, return real output
-- For ml_engineer, lead_finder, buyer_finder, contact_enricher, campaign_builder, outreach: call the persona with the complete task and pass on its summary and artifact ids
+- For ml_engineer, lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach: call the persona with the complete task and pass on its summary and artifact ids
 - For Composio tools (e.g. GMAIL_SEND_EMAIL): Execute the tool action with provided parameters
 
 FAILURE IS NOT AN OPTION:
@@ -757,6 +769,7 @@ What the capabilities can do (ask only for inputs they can act on):
 - lead_finder: Data Axle business search by industry (SIC code), geography (city/state/zip/radius), employee count, revenue. No intent, technographic or funding data exists in Data Axle; "high intent" can only be approximated by size, multi-location, revenue or by slow web research per company.
 - buyer_finder: Data Axle contact search by title at those companies (title filter works at company level; coverage is partial).
 - contact_enricher: reveals masked records for 1 credit each; business enrichment returns phone, website, address, employees, revenue; contact enrichment returns name and title. Neither guarantees an email address.
+- campaign_strategizer: the campaign's angle against competitors, from KnightWatch market intelligence (only what the user's scouts track).
 - campaign_builder: writes the email sequence; outreach: sends or drafts through the user's connected Gmail. There is no calendar or meeting-booking integration: meetings are booked by prospects replying.
 - ml_engineer: analytics and scoring on data the user provides or on artifacts. software_developer: code. web_browser: web search.
 

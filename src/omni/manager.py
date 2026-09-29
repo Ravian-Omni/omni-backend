@@ -22,6 +22,7 @@ from src.agent_runtime import PERSONAS, run_persona, specialists
 from src.agent_runtime.prompts import (
     BUYER_FINDER_DESCRIPTION,
     CAMPAIGN_BUILDER_DESCRIPTION,
+    CAMPAIGN_STRATEGIZER_DESCRIPTION,
     CONTACT_ENRICHER_DESCRIPTION,
     LEAD_FINDER_DESCRIPTION,
     ML_ENGINEER_DESCRIPTION,
@@ -59,11 +60,11 @@ async def _mcp_planner_context() -> str:
     like Composio tools they are called by name on agent_caller. Naming them
     here keeps the planner from reaching for web_browser instead.
     """
-    from src.mcp_client.config import reserved_servers
+    from src.mcp_client.config import enabled_servers, in_mode
 
     sections = []
-    for server in reserved_servers():
-        note = options(server).get("planner_note")
+    for server in enabled_servers():
+        note = options(server).get("planner_note") if in_mode(server, "task") else None
         if not note or not await is_connected(server):
             continue
         try:
@@ -1017,6 +1018,7 @@ class Omni:
             "lead_finder": LEAD_FINDER_DESCRIPTION,
             "buyer_finder": BUYER_FINDER_DESCRIPTION,
             "contact_enricher": CONTACT_ENRICHER_DESCRIPTION,
+            "campaign_strategizer": CAMPAIGN_STRATEGIZER_DESCRIPTION,
             "campaign_builder": CAMPAIGN_BUILDER_DESCRIPTION,
             "outreach": OUTREACH_DESCRIPTION,
         }

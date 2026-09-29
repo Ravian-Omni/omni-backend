@@ -160,6 +160,7 @@ async def create_server(body: NewServer):
 
 class ServerUpdate(BaseModel):
     enabled: bool | None = Field(default=None, description="Switch the server on or off for chat, tasks and personas")
+    token: str | None = Field(default=None, description="API key or bearer token, for servers that sign in with one")
     chat: bool | None = Field(default=None, description="Offer the server in chat mode")
     task: bool | None = Field(default=None, description="Offer the server in task mode (agents and its specialist)")
     display_name: str | None = None
@@ -174,6 +175,10 @@ async def update_server(server: str, body: ServerUpdate):
     """Change a server's display fields, persona access or prompt notes."""
     _require(server)
     fields = body.model_dump(exclude_none=True)
+    if token := fields.pop("token", "").strip():
+        if auth_type(server) not in ("bearer", "api_key"):
+            raise HTTPException(status_code=400, detail=f"{server} does not sign in with a key")
+        await store_static_token(server, token)
     enabled = fields.pop("enabled", None)
     if enabled is not None:
         await set_enabled(server, enabled)

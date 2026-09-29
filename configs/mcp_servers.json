@@ -16,6 +16,24 @@
         "planner_note": "Business and consumer data: 90M+ businesses and 250M+ consumers. Search tools are free masked previews; enrichment tools cost 1 credit per match and are always confirmed with the user.\nIn task mode these tools are used THROUGH the personas, never called directly in a plan step: lead_finder = business_search (companies by industry/SIC, size, geography); buyer_finder = contact_search (decision makers by title at those companies); contact_enricher = business_enrichment / contact_enrichment (full profiles, spends credits); consumer_search / consumer_enrichment (individual consumers) are reachable through lead_finder and contact_enricher when the user asks about consumers. Plan tasks for those personas and never assign business or contact discovery to web_browser or software_developer.\n",
         "reserved": true
       }
+    },
+    "knightwatch": {
+      "url": "http://localhost:8765/mcp",
+      "daxagent": {
+        "display_name": "KnightWatch",
+        "description": "Market intelligence: competitor report cards with dated, sourced events, and battlecards",
+        "auth": "bearer",
+        "personas": [
+          "campaign_strategizer"
+        ],
+        "specialist": false,
+        "modes": [
+          "task"
+        ],
+        "planner_note": "Market intelligence about the user's competitors: report cards with dated, sourced events, and battlecards. Used only through campaign_strategizer, never called directly in a plan step. For any request to build or plan a campaign, add a campaign_strategizer task before campaign_builder: it finds the competitors this campaign runs into and saves a strategy artifact that campaign_builder writes from. Skip it only when the user says not to look at competitors.\n",
+        "app_url": "http://localhost:5173",
+        "persona_prompt_append": "\n\n## KnightWatch links\nThe KnightWatch app is at http://localhost:5173 (it has no page-level links). In every strategy row, `sources` lists where the fact came from as {\"label\", \"url\"} items: each event's own link (the original news or page) labelled with its title and date, and for battlecard or report-card facts {\"label\": \"KnightWatch · battlecard §<n> <title> (<date generated>)\", \"url\": \"http://localhost:5173\"}.\n"
+      }
     }
   }
 }

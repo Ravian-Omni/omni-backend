@@ -18,7 +18,7 @@ from src.database import save_artifact as db_save_artifact
 
 KINDS = (
     "lead_list", "buyer_map", "enriched_contacts", "campaign_plan", "send_log",
-    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "snippets", "other",
+    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "snippets", "strategy", "other",
 )
 
 # Visual kinds ship their data with the chat event so the UI can draw them at once.

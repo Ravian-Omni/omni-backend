@@ -105,6 +105,8 @@ def build(ctx: ToolContext):
         if decision.approved:
             ctx.spend_allowance[full] = ctx.spend_allowance.get(full, 0) + count  # approvals add up
             return _text({"approved": True, "tool": full.split("__")[-1], "calls_allowed": count, "balance_before": balance})
+        if decision.suggestion:
+            return _text({"approved": False, "user_said": decision.suggestion, "message": "The user answered with their own instruction instead of approving. Follow it (for example a smaller batch) and ask again; spend nothing yet."})
         return _text({"approved": False, "message": "The user declined the credit spend. Do not call the tool; report and offer a smaller batch."})
 
     @tool(
@@ -137,6 +139,8 @@ def build(ctx: ToolContext):
             # Any send tool may deliver the approved batch (Outreach's Gmail tool or Gmail's own).
             ctx.send_allowance["*"] = ctx.send_allowance.get("*", 0) + len(recipients)
             return _text({"approved": True, "sends_allowed": len(recipients), "tool": tool_name})
+        if decision.suggestion:
+            return _text({"approved": False, "user_said": decision.suggestion, "message": "The user answered with their own instruction instead of approving. Apply it and ask again; send nothing yet."})
         return _text({"approved": False, "message": "The user declined this batch. Send nothing; report and ask what to change."})
 
     @tool(
@@ -159,12 +163,15 @@ def build(ctx: ToolContext):
                 "options": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["label", "value"]}},
                 "multi": {"type": "boolean"},
                 "title": {"type": "string"},
+                "why": {"type": "string", "description": "One line the user sees: what depends on this answer and what you do if they skip"},
             },
             "required": ["question", "options"],
         },
     )
     async def ask_user_choice(args: dict) -> dict:
-        d = await ctx.decisions.choose(args["question"], args["options"], bool(args.get("multi")), title=args.get("title") or "Your call")
+        d = await ctx.decisions.choose(args["question"], args["options"], bool(args.get("multi")), title=args.get("title") or "Your call", why=args.get("why") or "")
+        if d.skipped:
+            return _text({"answered": False, "skipped": True, "message": "The user left this to you: go with your recommended option and say which one you used."})
         if not d.approved and not d.selected and not d.text:
             return _text({"answered": False, "message": "The user did not choose. Ask differently or proceed with the safest option and say so."})
         return _text({"answered": True, "selected": d.selected or ([d.value] if d.value is not None else []), "note": d.text})
@@ -172,10 +179,10 @@ def build(ctx: ToolContext):
     @tool(
         "ask_user_for_data",
         "Ask the user for a dataset: a file path or pasted rows. Returns the path or text they provided.",
-        {"type": "object", "properties": {"prompt": {"type": "string"}, "accept": {"type": "array", "items": {"type": "string"}}}, "required": ["prompt"]},
+        {"type": "object", "properties": {"prompt": {"type": "string"}, "accept": {"type": "array", "items": {"type": "string"}}, "why": {"type": "string", "description": "One line the user sees: what depends on this answer and what you do if they skip"}}, "required": ["prompt"]},
     )
     async def ask_user_for_data(args: dict) -> dict:
-        d = await ctx.decisions.provide_data(args["prompt"], args.get("accept"))
+        d = await ctx.decisions.provide_data(args["prompt"], args.get("accept"), why=args.get("why") or "")
         if not d.approved:
             return _text({"provided": False, "message": "The user did not provide data. Explain what you need and stop."})
         return _text({"provided": True, "value": d.value or d.text})
@@ -184,7 +191,7 @@ def build(ctx: ToolContext):
         "review_with_user",
         "Show an artifact to the user for review before you continue. The user can drop rows; "
         "the tool returns the ids they excluded and updates the artifact accordingly.",
-        {"type": "object", "properties": {"artifact_id": {"type": "string"}, "message": {"type": "string"}}, "required": ["artifact_id"]},
+        {"type": "object", "properties": {"artifact_id": {"type": "string"}, "message": {"type": "string"}, "why": {"type": "string", "description": "One line the user sees: what depends on this answer and what you do if they skip"}}, "required": ["artifact_id"]},
     )
     async def review_with_user(args: dict) -> dict:
         try:
@@ -194,7 +201,10 @@ def build(ctx: ToolContext):
         d = await ctx.decisions.review_artifact(
             payload["id"], payload["kind"], payload["title"], payload["columns"], payload["rows"], payload["row_count"],
             message=args.get("message") or "Review this list before I continue. Untick anything you want left out.",
+            why=args.get("why") or "",
         )
+        if d.suggestion:
+            return _text({"approved": False, "changes_requested": d.suggestion, "message": "The user asked for changes instead of approving. Apply them, update the artifact, and review again."})
         excluded = []
         if isinstance(d.raw, dict):
             excluded = [int(x) for x in (d.raw.get("excluded_ids") or d.raw.get("excluded") or []) if str(x).isdigit()]

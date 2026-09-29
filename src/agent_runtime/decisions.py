@@ -44,7 +44,25 @@ class Decision:
     text: str = ""
     raw: Any = None
 
+    @property
+    def action(self) -> str:
+        return str(self.raw.get("action", "")).lower() if isinstance(self.raw, dict) else ""
+
+    @property
+    def skipped(self) -> bool:
+        """The user left the decision to the agent."""
+        return self.action == "skip"
+
+    @property
+    def suggestion(self) -> str:
+        """What the user typed instead of approving or rejecting ("" when they did not)."""
+        return self.text if self.action == "revise" else ""
+
     def summary(self) -> str:
+        if self.skipped:
+            return "skipped: agent decides"
+        if self.suggestion:
+            return self.suggestion
         if self.card in ("confirm_spend", "confirm_send"):
             return "approved" if self.approved else "rejected"
         if self.card == "choose":
@@ -199,18 +217,18 @@ class DecisionCards:
         )
 
     async def choose(
-        self, question: str, options: list[dict[str, Any]], multi: bool = False, title: str = "Your call"
+        self, question: str, options: list[dict[str, Any]], multi: bool = False, title: str = "Your call", why: str = ""
     ) -> Decision:
         """Offer options; each option is {label, value, description?}."""
-        return await self._ask("choose", title, question, question=question, options=options, multi=multi)
+        return await self._ask("choose", title, question, question=question, options=options, multi=multi, why=why)
 
     async def provide_data(
-        self, prompt: str, accept: list[str] | None = None, allow_text: bool = True, title: str = "Data needed"
+        self, prompt: str, accept: list[str] | None = None, allow_text: bool = True, title: str = "Data needed", why: str = ""
     ) -> Decision:
         """Ask for a file (path) or pasted data."""
         return await self._ask(
             "provide_data", title, prompt, prompt=prompt,
-            accept=accept or ["csv", "xlsx", "json"], allow_text=allow_text,
+            accept=accept or ["csv", "xlsx", "json"], allow_text=allow_text, why=why,
         )
 
     async def review_artifact(
@@ -222,11 +240,12 @@ class DecisionCards:
         rows: list[dict[str, Any]],
         row_count: int,
         message: str = "Review this list before I continue. Untick anything you want left out.",
+        why: str = "",
     ) -> Decision:
         """Show a table for approval; the answer may carry excluded row ids."""
         return await self._ask(
             "review_artifact", title, message, artifact_id=artifact_id, kind=kind,
-            columns=columns, rows=rows[:25], row_count=row_count,
+            columns=columns, rows=rows[:25], row_count=row_count, why=why,
         )
 
     async def text(self, prompt: str, title: str = "Question") -> Decision:

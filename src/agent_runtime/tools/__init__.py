@@ -23,13 +23,18 @@ def full_name(short: str) -> str:
     return f"mcp__{SERVER_NAME}__{short}"
 
 
+def all_tools(ctx: ToolContext) -> list:
+    """Every in-process tool, with its handler (both runtimes serve the same list)."""
+    return [*workspace.build(ctx), *artifacts.build(ctx), *viz.build(ctx), *campaign.build(ctx), *sales.build(ctx), *memory.build(ctx)]
+
+
 def build_server(ctx: ToolContext, extra: list | tuple = ()):
     """extra: more tools to serve, e.g. connected-app tools routed through this server."""
-    tools = [*workspace.build(ctx), *artifacts.build(ctx), *viz.build(ctx), *campaign.build(ctx), *sales.build(ctx), *memory.build(ctx), *extra]
+    tools = [*all_tools(ctx), *extra]
     server = create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0", tools=tools)
     names = [t.name for t in tools]
     classes = {full_name(n): TOOL_CLASSES.get(n, "read") for n in names}
     return server, names, classes
 
 
-__all__ = ["SERVER_NAME", "ToolContext", "build_server", "full_name"]
+__all__ = ["SERVER_NAME", "ToolContext", "all_tools", "build_server", "full_name"]

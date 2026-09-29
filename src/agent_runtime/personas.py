@@ -118,6 +118,17 @@ _register(Persona(
 ))
 
 _register(Persona(
+    name="campaign_strategizer",
+    display_name="Campaign Strategizer",
+    tagline="The campaign's winning angle, from market intelligence on your competitors",
+    description=prompts.CAMPAIGN_STRATEGIZER_DESCRIPTION,
+    system_prompt=prompts.CAMPAIGN_STRATEGIZER,
+    builtin_tools=["Read"],
+    daxagent_tools=[*COMMON_TOOLS],
+    remote_mcp=True,  # KnightWatch is tagged to this persona (configs/mcp_servers.json)
+))
+
+_register(Persona(
     name="campaign_builder",
     display_name="Campaign Builder",
     tagline="Segments, sequences and copy for an outbound campaign",
@@ -157,7 +168,7 @@ _register(Persona(
     max_turns=30,
 ))
 
-SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_builder", "outreach"]
+SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach"]
 
 
 def get_persona(name: str) -> Persona:

@@ -13,7 +13,7 @@ def build(ctx: ToolContext):
         "Save one lasting fact or preference the user told you about themselves, their company or how they want "
         "work done (e.g. 'Sells dental supplies in Texas', 'Signs emails as Sam Lee'). One short sentence. Not for "
         "one-off task details, contact data or secrets. Every agent reads saved memory in later chats and tasks.",
-        {"text": str},
+        {"type": "object", "properties": {"text": {"type": "string", "description": "One short sentence about the user"}}, "required": ["text"]},
     )
     async def remember(args: dict) -> dict:
         text = " ".join(str(args.get("text") or "").split())[:500]

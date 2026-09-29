@@ -277,7 +277,7 @@ class PersonaSession:
                 notes += note
         notes += await prefs.prompt_notes(self.context.user_id, self.persona.name)  # Settings > Memory and Agents
         api_key = settings.ANTHROPIC_API_KEY or os.environ.get("ANTHROPIC_API_KEY", "")
-        model = getattr(settings, "AGENT_MODEL", None) or "claude-sonnet-5"
+        model = getattr(settings, "AGENT_MODEL", None) or "claude-haiku-4-5-20251001"
         self._budget = float(getattr(settings, "AGENT_MAX_BUDGET_USD", None) or self.persona.max_budget_usd or 0) or None
         opts = ClaudeAgentOptions(
             system_prompt=self._system_prompt(notes),
@@ -345,6 +345,8 @@ class PersonaSession:
         )
         if decision.approved:
             return PermissionResultAllow(updated_input=input_data)
+        if decision.suggestion:
+            return PermissionResultDeny(message=f"The user answered instead of approving: {decision.suggestion}. Apply it and ask again.")
         return PermissionResultDeny(message="The user declined this send. Do not retry it; report and ask what to change.")
 
     # ------------------------------------------------------------- streaming
@@ -696,6 +698,8 @@ class PersonaSession:
         async def warm() -> None:
             try:
                 await self._ensure_ws()
+                if (getattr(settings, "AGENT_PROVIDER", "anthropic") or "anthropic") == "openai":
+                    return  # the OpenAI runner builds its tools per run; there is no client to start
                 await self._ensure_client()
             except Exception as e:
                 logger.warning(f"[{self.persona.name}] warm-up failed; the first message starts the client: {e}")
