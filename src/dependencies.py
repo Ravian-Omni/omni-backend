@@ -65,6 +65,9 @@ async def init_managers() -> None:
         logger.info("Connection manager initialized")
 
         # Initialize SQLite database
+        from src.seed import apply_pending
+
+        apply_pending(settings.ROOT_DIR)  # local data uploaded for the hosted app, applied before the database opens
         await init_db()
         from src.mcp_client.config import refresh as refresh_mcp_servers
 

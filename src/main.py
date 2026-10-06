@@ -15,11 +15,13 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware import Middleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 
-from src.configs.settings import settings
+from src.configs.settings import settings  # loads .env first
+from src.auth import ClerkGate
 from src.dependencies import init_managers
 from src.routers.agents import router as agents_router
 from src.routers.campaigns import router as campaigns_router
@@ -41,8 +43,11 @@ middleware = [
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-    )
+    ),
+    Middleware(ClerkGate),  # Clerk sign-in when CLERK_PUBLISHABLE_KEY is set (the hosted app)
 ]
+# The built frontend, when this server also serves the page (Railway: one service, one domain).
+STATIC_DIR = os.getenv("DAXAGENT_STATIC_DIR", "")
 
 
 @asynccontextmanager
@@ -161,6 +166,8 @@ async def serve_html(request: Request):
     Returns:
         HTMLResponse: The main index.html page content with template variables.
     """
+    if STATIC_DIR:
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
     return templates.TemplateResponse(
         "index.html",
         {"request": request},
@@ -233,6 +240,10 @@ async def health_check():
         dict: Health status containing 'status' (ok) and descriptive message.
     """
     return {"status": "ok", "message": "Service is running"}
+
+
+if STATIC_DIR and os.path.isdir(STATIC_DIR):
+    app.mount("/", StaticFiles(directory=STATIC_DIR), name="frontend")  # after every API route
 
 
 if __name__ == "__main__":

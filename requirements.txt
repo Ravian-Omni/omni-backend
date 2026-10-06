@@ -10,6 +10,11 @@ GitPython>=3.1.40
 cryptography==45.0.5
 fastapi==0.116.1
 httpx==0.28.1
+PyJWT[crypto]==2.13.0  # Clerk session tokens (src/auth.py)
+pypdf==6.18.1  # reads uploaded PDF creatives
+python-multipart==0.0.32  # creative uploads
+mcp==1.30.0
+composio==0.15.0
 Jinja2>=3.1.0  # FastAPI Jinja2Templates (HTML pages served by src/main.py)
 langchain==0.3.25
 langchain-openai>=0.3.30  # supports openai 2.x; 1.x needs langchain-core 1.x (incompatible with langchain 0.3.25)

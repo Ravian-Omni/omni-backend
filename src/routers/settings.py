@@ -7,7 +7,9 @@ This module provides endpoints for:
 - Secure handling of sensitive configuration data
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
+
+from src.configs.settings import settings
 
 from src.database import delete_api_key, save_api_key, save_user_profile
 from src.services.settings_service import SettingsService
@@ -33,6 +35,30 @@ async def get_all_settings():
 # =============================================================================
 # API KEY MANAGEMENT
 # =============================================================================
+
+
+@router.post("/admin/seed")
+async def upload_seed(request: Request):
+    """Store an archive of a local DAXAGENT's data; it is applied on the next start (src/seed.py).
+
+    Open only while DAXAGENT_SEED_TOKEN is set, and only with that token in X-Seed-Token.
+    """
+    import hmac
+    import os
+
+    from src.seed import ARCHIVE
+
+    expected = os.getenv("DAXAGENT_SEED_TOKEN", "")
+    if not expected or not hmac.compare_digest(request.headers.get("x-seed-token", ""), expected):
+        raise HTTPException(status_code=403, detail="Seeding is closed")
+    path = os.path.join(settings.ROOT_DIR, ARCHIVE)
+    size = 0
+    with open(path + ".part", "wb") as f:
+        async for chunk in request.stream():
+            f.write(chunk)
+            size += len(chunk)
+    os.replace(path + ".part", path)
+    return {"stored": size, "applies": "on the next restart"}
 
 
 @router.put("/api/settings/api-keys")

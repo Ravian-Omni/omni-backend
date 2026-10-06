@@ -57,7 +57,7 @@ class Settings:
         self.PORT = os.getenv("PORT", "8000")
         self.BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
         self.USER_TOKEN = None
-        self.ROOT_DIR = os.path.join(Path.home(), ".daxagent")
+        self.ROOT_DIR = os.getenv("DAXAGENT_DATA_DIR") or os.path.join(Path.home(), ".daxagent")  # /data on Railway (a volume)
         self.USER_EMAIL = os.getenv("email_username")
         self.USER_EMAIL_PASSWORD = os.getenv("email_password")
         self.USER_FILES_PATH = os.getenv("USER_FILES_PATH", "/mnt/data")
