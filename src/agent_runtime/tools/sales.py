@@ -41,6 +41,28 @@ async def _credit_balance(server: str) -> int | None:
 
 async def gmail_call(user_id: str, slug: str, arguments: dict) -> Any:
     """Run one Composio Gmail action for the user; raises when Gmail is not connected."""
+    return await composio_call(user_id, "gmail", slug, arguments, "Gmail")
+
+
+async def composio_upload(path: str, slug: str, toolkit: str) -> dict:
+    """Stage a local file for a Composio action's file field (e.g. a Gmail attachment): {name, mimetype, s3key}."""
+    import asyncio
+
+    from composio import Composio
+    from composio.core.models._files import FileUploadable
+
+    from src.configs.llm_configs_manager import LLMConfigManager
+
+    key = LLMConfigManager.get_config("composio_api_key").get("config_list", [{}])[0].get("api_key")
+    if not key:
+        raise RuntimeError("Composio API key not set. Add it in Settings.")
+    client = Composio(api_key=key)
+    staged = await asyncio.to_thread(FileUploadable.from_path, client._client, path, slug, toolkit, file_upload_allowlist=None)
+    return staged.model_dump()
+
+
+async def composio_call(user_id: str, toolkit: str, slug: str, arguments: dict, label: str = "") -> Any:
+    """Run one Composio action of a connected app (gmail, slack, googlecalendar) for the user."""
     import asyncio
 
     from composio import Composio
@@ -52,8 +74,9 @@ async def gmail_call(user_id: str, slug: str, arguments: dict) -> Any:
         raise RuntimeError("Composio API key not set. Add it in Settings.")
     client = Composio(api_key=key)
     connections = await asyncio.to_thread(client.connected_accounts.list, user_ids=[user_id])
-    if not any(c.toolkit and c.toolkit.slug.lower() == "gmail" and c.status == "ACTIVE" for c in connections.items):
-        raise RuntimeError("Gmail is not connected. Ask the user to connect Gmail in Settings, then try again.")
+    if not any(c.toolkit and c.toolkit.slug.lower() == toolkit and c.status == "ACTIVE" for c in connections.items):
+        label = label or toolkit.title()
+        raise RuntimeError(f"{label} is not connected. Ask the user to connect {label} in Settings, then try again.")
     return await asyncio.to_thread(
         client.tools.execute, slug=slug, user_id=user_id, arguments=arguments, dangerously_skip_version_check=True
     )
@@ -238,7 +261,37 @@ def build(ctx: ToolContext):
     CAMPAIGN_FIELDS = {
         "plan_id": {"type": "string", "description": "From render_campaign; logs the send to the campaign's send log"},
         "step": {"type": "integer", "description": "From render_campaign"},
+        "attachments": {"type": "array", "items": {"type": "string"}, "description": "Creative ids from render_campaign, attached to the email"},
+        "inline_image": {"type": "string", "description": "Creative id from render_campaign, shown inside the email"},
     }
+
+    async def _with_creatives(args: dict, arguments: dict, slug: str, body_key: str) -> dict | str:
+        """Attach the campaign's creatives and show its inline image; returns the arguments, or what is wrong."""
+        import os
+
+        from src.agent_runtime import assets
+        from src.database import get_creative
+
+        async def mine(creative_id: str) -> dict | None:
+            c = await get_creative(creative_id)
+            return c if c and c["chat_id"] == ctx.chat_id and os.path.exists(c["path"]) else None
+
+        if args.get("inline_image"):
+            c = await mine(args["inline_image"])
+            problems = assets.lint({"inline_image": args["inline_image"]}, {c["id"]: c} if c else {})
+            if problems:
+                return problems[0]
+            arguments[body_key] = assets.html_body(arguments[body_key], c["url"], c["name"])
+            arguments["is_html"] = True
+        files = []
+        for creative_id in args.get("attachments") or []:
+            c = await mine(creative_id)
+            if not c:
+                return f"missing attachment {creative_id}"
+            files.append(await composio_upload(c["path"], slug, "gmail"))
+        if files:
+            arguments["attachment"] = files
+        return arguments
 
     @tool(
         "gmail_send_email",
@@ -258,17 +311,21 @@ def build(ctx: ToolContext):
     )
     async def gmail_send_email(args: dict) -> dict:
         if args.get("thread_id"):
-            return await _send("GMAIL_REPLY_TO_THREAD", {
+            slug, body_key, arguments = "GMAIL_REPLY_TO_THREAD", "message_body", {
                 "thread_id": args["thread_id"], "recipient_email": args["to"], "message_body": args["body"],
                 "user_id": "me", "is_html": bool(args.get("is_html")),
-            }, args, "sent")
-        arguments = {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me",
-                     "is_html": bool(args.get("is_html"))}
-        if args.get("cc"):
-            arguments["cc"] = args["cc"]
-        if args.get("bcc"):
-            arguments["bcc"] = args["bcc"]
-        return await _send("GMAIL_SEND_EMAIL", arguments, args, "sent")
+            }
+        else:
+            slug, body_key, arguments = "GMAIL_SEND_EMAIL", "body", {
+                "recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me",
+                "is_html": bool(args.get("is_html")),
+            }
+            if args.get("cc"):
+                arguments["cc"] = args["cc"]
+            if args.get("bcc"):
+                arguments["bcc"] = args["bcc"]
+        arguments = await _with_creatives(args, arguments, slug, body_key)
+        return _error(f"Not sent: {arguments}") if isinstance(arguments, str) else await _send(slug, arguments, args, "sent")
 
     @tool(
         "gmail_create_draft",
@@ -276,7 +333,9 @@ def build(ctx: ToolContext):
         {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "is_html": {"type": "boolean"}, **CAMPAIGN_FIELDS}, "required": ["to", "subject", "body"]},
     )
     async def gmail_create_draft(args: dict) -> dict:
-        return await _send("GMAIL_CREATE_EMAIL_DRAFT", {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me", "is_html": bool(args.get("is_html"))}, args, "drafted")
+        arguments = {"recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me", "is_html": bool(args.get("is_html"))}
+        arguments = await _with_creatives(args, arguments, "GMAIL_CREATE_EMAIL_DRAFT", "body")
+        return _error(f"Not drafted: {arguments}") if isinstance(arguments, str) else await _send("GMAIL_CREATE_EMAIL_DRAFT", arguments, args, "drafted")
 
     @tool(
         "gmail_search_emails",

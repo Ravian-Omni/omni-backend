@@ -147,7 +147,7 @@ planner = """
       "data_requirement": "Always read the data from the provided location.",
       "completeness": "The TO DO list should be exhaustive and must have all the information which would be needed to solve the problem/task given by user",
       "intent_understanding": "Understand the underlying intent of the user. Only perform the task explicitly asked by the user. ANY TASK CAN BE ACHIEVED WITH THE BELOW MENTIONED CAPABILITIES.",
-      "data_axle_context": "Data Axle is the primary data source. Its tools are available through the personas: lead_finder (companies by industry/SIC, size, geography), buyer_finder (decision makers at those companies), contact_enricher (full business and contact details, 1 credit per match, always confirmed with the user). USE DATA AXLE TOOLS for any request about companies, leads, prospects, contacts, industries or territories, and PLAN ACCORDINGLY: free masked previews first, enrichment only when contact details are needed, then campaign and outreach.",
+      "data_axle_context": "Data Axle is the primary data source. Its tools are available through the personas: lead_finder (companies by industry/SIC, size, geography), buyer_finder (decision makers at those companies), contact_enricher (full business and contact details, 1 credit per match, always confirmed with the user). USE DATA AXLE TOOLS for any request about companies, leads, prospects, contacts, industries or territories, and PLAN ACCORDINGLY: masked previews first, enrichment (1 credit per record) only when contact details are needed, then campaign and outreach.",
       "high_level_capabilities": [
         "we can search web to explore any detail",
         "we can code to create any thing",
@@ -176,7 +176,7 @@ planner = """
         ]
       },
       "lead_finder": {
-        "description": "Lead Finder: turns an ideal customer profile into a lead list of companies from Data Axle (free previews, masked names)",
+        "description": "Lead Finder: turns an ideal customer profile into a lead list of companies from Data Axle (masked previews; revealing them uses credits)",
         "abilities": [
           "Maps industries to SIC codes and searches Data Axle by industry, size and geography",
           "Saves a lead_list artifact the user reviews; never spends credits",
@@ -195,6 +195,13 @@ planner = """
         "abilities": [
           "Asks the user to approve the exact credit spend before enriching",
           "Saves an enriched_contacts artifact with names, phones, emails, websites, revenue"
+        ]
+      },
+      "inbox_agent": {
+        "description": "Inbox Agent: reads the replies to a campaign's emails, follows Jev's decision for each (unsubscribe, out of office, not now, or a person answers) and hands the ones that need a person to their owner with a drafted answer; sends nothing",
+        "abilities": [
+          "Checks and records every reply to a campaign plan",
+          "Opens handoffs for the team member who owns each contact"
         ]
       },
       "campaign_strategizer": {
@@ -461,12 +468,12 @@ We have the below mentioned capabilities. Based on the plan made by planner, ana
 
 <lead_finder>
 - ALWAYS the capability for 'find companies / businesses / leads / <kind of business> in <place>' requests; it also maps and charts the results itself.
-- Finds companies matching an ideal customer profile (industry, size, geography) in Data Axle. Free previews, masked names, saves a lead_list artifact.
+- Finds companies matching an ideal customer profile (industry, size, geography) in Data Axle. Masked previews (revealing them uses credits), saves a lead_list artifact.
 - Use first whenever the user wants leads, prospects, a target list or market sizing.
 </lead_finder>
 
 <buyer_finder>
-- Finds the decision makers (by title) at the companies of a lead list via Data Axle contact search. Saves a buyer_map artifact. Free.
+- Finds the decision makers (by title) at the companies of a lead list via Data Axle contact search. Saves a buyer_map artifact. Masked previews; revealing them uses credits.
 - Use after lead_finder, or when the user already has companies and needs the people.
 </buyer_finder>
 
@@ -474,6 +481,11 @@ We have the below mentioned capabilities. Based on the plan made by planner, ana
 - Resolves masked records into full profiles (names, phones, emails, websites, revenue). Costs 1 credit per match; the persona asks the user to approve the spend first.
 - Use when real contact details are needed, after lead_finder/buyer_finder.
 </contact_enricher>
+
+<inbox_agent>
+- Reads the replies to a campaign's sent emails, records each with Jev's decision, and hands replies that need a person to their owner with a drafted answer. Sends nothing.
+- Use when the user asks to check, triage or answer replies, and after outreach has sent a step.
+</inbox_agent>
 
 <campaign_strategizer>
 - Reads market intelligence on the user's competitors (KnightWatch battlecards, report cards, dated events) and saves a strategy artifact with the campaign's angle; every fact cited.
@@ -721,7 +733,7 @@ MANDATORY EXECUTION PROCESS:
 EXECUTION REQUIREMENTS:
 - For web_browser: Perform actual web searches, extract real information
 - For software_developer: Write and run the code or analysis, return real output
-- For ml_engineer, lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach: call the persona with the complete task and pass on its summary and artifact ids
+- For ml_engineer, lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, inbox_agent: call the persona with the complete task and pass on its summary and artifact ids
 - For Composio tools (e.g. GMAIL_SEND_EMAIL): Execute the tool action with provided parameters
 
 FAILURE IS NOT AN OPTION:
@@ -770,7 +782,7 @@ What the capabilities can do (ask only for inputs they can act on):
 - buyer_finder: Data Axle contact search by title at those companies (title filter works at company level; coverage is partial).
 - contact_enricher: reveals masked records for 1 credit each; business enrichment returns phone, website, address, employees, revenue; contact enrichment returns name and title. Neither guarantees an email address.
 - campaign_strategizer: the campaign's angle against competitors, from KnightWatch market intelligence (only what the user's scouts track).
-- campaign_builder: writes the email sequence; outreach: sends or drafts through the user's connected Gmail. There is no calendar or meeting-booking integration: meetings are booked by prospects replying.
+- campaign_builder: writes the email sequence; outreach: sends or drafts through the user's connected Gmail; inbox_agent: handles the replies and hands the ones that need a person to their owner. There is no meeting-booking integration: the owner confirms meeting times from the handoff.
 - ml_engineer: analytics and scoring on data the user provides or on artifacts. software_developer: code. web_browser: web search.
 
 Rules:
@@ -778,7 +790,7 @@ Rules:
 - Never ask for things the capabilities cannot use (intent signals, calendar links, CRM fields). State the limitation in `assumptions` instead, e.g. "Data Axle has no intent data; I will rank by size and multi-location unless you want slow per-company web research".
 - Never ask for information already present in the request or earlier in this chat.
 - If the request is specific enough to plan, set needs_input=false, keep `questions` empty and explain the approach in `intro`.
-- `intro` is written to the user: what you understood, what will happen after they answer, and that searches are free while enrichment and sending each need their approval.
+- `intro` is written to the user: what you understood, what will happen after they answer, that search results arrive as masked previews, and that revealing records uses Data Axle credits (1 each) and sending each need their approval. Never call searches free.
 """
 
 process_completion = """

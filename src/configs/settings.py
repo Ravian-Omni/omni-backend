@@ -102,6 +102,7 @@ class Settings:
         self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
         self.BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
         self.COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY")
+        self.JEV_API_KEY = os.getenv("JEV_API_KEY")  # TypeSafe AI decision model (reads campaign replies)
 
         # User Profile
         self.USER_FIRST_NAME = os.getenv("USER_FIRST_NAME", "")

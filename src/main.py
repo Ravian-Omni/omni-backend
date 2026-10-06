@@ -25,7 +25,7 @@ from src.routers.agents import router as agents_router
 from src.routers.campaigns import router as campaigns_router
 from src.routers import chat
 from src.routers import settings as settings_router
-from src.routers import mcp, share, software_developer, websocket
+from src.routers import feedback, handoffs, mcp, share, software_developer, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -134,6 +134,8 @@ app.include_router(
 )
 app.include_router(agents_router, prefix="/agents", tags=["Agent Runtime"])
 app.include_router(campaigns_router, prefix="/campaigns", tags=["Campaigns"])
+app.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])
+app.include_router(handoffs.router, prefix="/handoffs", tags=["Handoffs"])
 
 
 # @app.get("/")

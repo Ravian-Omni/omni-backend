@@ -59,6 +59,7 @@ class WebSocketManager:
         self._closed_connections: set[str] = set()
         self._input_responses: dict[str, asyncio.Queue[str]] = {}
         self._active_tasks: dict[str, asyncio.Task] = {}
+        self._pending_requests: dict[str, dict[str, Any]] = {}  # the question each run waits on
         self.active_browser: dict[str, asyncio.Task] = {}
         self.active_executor: dict = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
@@ -446,22 +447,21 @@ class WebSocketManager:
                 TimeoutError: If no response received within timeout.
                 ValueError: If no input queue exists or session closed.
             """
+            request = {
+                "type": "input_request",
+                "input_type": input_type,
+                "prompt": prompt,
+                "data": {"source": source, "content": prompt, "timestamp": dt.now_iso()},
+                "timestamp": dt.now_iso(),
+            }
             try:
                 logger.info(
                     f"Requesting input for session {session_id}: ({input_type}) {prompt}"
                 )
 
-                # Send input request to client
-                await self._send_message(
-                    session_id,
-                    {
-                        "type": "input_request",
-                        "input_type": input_type,
-                        "prompt": prompt,
-                        "data": {"source": source, "content": prompt, "timestamp": dt.now_iso()},
-                        "timestamp": dt.now_iso(),
-                    },
-                )
+                # Send input request to client (and keep it to show again after a reconnect)
+                self._pending_requests[session_id] = request
+                await self._send_message(session_id, request)
 
                 # Wait for response with timeout
                 if session_id in self._input_responses:
@@ -504,6 +504,9 @@ class WebSocketManager:
             except Exception as e:
                 logger.error(f"Error handling input for session {session_id}: {e}")
                 raise
+            finally:
+                if self._pending_requests.get(session_id) is request:
+                    self._pending_requests.pop(session_id)
 
         return input_handler
 
@@ -531,6 +534,7 @@ class WebSocketManager:
             ValueError: If the session has no input queue or was closed.
         """
         message = {"type": "input_request", "timestamp": dt.now_iso(), **message}
+        self._pending_requests[session_id] = message  # shown again after a reconnect
         await self._send_message(session_id, message)
 
         if session_id not in self._input_responses:
@@ -556,6 +560,9 @@ class WebSocketManager:
             logger.warning(f"Input response timeout for session {session_id}")
             await self.stop_session(session_id, "Input timeout")
             raise
+        finally:
+            if self._pending_requests.get(session_id) is message:
+                self._pending_requests.pop(session_id)
 
     async def send_message(self, session_id: str, message: dict[str, Any]) -> None:
         """Send a message to the client.
@@ -615,6 +622,11 @@ class WebSocketManager:
             await self._input_responses[session_id].put(response)
         else:
             logger.warning(f"Received input response for inactive session {session_id}")
+
+    async def resend_pending(self, session_id: str) -> None:
+        """Show again the question a run is waiting on (the page reconnected or lost it)."""
+        if session_id in self._pending_requests:
+            await self._send_message(session_id, self._pending_requests[session_id])
 
     def is_running(self, session_id: str) -> bool:
         task = self._active_tasks.get(session_id)
@@ -863,7 +875,7 @@ class WebSocketManager:
         else:
             logger.warning(f"Received kill request for inactive session {session_id}")
 
-    async def disconnect(self, session_id: str) -> None:
+    async def disconnect(self, session_id: str, websocket: WebSocket | None = None) -> None:
         """Clean up connection and associated resources.
 
         Stops the session, removes connection from tracking,
@@ -872,7 +884,11 @@ class WebSocketManager:
 
         Args:
             session_id: Session identifier.
+            websocket: The socket that closed; an older one the page already replaced leaves the session alone.
         """
+        if websocket is not None and self._connections.get(session_id) not in (None, websocket):
+            logger.info(f"Superseded socket closed for session {session_id}; the newer one keeps the run")
+            return
         LLMConfigManager.clear_cache()
         logger.info(f"Disconnecting session {session_id}")
 

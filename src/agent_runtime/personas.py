@@ -153,6 +153,17 @@ _register(Persona(
 ))
 
 _register(Persona(
+    name="inbox_agent",
+    display_name="Inbox Agent",
+    tagline="Reads campaign replies, decides each next step with Jev, hands the rest to their owner",
+    description=prompts.INBOX_AGENT_DESCRIPTION,
+    system_prompt=prompts.INBOX_AGENT,
+    builtin_tools=["Read"],
+    daxagent_tools=["check_replies", "record_reply", "hand_off", "meeting_slots", *COMMON_TOOLS],
+    remote_mcp=True,  # KnightWatch, for answers about competitors (configs/mcp_servers.json)
+))
+
+_register(Persona(
     name="assistant",
     display_name="DAXAGENT",
     tagline="Chat mode: answers and acts with every connected tool",
@@ -168,7 +179,7 @@ _register(Persona(
     max_turns=30,
 ))
 
-SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach"]
+SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach", "inbox_agent"]
 
 
 def get_persona(name: str) -> Persona:

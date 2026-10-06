@@ -16,7 +16,7 @@ from fastapi import HTTPException, status
 
 from src.configs.datetime_utils import dt
 from src.configs.settings import CapabilityType, settings
-from src.database import get_chat_repository
+from src.database import get_chat_repository, load_feedback
 from src.utilities.storage import ensure_path
 
 
@@ -235,6 +235,7 @@ class ChatService:
             "chat_id": document.get("chat_id", ""),
             "chat_dir": document.get("chat_dir", ""),
             "raw_messages": raw_messages,
+            "feedback": {"data": await load_feedback(chat_id)},
         }
 
     @staticmethod
@@ -349,5 +350,5 @@ class ChatService:
             "chat_id": document.get("chat_id", ""),
             "chat_dir": document.get("chat_dir", ""),
             "raw_messages": raw_messages,
-            "feedback": document.get("feedback", {}),
+            "feedback": {"data": await load_feedback(chat_id)},
         }

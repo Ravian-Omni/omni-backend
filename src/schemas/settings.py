@@ -30,6 +30,7 @@ class APIKeysUpdateRequest(BaseModel):
     tavily_api_key: str | None = None
     brave_api_key: str | None = None
     composio_api_key: str | None = None
+    jev_api_key: str | None = None
 
 
 class APIKeysStatusResponse(BaseModel):

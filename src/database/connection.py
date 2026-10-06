@@ -143,6 +143,67 @@ CREATE TABLE IF NOT EXISTS user_prefs (
     PRIMARY KEY (user_id, key)
 );
 
+-- The user's rating of a finished run ("How was your experience?"), bound to its conversation
+-- (chat_id) and run (task_id); rating the same run again replaces it.
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (chat_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_chat_id ON feedback(chat_id);
+
+-- Replies a person on the team must answer, from the Inbox Agent: one row per reply thread,
+-- reopened when the contact writes again. read = Jev's answers (JSON); draft = the suggested reply.
+CREATE TABLE IF NOT EXISTS handoffs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL DEFAULT '',
+    contact TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    route TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    reply TEXT NOT NULL,
+    read TEXT NOT NULL DEFAULT '{}',
+    draft TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'claimed', 'sent', 'done')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (chat_id, contact, thread_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(user_id, status);
+
+-- Ad creatives the user uploads for a campaign plan: read by Campaign Builder for the copy (summary),
+-- attached to chosen steps, linked (url) or shown inside the email (url, images only).
+CREATE TABLE IF NOT EXISTS creatives (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_creatives_plan ON creatives(chat_id, plan_id);
+
+-- Conversations the user deleted from the sidebar: kept in history, never listed again.
+CREATE TABLE IF NOT EXISTS hidden_chats (
+    chat_id TEXT PRIMARY KEY,
+    hidden_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS geocode_cache (
     place TEXT PRIMARY KEY,
     lat REAL,

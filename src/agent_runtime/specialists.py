@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import prompts
+from src.agent_runtime import app_agents, prompts
 from src.agent_runtime.personas import COMMON_TOOLS, Persona
 from src.database import load_mcp_tool_classes
 from src.mcp_client import is_connected, list_tools, options, server_names
@@ -71,33 +71,40 @@ async def build(server: str) -> Persona | None:
     if not tools:
         return None
     opts = options(server)
+    agent = app_agents.for_options(opts)  # an app agent (Salesforce, HubSpot, Slack, Gmail) has its own name, job and rules
+    if agent and agent["tools"]:
+        tools = [t for t in tools if t["name"] in agent["tools"]] or tools
     overrides = await load_mcp_tool_classes(server)
-    display = opts.get("display_name") or server
+    display = agent["agent"] if agent else opts.get("display_name") or server
     lines, summary = [], []
     for t in tools:
         cls = classify_tool(t["name"], t.get("description", ""), t.get("annotations"), overrides.get(t["name"]))
         tag = "" if cls == "read" else f" ({cls})"
         lines.append(f"- {t['name']}{tag}: {_escape(_short(t.get('description', '')))}")
         summary.append(t["name"].split("__")[-1].replace("_", " ").lower())
-    notes = ""
+    notes = f"\n## How you work\n{_escape(agent['instructions'])}\n" if agent else ""
     if opts.get("system_prompt_append"):
         notes += "\n" + _escape(opts["system_prompt_append"].strip()) + "\n"
     if opts.get("planner_note"):
         notes += "\n" + _escape(opts["planner_note"].strip()) + "\n"
-    description = (
-        f"{display} specialist: works with {display} on the user's behalf through its MCP server. "
-        f"{_short(opts.get('description', ''), 160)} "
-        f"Can: {', '.join(summary[:14])}{', …' if len(summary) > 14 else ''}. "
-        "Parameters: query (required): the complete task, with any ids, dates, names or artifact ids it needs. "
-        f"Use this function for anything that should happen in {display}."
-    )
+    if agent:
+        description = (f"{display}: {agent['tagline']}. Can: {'; '.join(agent['abilities'])}. {agent['planner_note']} "
+                       "Parameters: query (required): the complete task, with any ids, names, emails or artifact ids it needs.")
+    else:
+        description = (
+            f"{display} specialist: works with {display} on the user's behalf through its MCP server. "
+            f"{_short(opts.get('description', ''), 160)} "
+            f"Can: {', '.join(summary[:14])}{', …' if len(summary) > 14 else ''}. "
+            "Parameters: query (required): the complete task, with any ids, dates, names or artifact ids it needs. "
+            f"Use this function for anything that should happen in {display}."
+        )
     prompt = SPECIALIST_PROMPT.format(
-        display_name=_escape(display), description=_escape(opts.get("description") or f"The {display} service."),
+        display_name=_escape(display), description=_escape(agent["tagline"] if agent else opts.get("description") or f"The {display} service."),
         notes=notes, tool_lines="\n".join(lines),
     ) + prompts._COMMON_RULES
     return Persona(
         name=specialist_name(server), display_name=display,
-        tagline=f"Works with {display} for you", description=description, system_prompt=prompt,
+        tagline=agent["tagline"] if agent else f"Works with {display} for you", description=description, system_prompt=prompt,
         builtin_tools=["Read"], daxagent_tools=["review_with_user", *COMMON_TOOLS], remote_mcp=True,
         mcp_servers=[server], kind="specialist", server=server, icon=opts.get("icon", ""), max_turns=30,
     )

@@ -84,6 +84,7 @@ class Capability(str, Enum):
     CAMPAIGN_STRATEGIZER = "campaign_strategizer"
     CAMPAIGN_BUILDER = "campaign_builder"
     OUTREACH = "outreach"
+    INBOX_AGENT = "inbox_agent"
     EMAIL_SENDER = "email_sender"
     MANUAL_VERIFICATION = "manual_verification"
 
@@ -108,7 +109,7 @@ class Task(BaseModel):
 
     task_id: int
     task: str
-    capability: str = Field(..., description="A capability name from the list you were given: a built-in one (lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, ml_engineer, software_developer, web_browser, email_sender, manual_verification) or a connected-app specialist (names starting with mcp_)")
+    capability: str = Field(..., description="A capability name from the list you were given: a built-in one (lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, inbox_agent, ml_engineer, software_developer, web_browser, email_sender, manual_verification) or a connected-app specialist (names starting with mcp_)")
     status: Status
     details: str
     estimated_time: str = Field(
@@ -294,6 +295,7 @@ class Capability(str, Enum):
     CAMPAIGN_STRATEGIZER = "campaign_strategizer"
     CAMPAIGN_BUILDER = "campaign_builder"
     OUTREACH = "outreach"
+    INBOX_AGENT = "inbox_agent"
     EMAIL_SENDER = "email_sender"
     WEB_BROWSER = "web_browser"
 

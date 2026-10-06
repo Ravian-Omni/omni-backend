@@ -130,6 +130,13 @@ async def _send_error(websocket: WebSocket, chat_id: str, message: str) -> None:
 # =============================================================================
 
 
+async def _resume_running(websocket: WebSocket, chat_id: str, ws_manager: WebSocketManager) -> None:
+    """A run that outlived a reload: tell the page it is working, and show what it waits on."""
+    if ws_manager.is_running(chat_id):
+        await websocket.send_json({"type": "run_started"})
+        await ws_manager.resend_pending(chat_id)
+
+
 async def _handle_messages(
     websocket: WebSocket,
     chat_id: str,
@@ -158,6 +165,11 @@ async def _handle_messages(
             # With nothing running it is simply the next task.
             if msg_type == "user_note" and not ws_manager.is_running(chat_id):
                 message, msg_type = {"type": "start", "task": message.get("text"), "files": []}, "start"
+            # One run per task: a request while a run is going (e.g. the page reloaded and lost its
+            # state) is a note for the agents, and the question the run waits on is shown again.
+            elif msg_type == "start" and ws_manager.is_running(chat_id):
+                message, msg_type = {"type": "user_note", "text": message.get("task")}, "user_note"
+                await ws_manager.resend_pending(chat_id)
 
             # === START: Begin chat stream ===
             if msg_type == "start":
@@ -396,6 +408,7 @@ async def omni_websocket(
         )
 
         logger.info(f"Omni ready for session {chat_id}")
+        await _resume_running(websocket, chat_id, ws_manager)
         await _handle_messages(websocket, chat_id, ws_manager, omni, mode="omni")
 
     except WebSocketDisconnect:
@@ -410,7 +423,7 @@ async def omni_websocket(
             pass
     finally:
         LLMConfigManager.clear_cache()
-        await ws_manager.disconnect(chat_id)
+        await ws_manager.disconnect(chat_id, websocket)
 
 
 # =============================================================================
@@ -521,6 +534,7 @@ async def chat_websocket(
         )
 
         logger.info(f"Chat ready for session {chat_id}")
+        await _resume_running(websocket, chat_id, ws_manager)
         await _handle_messages(websocket, chat_id, ws_manager, chat, mode="chat")
 
     except WebSocketDisconnect:
@@ -535,7 +549,7 @@ async def chat_websocket(
             pass
     finally:
         LLMConfigManager.clear_cache()
-        await ws_manager.disconnect(chat_id)
+        await ws_manager.disconnect(chat_id, websocket)
         if chat is not None and not isinstance(chat, Chat):
             try:  # stop the SDK client process, but never hold up a server reload or shutdown
                 await asyncio.wait_for(chat.cleanup(), timeout=5)
@@ -617,4 +631,4 @@ async def capability_websocket(
     except Exception as e:
         logger.error(f"Capability WebSocket error: {e}")
     finally:
-        await ws_manager.disconnect(chat_id)
+        await ws_manager.disconnect(chat_id, websocket)

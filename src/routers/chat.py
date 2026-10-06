@@ -93,6 +93,30 @@ async def create_capability_chat(
         )
 
 
+@router.get("/conversations")
+async def conversations(user_id: str = "local_user") -> dict:
+    """Every stored task and chat, newest first: what the sidebar can restore when the browser lost its list."""
+    import os
+
+    from src.database import list_conversations
+
+    return {"conversations": [
+        {"chat_id": c["chat_id"], "type": "task" if c["collection"] == "omni" else "chat",
+         "name": os.path.basename(str(c["chat_dir"] or "").rstrip("/")) if c["collection"] == "omni" else "",
+         "folder": c["chat_dir"] or "", "created_at": str(c["created_at"]).replace(" ", "T"), "updated_at": str(c["updated_at"]).replace(" ", "T")}
+        for c in await list_conversations(user_id)
+    ]}
+
+
+@router.post("/conversations/{chat_id}/hide")
+async def hide_conversation(chat_id: str) -> dict:
+    """Deleted from the sidebar: the history stays, but the sidebar never lists it again."""
+    from src.database import hide_chat
+
+    await hide_chat(chat_id)
+    return {"hidden": chat_id}
+
+
 @router.get("/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory)
 async def get_omni_chat_history(
     user_id: str = Path(..., description="User ID"),

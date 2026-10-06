@@ -43,6 +43,7 @@ async def update_api_keys(
     tavily_api_key: str | None = None,
     brave_api_key: str | None = None,
     composio_api_key: str | None = None,
+    jev_api_key: str | None = None,
 ):
     """Set one or more LLM provider API keys.
 
@@ -64,6 +65,7 @@ async def update_api_keys(
         "tavily": tavily_api_key,
         "brave": brave_api_key,
         "composio": composio_api_key,
+        "jev": jev_api_key,
     }
     filtered = {k: v for k, v in keys.items() if v is not None}
     result = SettingsService.update_api_keys(filtered)

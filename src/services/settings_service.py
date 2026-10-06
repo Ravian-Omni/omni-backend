@@ -23,6 +23,7 @@ _PROVIDER_ATTR_MAP = {
     "tavily": "TAVILY_API_KEY",
     "brave": "BRAVE_API_KEY",
     "composio": "COMPOSIO_API_KEY",
+    "jev": "JEV_API_KEY",
 }
 
 # User profile field → settings attribute mapping

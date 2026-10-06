@@ -414,7 +414,12 @@ async def create_composio_server(body: ComposioServer):
     """
     import asyncio
 
+    from src.agent_runtime import app_agents
+
     client, api_key = _composio_client()
+    agent = app_agents.APPS.get(body.toolkits[0]) if len(body.toolkits) == 1 else None
+    if agent and agent["tools"] and body.allowed_tools is None:
+        body.allowed_tools = agent["tools"]  # an app agent gets its short tool list, not the app's hundreds
     for toolkit in body.toolkits:
         await save_mcp_server_flag(_dismissed_key(toolkit), True)  # an explicit add re-enables the sync for it
     listing = await composio_toolkits()

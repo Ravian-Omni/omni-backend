@@ -70,6 +70,9 @@ class SimplifiedChatHistory(BaseModel):
     raw_messages: list[RawMessage] = Field(
         default_factory=list, description="List of raw messages"
     )
+    feedback: dict[str, Any] = Field(
+        default_factory=dict, description="Ratings given in this conversation, as {data: [...]}"
+    )
 
 
 class ChatHistoryByTaskId(BaseModel):

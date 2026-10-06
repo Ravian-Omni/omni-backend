@@ -1,0 +1,75 @@
+"""The reply watcher: runs only when switched on and in working time; records the routine routes, hands off the rest."""
+
+import asyncio
+import json
+from datetime import datetime, timedelta
+
+import pytest
+
+from src.agent_runtime import inbox, prefs, watcher
+from src.agent_runtime.prefs import InboxRules
+from src.agent_runtime.tools import campaign
+from src.database import connection, save_artifact
+
+ON = {**InboxRules().model_dump(), "watch": True}
+MONDAY_10 = datetime(2026, 10, 5, 10, 0).astimezone()
+
+
+def test_due_only_when_on_in_working_time_and_after_the_interval():
+    assert not watcher.due({**ON, "watch": False}, MONDAY_10, None)
+    assert watcher.due(ON, MONDAY_10, None)
+    assert not watcher.due(ON, MONDAY_10.replace(hour=21), None)
+    assert not watcher.due(ON, MONDAY_10 - timedelta(days=1), None)  # Sunday
+    assert watcher.due({**ON, "weekends": True}, MONDAY_10 - timedelta(days=1), None)
+    assert not watcher.due(ON, MONDAY_10, MONDAY_10 - timedelta(minutes=2))
+    assert watcher.due(ON, MONDAY_10, MONDAY_10 - timedelta(minutes=6))
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    monkeypatch.setattr(connection.settings, "ROOT_DIR", str(tmp_path))
+    monkeypatch.setattr(connection, "_db", None)
+    asyncio.run(connection.init_db())
+    path = tmp_path / "send_log-plan0001.json"
+    path.write_text(json.dumps({"rows": [{"plan_id": "campaign_plan-plan0001", "to": "a@x.com", "status": "sent"}]}))
+    asyncio.run(save_artifact({"id": "send_log-plan0001", "chat_id": "chat-1", "task_id": None, "persona": "outreach", "kind": "send_log",
+                               "title": "log", "path": str(path), "row_count": 1, "source": "", "created_at": "2026-10-01T00:00:00"}))
+    recorded, handed = [], []
+
+    async def fetch(ctx, plan_id):
+        return {"threads_checked": 2, "decided_by": "jev", "errors": [], "replies": [
+            {"to": "a@x.com", "thread_id": "t1", "message_id": "m1", "text": "Please remove me", "route": "suppress", "read": {"intent": "unsubscribe"}},
+            {"to": "b@x.com", "thread_id": "t2", "message_id": "m2", "text": "What does it cost?", "route": "answer", "read": {"intent": "question"}},
+        ]}
+
+    async def record_reply(ctx, plan_id, to, intent, route="", summary="", message_id=""):
+        recorded.append((to, intent, route, message_id))
+
+    async def open_handoff(ctx, **kw):
+        handed.append(kw)
+        return {"id": "handoff-1", "contact": kw["contact"], "owner": "", "notified": []}
+
+    async def draft(*a):
+        return "Plans start at..."
+
+    monkeypatch.setattr(campaign, "fetch_replies", fetch)
+    monkeypatch.setattr(campaign, "record_reply", record_reply)
+    monkeypatch.setattr(inbox, "open_handoff", open_handoff)
+    monkeypatch.setattr(watcher, "_draft", draft)
+    yield recorded, handed
+    asyncio.run(connection.close_db())
+
+
+def test_routine_routes_are_recorded_and_the_rest_handed_off(world):
+    recorded, handed = world
+    summary = asyncio.run(watcher.sweep("u"))
+    assert recorded == [("a@x.com", "unsubscribe", "suppress", "m1"), ("b@x.com", "question", "answer", "m2")]
+    assert [(h["contact"], h["route"], h["draft"]) for h in handed] == [("b@x.com", "answer", "Plans start at...")]
+    assert summary["replies"] == 2 and summary["routes"] == {"suppress": 1, "answer": 1} and len(summary["handoffs"]) == 1
+
+
+def test_dry_run_records_nothing(world, monkeypatch):
+    recorded, handed = world
+    asyncio.run(prefs.put("u", "inbox", {"dry_run": True}))
+    summary = asyncio.run(watcher.sweep("u"))
+    assert summary["dry_run"] and summary["routes"] == {"suppress": 1, "answer": 1} and recorded == [] and handed == []

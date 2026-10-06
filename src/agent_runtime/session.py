@@ -373,7 +373,7 @@ class PersonaSession:
     async def _emit_event(self, content: dict[str, Any]) -> None:
         """Stream an event (artifact, ...) and keep it in history so it survives a reload."""
         await self._stream_message(content)
-        if content.get("type") == "artifact":
+        if content.get("type") in ("artifact", "handoff"):
             await self._persist("assistant", self.persona.name, content)
 
     async def _persist(self, role: str, name: str, raw_message: Any, content: str | None = None, usage: dict | None = None) -> None:

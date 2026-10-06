@@ -82,11 +82,16 @@ def footer(brief: dict[str, Any]) -> str:
     return "\n".join(str(v) for v in lines if v)
 
 
-def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
-    """One finished message (subject, body with footer) plus lint issues."""
+def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any], assets: dict[str, dict] | None = None) -> dict[str, Any]:
+    """One finished message (subject, body with footer) plus lint issues. assets: the campaign's creatives by id,
+    to check the step's attachments and inline image."""
     subject, subject_issues = render(step.get("subject") or "", row, brief)
     body, body_issues = render(step.get("body") or "", row, brief)
     issues = subject_issues + body_issues
+    if assets is not None:
+        from src.agent_runtime.assets import lint
+
+        issues += lint(step, assets)
     channel = step.get("channel") or "email"
     if channel == "email":
         body = f"{body.rstrip()}\n\n{footer(brief)}".rstrip()
@@ -101,6 +106,7 @@ def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any]) ->
     return {
         "step": step.get("step"), "role": step.get("role"), "channel": channel, "segment": step.get("segment"),
         "to": field(row, "email"), "phone": field(row, "phone"), "subject": subject, "body": body,
+        "attachments": list(step.get("attachments") or []), "inline_image": step.get("inline_image") or "",
         "issues": sorted(set(issues)),
     }
 
@@ -120,4 +126,4 @@ def steps_for(plan: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]
 
 def blocking(issues: list[str]) -> list[str]:
     """Issues that must stop a send (style warnings such as length do not)."""
-    return [i for i in issues if i.startswith(("no email", "masked", "empty", "unknown token", "footer incomplete"))]
+    return [i for i in issues if i.startswith(("no email", "masked", "empty", "unknown token", "footer incomplete", "missing attachment", "inline image"))]

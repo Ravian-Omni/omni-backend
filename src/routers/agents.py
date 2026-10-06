@@ -7,6 +7,7 @@ import os
 import re
 from typing import Any
 
+from loguru import logger
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
@@ -69,6 +70,38 @@ async def put_prefs(key: str, body: PrefValue, user_id: str = "local_user"):
     except ValidationError as e:
         err = e.errors()[0]
         raise HTTPException(status_code=422, detail=f"{'.'.join(map(str, err['loc']))}: {err['msg']}")
+
+
+@router.get("/apps")
+async def app_agents_status(user_id: str = "local_user") -> dict:
+    """The app agents (Salesforce, HubSpot, Slack, Gmail): what each does, whether its app is connected,
+    and whether it is used in tasks (switching it off keeps it out of tasks; chat can still use the app)."""
+    import asyncio
+
+    from src.agent_runtime import app_agents, specialists
+    from src.mcp_client import options, server_names
+    from src.mcp_client.config import in_mode, is_enabled
+
+    connected: set[str] = set()
+    try:
+        from src.routers.mcp import _composio_client
+
+        client, _ = _composio_client()
+        conns = await asyncio.to_thread(client.connected_accounts.list, user_ids=[user_id])
+        connected = {c.toolkit.slug.lower() for c in conns.items if c.toolkit and c.status == "ACTIVE"}
+    except Exception as e:
+        logger.warning(f"App agents: Composio connections unavailable: {e}")
+    servers = {app_agents.toolkit_of(options(name)): name for name in server_names() if app_agents.toolkit_of(options(name))}
+    out = []
+    for toolkit, a in app_agents.APPS.items():
+        server = servers.get(toolkit)
+        persona = specialists._by_server.get(server) if server else None
+        out.append({
+            "toolkit": toolkit, "agent": a["agent"], "app": a["app"], "tagline": a["tagline"], "abilities": a["abilities"],
+            "icon": (options(server).get("icon", "") if server else "") or a["logo"], "connected": toolkit in connected, "server": server,
+            "in_tasks": bool(server and is_enabled(server) and in_mode(server, "task")), "persona": persona,
+        })
+    return {"apps": out}
 
 
 @router.get("/suggestions")

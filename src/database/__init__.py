@@ -529,6 +529,176 @@ async def save_pref(user_id: str, key: str, value: Any) -> None:
     await db.commit()
 
 
+async def save_feedback(chat_id: str, task_id: str, user_id: str, rating: int, description: str) -> dict:
+    """Store the user's rating of a run in a conversation; rating the same run again replaces it."""
+    db = await get_db()
+    row = {"chat_id": chat_id, "task_id": task_id, "rating": rating, "description": description, "created_at": dt.now_iso()}
+    await db.execute(
+        "INSERT INTO feedback (chat_id, task_id, user_id, rating, description, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (chat_id, task_id) DO UPDATE SET rating = excluded.rating, description = excluded.description, "
+        "created_at = excluded.created_at",
+        (chat_id, task_id, user_id, rating, description, row["created_at"]),
+    )
+    await db.commit()
+    return row
+
+
+async def load_feedback(chat_id: str) -> list[dict]:
+    """Every rating given in a conversation, oldest first."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT task_id, rating, description, created_at FROM feedback WHERE chat_id = ? ORDER BY id", (chat_id,)
+    )
+    return [
+        {"chat_id": chat_id, "task_id": r[0], "rating": r[1], "description": r[2], "created_at": r[3]}
+        for r in await cursor.fetchall()
+    ]
+
+
+_HANDOFF_COLUMNS = ("id", "user_id", "chat_id", "plan_id", "contact", "thread_id", "owner", "route", "subject",
+                    "reply", "read", "draft", "status", "created_at", "updated_at")
+
+
+def _handoff(row) -> dict:
+    h = dict(zip(_HANDOFF_COLUMNS, row))
+    h["read"] = json.loads(h["read"] or "{}")
+    return h
+
+
+_CREATIVE_COLUMNS = ("id", "chat_id", "plan_id", "name", "mime", "path", "size", "url", "summary", "created_at")
+
+
+async def save_creative(c: dict) -> dict:
+    db = await get_db()
+    await db.execute(f"INSERT INTO creatives ({', '.join(_CREATIVE_COLUMNS)}) VALUES ({', '.join('?' * len(_CREATIVE_COLUMNS))})",
+                     tuple(c.get(k, "") for k in _CREATIVE_COLUMNS))
+    await db.commit()
+    return c
+
+
+async def list_creatives(chat_id: str, plan_id: str) -> list[dict]:
+    """A campaign plan's creatives, oldest first."""
+    db = await get_db()
+    cursor = await db.execute(f"SELECT {', '.join(_CREATIVE_COLUMNS)} FROM creatives WHERE chat_id = ? AND plan_id = ? ORDER BY created_at",
+                              (chat_id, plan_id))
+    return [dict(zip(_CREATIVE_COLUMNS, r)) for r in await cursor.fetchall()]
+
+
+async def get_creative(creative_id: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(f"SELECT {', '.join(_CREATIVE_COLUMNS)} FROM creatives WHERE id = ?", (creative_id,))
+    row = await cursor.fetchone()
+    return dict(zip(_CREATIVE_COLUMNS, row)) if row else None
+
+
+async def update_creative(creative_id: str, url: str) -> dict | None:
+    db = await get_db()
+    await db.execute("UPDATE creatives SET url = ? WHERE id = ?", (url, creative_id))
+    await db.commit()
+    return await get_creative(creative_id)
+
+
+async def delete_creative(creative_id: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM creatives WHERE id = ?", (creative_id,))
+    await db.commit()
+
+
+async def list_conversations(user_id: str) -> list[dict]:
+    """Every task and chat-mode conversation with something in it, newest first (the sidebar's source of truth)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT chat_id, collection, chat_dir, created_at, updated_at FROM chats "
+        "WHERE user_id = ? AND collection IN ('omni', 'chats') AND length(raw_messages) > 2 "
+        "AND chat_id NOT IN (SELECT chat_id FROM hidden_chats)",
+        (user_id,),
+    )
+    rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at"), r)) for r in await cursor.fetchall()]
+    return sorted(rows, key=lambda r: str(r["updated_at"]).replace(" ", "T"), reverse=True)
+
+
+async def hide_chat(chat_id: str) -> None:
+    """The user deleted it from the sidebar: keep its history, stop listing it."""
+    db = await get_db()
+    await db.execute("INSERT OR REPLACE INTO hidden_chats (chat_id, hidden_at) VALUES (?, ?)", (chat_id, dt.now_iso()))
+    await db.commit()
+
+
+async def list_artifacts_of_kind(kind: str) -> list[dict]:
+    """Every chat's artifacts of one kind (the reply watcher reads all send logs), newest first."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id, chat_id, task_id, kind, title, path, created_at FROM artifacts WHERE kind = ? ORDER BY created_at DESC", (kind,)
+    )
+    keys = ["id", "chat_id", "task_id", "kind", "title", "path", "created_at"]
+    return [dict(zip(keys, r)) for r in await cursor.fetchall()]
+
+
+async def chat_collection(chat_id: str) -> str | None:
+    """Where a chat's own history lives: "omni" for a task, "chats" for chat mode (None if unknown)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT collection FROM chats WHERE chat_id = ? AND collection IN ('omni', 'chats') ORDER BY collection = 'omni' DESC LIMIT 1",
+        (chat_id,),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def save_handoff(h: dict) -> dict:
+    """Open a handoff, or reopen the thread's existing one with the new reply (it keeps its id)."""
+    db = await get_db()
+    now = dt.now_iso()
+    await db.execute(
+        "INSERT INTO handoffs (id, user_id, chat_id, plan_id, contact, thread_id, owner, route, subject, reply, read, draft, "
+        "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) "
+        "ON CONFLICT (chat_id, contact, thread_id) DO UPDATE SET owner = excluded.owner, route = excluded.route, "
+        "reply = excluded.reply, read = excluded.read, draft = excluded.draft, status = 'open', updated_at = excluded.updated_at",
+        (h["id"], h["user_id"], h["chat_id"], h.get("plan_id", ""), h["contact"], h.get("thread_id", ""), h.get("owner", ""),
+         h["route"], h.get("subject", ""), h["reply"], json.dumps(h.get("read") or {}), h.get("draft", ""), now, now),
+    )
+    await db.commit()
+    cursor = await db.execute(
+        f"SELECT {', '.join(_HANDOFF_COLUMNS)} FROM handoffs WHERE chat_id = ? AND contact = ? AND thread_id = ?",
+        (h["chat_id"], h["contact"], h.get("thread_id", "")),
+    )
+    return _handoff(await cursor.fetchone())
+
+
+async def get_handoff(handoff_id: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(f"SELECT {', '.join(_HANDOFF_COLUMNS)} FROM handoffs WHERE id = ?", (handoff_id,))
+    row = await cursor.fetchone()
+    return _handoff(row) if row else None
+
+
+async def list_handoffs(user_id: str, status: str | None = None, chat_id: str | None = None) -> list[dict]:
+    """Newest first; status "active" means open or claimed."""
+    where, args = ["user_id = ?"], [user_id]
+    if status == "active":
+        where.append("status IN ('open', 'claimed')")
+    elif status:
+        where.append("status = ?"); args.append(status)
+    if chat_id:
+        where.append("chat_id = ?"); args.append(chat_id)
+    db = await get_db()
+    cursor = await db.execute(
+        f"SELECT {', '.join(_HANDOFF_COLUMNS)} FROM handoffs WHERE {' AND '.join(where)} ORDER BY updated_at DESC", args
+    )
+    return [_handoff(r) for r in await cursor.fetchall()]
+
+
+async def update_handoff(handoff_id: str, **fields: Any) -> dict | None:
+    """Change owner, draft or status; returns the updated handoff (None if it does not exist)."""
+    allowed = {k: v for k, v in fields.items() if k in ("owner", "draft", "status") and v is not None}
+    if allowed:
+        db = await get_db()
+        sets = ", ".join(f"{k} = ?" for k in allowed)
+        await db.execute(f"UPDATE handoffs SET {sets}, updated_at = ? WHERE id = ?", (*allowed.values(), dt.now_iso(), handoff_id))
+        await db.commit()
+    return await get_handoff(handoff_id)
+
+
 async def get_geocode(place: str) -> dict | None:
     """Cached coordinates for a normalised place key; lat/lng are None for a known miss."""
     db = await get_db()

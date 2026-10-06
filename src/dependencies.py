@@ -79,14 +79,7 @@ async def init_managers() -> None:
 
         # Restore persisted API keys into settings
         saved_keys = await load_all_api_keys()
-        _PROVIDER_ATTR_MAP = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "together": "TOGETHER_API_KEY",
-            "tavily": "TAVILY_API_KEY",
-            "brave": "BRAVE_API_KEY",
-            "composio": "COMPOSIO_API_KEY",
-        }
+        from src.services.settings_service import _PROVIDER_ATTR_MAP
         for provider, key in saved_keys.items():
             attr = _PROVIDER_ATTR_MAP.get(provider)
             if attr:
@@ -119,6 +112,10 @@ async def init_managers() -> None:
                     logger.debug(f"Tool prefetch for {name} skipped: {e}")
 
         asyncio.create_task(_prefetch_tools())
+
+        from src.agent_runtime import watcher
+
+        asyncio.create_task(watcher.run_forever())  # the reply watcher; idle until switched on in Settings
 
         # Restore persisted user profile into settings
         _PROFILE_ATTR_MAP = {
