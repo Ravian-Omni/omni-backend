@@ -29,6 +29,8 @@ class ToolContext:
     # Approved call counts, keyed by full tool name, consumed by the permission gate.
     spend_allowance: dict[str, int] = field(default_factory=dict)
     send_allowance: dict[str, int] = field(default_factory=dict)
+    # Remote servers whose data this turn touched, stamped on artifacts as meta.data_sources.
+    data_sources: set[str] = field(default_factory=set)
 
     def resolve_tool(self, short_or_full: str) -> str | None:
         """Find the full name of a known remote tool from its short name."""

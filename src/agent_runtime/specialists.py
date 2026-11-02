@@ -16,6 +16,7 @@ from src.agent_runtime import app_agents, prompts
 from src.agent_runtime.personas import COMMON_TOOLS, Persona
 from src.database import load_mcp_tool_classes
 from src.mcp_client import is_connected, list_tools, options, server_names
+from src.mcp_client.client import server_notes
 from src.mcp_client.classify import classify_tool
 from src.mcp_client.config import specialist_eligible
 
@@ -87,6 +88,7 @@ async def build(server: str) -> Persona | None:
         notes += "\n" + _escape(opts["system_prompt_append"].strip()) + "\n"
     if opts.get("planner_note"):
         notes += "\n" + _escape(opts["planner_note"].strip()) + "\n"
+    notes += _escape(server_notes(server))  # the server's own guidance, published on initialize()
     if agent:
         description = (f"{display}: {agent['tagline']}. Can: {'; '.join(agent['abilities'])}. {agent['planner_note']} "
                        "Parameters: query (required): the complete task, with any ids, names, emails or artifact ids it needs.")
@@ -107,6 +109,7 @@ async def build(server: str) -> Persona | None:
         tagline=agent["tagline"] if agent else f"Works with {display} for you", description=description, system_prompt=prompt,
         builtin_tools=["Read"], daxagent_tools=["review_with_user", *COMMON_TOOLS], remote_mcp=True,
         mcp_servers=[server], kind="specialist", server=server, icon=opts.get("icon", ""), max_turns=30,
+        call_when=agent["planner_note"] if agent else f"Anything that should happen in {display}.",
     )
 
 

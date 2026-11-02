@@ -92,10 +92,11 @@ APPS: dict[str, dict[str, Any]] = {
         "logo": "https://logos.composio.dev/api/gmail",
         "agent": "Gmail Agent",
         "app": "Gmail",
-        "tagline": "Works in your Gmail: finds and reads threads, drafts and labels email",
+        "tagline": "Works in your Gmail: finds and reads threads, sends, drafts and labels email",
         "abilities": [
             "Finds and reads emails and whole threads",
             "Drafts emails for you to review",
+            "Sends an email you asked for, once you confirm it",
             "Labels and organises threads",
         ],
         "tools": [],  # the Gmail server keeps its full list (60 tools, well inside the limit)
@@ -103,7 +104,7 @@ APPS: dict[str, dict[str, Any]] = {
             "- Campaign emails to prospects go out through Outreach after the user approves each batch, not through you.\n"
             "- You send only what the user asked for in this task, after the confirmation card; otherwise make a draft."
         ),
-        "planner_note": "Use the Gmail Agent for work in the user's Gmail that is not a campaign send: finding or reading threads, drafting, labelling.",
+        "planner_note": "Use the Gmail Agent for work in the user's Gmail that is not a campaign send: sending or replying to a one-off email (it asks first), finding or reading threads, drafting, labelling.",
     },
 }
 

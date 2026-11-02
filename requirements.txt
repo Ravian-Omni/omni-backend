@@ -8,9 +8,9 @@ certifi
 composio-autogen==0.11.3
 GitPython>=3.1.40
 cryptography==45.0.5
+PyJWT>=2.8  # Teams bot: checks the Bot Framework token on /teams/messages (RS256 via cryptography)
 fastapi==0.116.1
 httpx==0.28.1
-PyJWT[crypto]==2.13.0  # Clerk session tokens (src/auth.py)
 pypdf==6.18.1  # reads uploaded PDF creatives
 python-multipart==0.0.32  # creative uploads
 mcp==1.30.0

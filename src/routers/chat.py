@@ -8,8 +8,9 @@ This module provides endpoints for:
 """
 
 import os
+import re
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile, status
 
 from src.configs.settings import settings
 from src.schemas.chat import (
@@ -20,6 +21,40 @@ from src.schemas.chat import (
 from src.services.chat_service import ChatService
 
 router = APIRouter()
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _unique_path(folder: str, name: str) -> str:
+    """A path in folder for name, adding -1, -2, … when the name is taken."""
+    stem, ext = os.path.splitext(name)
+    path, n = os.path.join(folder, name), 1
+    while os.path.exists(path):
+        path, n = os.path.join(folder, f"{stem}-{n}{ext}"), n + 1
+    return path
+
+
+@router.post("/upload")
+async def upload_files(files: list[UploadFile] = File(...)) -> dict:
+    """Save files picked in the browser so a message can attach them by path.
+
+    The web UI has no access to local paths, so it uploads here and attaches the
+    returned paths exactly as the desktop app attaches local ones; a persona then
+    copies them into its chat's files folder and reads them from there.
+    """
+    folder = os.path.join(settings.ROOT_DIR, "uploads")
+    os.makedirs(folder, exist_ok=True)
+    saved = []
+    for f in files:
+        data = await f.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"{f.filename} is over 25 MB")
+        name = re.sub(r"[^\w.\-]+", "_", os.path.basename(f.filename or "file")) or "file"
+        path = _unique_path(folder, name)
+        with open(path, "wb") as out:
+            out.write(data)
+        saved.append({"fileName": os.path.basename(path), "filePath": path, "size": len(data)})
+    return {"files": saved}
 
 
 # =============================================================================
@@ -117,9 +152,9 @@ async def hide_conversation(chat_id: str) -> dict:
     return {"hidden": chat_id}
 
 
-@router.get("/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory)
+@router.get("/chat-history/{_user}/{chat_id}", response_model=SimplifiedChatHistory)
 async def get_omni_chat_history(
-    user_id: str = Path(..., description="User ID"),
+    user_id: str = "local_user",  # the path segment is ignored: signed in, the gate supplies user_id (src/auth.py)
     chat_id: str = Path(..., description="Chat ID"),
     capability: str = Query("omni", description="Chat collection/capability type"),
 ):
@@ -148,7 +183,7 @@ async def get_omni_chat_history(
 
 
 @router.post("/chat-history/task_id")
-async def get_chat_history_by_task(filter_criteria: ChatHistoryByTaskId):
+async def get_chat_history_by_task(filter_criteria: ChatHistoryByTaskId, user_id: str = "local_user"):
     """Get chat messages filtered by task ID.
 
     Args:
@@ -163,7 +198,7 @@ async def get_chat_history_by_task(filter_criteria: ChatHistoryByTaskId):
     try:
         return await ChatService.get_chat_history_by_task(
             task_id=filter_criteria.task_id,
-            user_id=filter_criteria.user_id,
+            user_id=user_id,  # the body's user_id is ignored: signed in, the gate supplies it (src/auth.py)
             chat_id=filter_criteria.chat_id,
             capability=filter_criteria.capability,
         )
@@ -177,10 +212,10 @@ async def get_chat_history_by_task(filter_criteria: ChatHistoryByTaskId):
 
 
 @router.get(
-    "/chat-history/capability/{user_id}/{chat_id}", response_model=EnhancedChatHistory
+    "/chat-history/capability/{_user}/{chat_id}", response_model=EnhancedChatHistory
 )
 async def get_capability_chat_history(
-    user_id: str = Path(..., description="User ID"),
+    user_id: str = "local_user",  # the path segment is ignored: signed in, the gate supplies user_id (src/auth.py)
     chat_id: str = Path(..., description="Chat ID"),
     call_id: str = Query(..., description="Call ID"),
     capability_name: str = Query(..., description="Capability name"),
@@ -249,10 +284,10 @@ async def create_chat_mode_session(
 
 
 @router.get(
-    "/chat_mode/chat-history/{user_id}/{chat_id}", response_model=SimplifiedChatHistory
+    "/chat_mode/chat-history/{_user}/{chat_id}", response_model=SimplifiedChatHistory
 )
 async def get_chat_mode_history(
-    user_id: str = Path(..., description="User ID"),
+    user_id: str = "local_user",  # the path segment is ignored: signed in, the gate supplies user_id (src/auth.py)
     chat_id: str = Path(..., description="Chat ID"),
 ):
     """Get a specific chat mode history by user_id and chat_id.

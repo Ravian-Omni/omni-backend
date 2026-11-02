@@ -17,5 +17,10 @@ def test_memory_text_cannot_be_empty():
         SCHEMAS["memory"].validate_python({"items": [{"text": ""}]})
 
 
+def test_agents_are_on_unless_switched_off():
+    agents = SCHEMAS["agents"].dump_python(SCHEMAS["agents"].validate_python({"outreach": {"enabled": False}, "lead_finder": {}}))
+    assert agents["outreach"]["enabled"] is False and agents["outreach"]["instructions"] == "" and agents["lead_finder"]["enabled"] is True
+
+
 def test_agent_instructions_are_keyed_by_agent():
     assert SCHEMAS["agents"].validate_python({"outreach": {"instructions": "CC my manager"}})["outreach"].instructions == "CC my manager"

@@ -4,10 +4,11 @@ Stored per user in ``user_prefs`` as JSON, validated by the models below on ever
 Memory and the per-agent instructions are appended to each agent's system prompt.
 """
 
+import re
 import uuid
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import AfterValidator, BaseModel, Field, TypeAdapter, model_validator
 
 from src.configs.datetime_utils import dt
 from src.database import load_pref, save_pref
@@ -25,8 +26,68 @@ class Memory(BaseModel):
     items: list[MemoryItem] = Field(default_factory=list, max_length=200)
 
 
+class CardText(BaseModel):
+    """The user's version of lines on an agent's card (Settings > Orchestrator); an empty line keeps DAXAGENT's."""
+
+    does: str = Field(default="", max_length=1500)
+    call_when: str = Field(default="", max_length=1500)
+    not_when: str = Field(default="", max_length=1500)
+    needs: str = Field(default="", max_length=1500)
+
+
 class AgentPref(BaseModel):
     instructions: str = Field(default="", max_length=2000)
+    enabled: bool = True  # off: the planner never assigns it and run_persona_capability refuses it
+    prompt: str = Field(default="", max_length=30000)  # the agent's own prompt as the user rewrote it; "" = DAXAGENT's
+    card: CardText = Field(default_factory=CardText)  # what the planner reads about it
+
+
+# The kinds of files a user's own agent can be given; the agent is told how to read each.
+FILE_TYPES = {
+    "csv": "CSV", "excel": "Excel", "json": "JSON", "parquet": "Parquet",
+    "pdf": "PDF", "text": "text and Markdown", "image": "images",
+}
+
+
+class CustomAgent(BaseModel):
+    """An agent the user wrote (Settings > Agents, Add agent): its prompt, files, apps, and when the planner calls it."""
+
+    name: str = Field(default="", pattern=r"^(custom_[a-z0-9_]{1,40})?$")  # derived from display_name when new, then kept
+    display_name: str = Field(min_length=1, max_length=60)
+    prompt: str = Field(min_length=1, max_length=8000)
+    routing: str = Field(min_length=1, max_length=2000)  # the planner's note: when and why to call it
+    file_types: list[Literal[tuple(FILE_TYPES)]] = Field(default_factory=list)  # type: ignore[valid-type]
+    mcp_servers: list[str] = Field(default_factory=list, max_length=20)  # unknown or removed servers are skipped at run time
+
+    @model_validator(mode="after")
+    def _name(self):
+        if not self.name:
+            self.name = ("custom_" + re.sub(r"[^a-z0-9]+", "_", self.display_name.lower()).strip("_")[:40]).rstrip("_")
+            if self.name == "custom":
+                raise ValueError("Give the agent a name with at least one letter or digit")
+        return self
+
+
+def _unique(agents: list[CustomAgent]) -> list[CustomAgent]:
+    seen = set()
+    for a in agents:
+        if a.name in seen:
+            raise ValueError(f"Two agents are called '{a.display_name}'; give one another name")
+        seen.add(a.name)
+    return agents
+
+
+# The orchestrator's core agents, each of which the user can attach a note to (omni/orchestrator.py STAGES).
+STAGE_KEYS = ("judge", "conversation", "clarifier", "planner", "aligner", "router", "verification", "wrap_up")
+
+
+class Orchestrator(BaseModel):
+    """The user's notes on the core agents (Settings > Orchestrator, Prompt engineering), added under DAXAGENT's prompt.
+
+    The prompts themselves are not the user's to change; a full rewrite saved before notes existed ("prompts") is dropped.
+    """
+
+    notes: dict[Literal[STAGE_KEYS], Annotated[str, Field(max_length=2000)]] = Field(default_factory=dict)  # type: ignore[valid-type]
 
 
 class TeamMember(BaseModel):
@@ -69,8 +130,10 @@ SCHEMAS: dict[str, TypeAdapter] = {
     "agents": TypeAdapter(dict[str, AgentPref]),
     "team": TypeAdapter(Team),
     "inbox": TypeAdapter(InboxRules),
+    "custom_agents": TypeAdapter(Annotated[list[CustomAgent], Field(max_length=30), AfterValidator(_unique)]),
+    "orchestrator": TypeAdapter(Orchestrator),
 }
-DEFAULTS: dict[str, Any] = {"memory": {}, "agents": {}, "team": {}, "inbox": {}}
+DEFAULTS: dict[str, Any] = {"memory": {}, "agents": {}, "team": {}, "inbox": {}, "custom_agents": [], "orchestrator": {}}
 _version = 0  # bumped on every save, so open sessions know to pick the change up
 
 
@@ -106,6 +169,27 @@ async def prompt_notes(user_id: str, persona: str) -> str:
     """Saved memory and the user's instructions for this agent, as system prompt sections."""
     instructions = ((await get(user_id, "agents")).get(persona) or {}).get("instructions", "").strip()
     return await memory_notes(user_id) + (f"\n\n## The user's standing instructions for you\n{instructions}" if instructions else "")
+
+
+async def agent_prompt(user_id: str, persona: str) -> str:
+    """The agent's own prompt as the user rewrote it, or "" for DAXAGENT's."""
+    return ((await get(user_id, "agents")).get(persona) or {}).get("prompt", "").strip()
+
+
+async def agent_enabled(user_id: str, persona: str) -> bool:
+    return ((await get(user_id, "agents")).get(persona) or {}).get("enabled", True)
+
+
+async def off_agents_notes(user_id: str) -> str:
+    """The agents the user switched off (Settings > Agents), as a planner system prompt section ("" when none)."""
+    from src.agent_runtime.personas import PERSONAS
+
+    off = [name for name, pref in (await get(user_id, "agents")).items() if not pref["enabled"]]
+    if not off:
+        return ""
+    names = ", ".join(f"{n} ({PERSONAS[n].display_name})" if n in PERSONAS else n for n in off)
+    return (f"\n\n## Agents switched off by the user\n{names}. Never create a task for them and never call them. "
+            "If the request needs one, say so and tell the user to switch it on in Settings > Agents.")
 
 
 async def remember(user_id: str, text: str) -> str:

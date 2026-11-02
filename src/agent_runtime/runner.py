@@ -5,13 +5,14 @@ import uuid
 
 from loguru import logger
 
+from src.agent_runtime.personas import Persona
 from src.agent_runtime.session import PersonaSession
 from src.database import create_capability_chat
 from src.utilities.custom_manager import ChatContext
 
 
 async def run_persona(
-    name: str,
+    persona: str | Persona,
     query: str,
     *,
     user_id: str,
@@ -24,7 +25,8 @@ async def run_persona(
     cancellation_token=None,
     mirror_collection: str | None = "omni",
 ) -> str:
-    """Create a persona session for one orchestrator call and return its answer."""
+    """Create a persona session for one orchestrator call and return its answer (a name, or a user's own agent)."""
+    name = persona if isinstance(persona, str) else persona.name
     context = ChatContext(
         user_id=user_id,
         chat_id=chat_id,
@@ -41,7 +43,7 @@ async def run_persona(
     session = None
     try:
         await create_capability_chat(context=context)
-        session = PersonaSession(context, name)
+        session = PersonaSession(context, persona)
         return await session.chat(query)
     except asyncio.CancelledError:
         raise

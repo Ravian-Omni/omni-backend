@@ -624,6 +624,83 @@ async def hide_chat(chat_id: str) -> None:
     await db.commit()
 
 
+async def save_user(email: str, password_hash: str, name: str = "") -> None:
+    """Add an account, or reset its password and name."""
+    db = await get_db()
+    await db.execute(
+        "INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (email) DO UPDATE SET name = excluded.name, password_hash = excluded.password_hash",
+        (email.lower(), name, password_hash, dt.now_iso()),
+    )
+    await db.commit()
+
+
+async def get_user(email: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT email, name, password_hash FROM users WHERE email = ?", (email.lower(),))
+    row = await cursor.fetchone()
+    return {"email": row[0], "name": row[1], "password_hash": row[2]} if row else None
+
+
+async def start_session(email: str, token: str, days: int) -> None:
+    from datetime import timedelta
+
+    db = await get_db()
+    await db.execute("INSERT INTO sessions (token, email, expires_at) VALUES (?, ?, ?)",
+                     (token, email.lower(), (dt.now() + timedelta(days=days)).isoformat()))
+    await db.commit()
+
+
+async def session_user(token: str) -> dict | None:
+    """The signed-in account behind a session cookie, while the session lasts."""
+    if not token:
+        return None
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT u.email, u.name, s.expires_at FROM sessions s JOIN users u ON u.email = s.email WHERE s.token = ?", (token,)
+    )
+    row = await cursor.fetchone()
+    if not row or row[2] < dt.now().isoformat():
+        return None
+    return {"email": row[0], "name": row[1]}
+
+
+async def end_session(token: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    await db.commit()
+
+
+async def save_account(user_id: str, email: str, name: str) -> None:
+    """Who a signed-in person is (the admin dashboard's label for their user id) and when they last opened the app."""
+    db = await get_db()
+    now = dt.now_iso()
+    await db.execute(
+        "INSERT INTO accounts (user_id, email, name, first_seen, last_seen) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (user_id) DO UPDATE SET email = excluded.email, name = excluded.name, last_seen = excluded.last_seen",
+        (user_id, email, name, now, now),
+    )
+    await db.commit()
+
+
+async def admin_rows(chat_id: str | None = None) -> dict[str, list[tuple]]:
+    """What the admin dashboard reads, for every conversation or one: its history rows (the task or chat and each
+    agent run's own row), feedback, saved artifacts, the people's labels and the chats they deleted from their sidebar."""
+    db = await get_db()
+    where, args = ("WHERE chat_id = ?", (chat_id,)) if chat_id else ("", ())
+
+    async def rows(sql: str, params: tuple = ()) -> list[tuple]:
+        return [tuple(r) for r in await (await db.execute(sql, params)).fetchall()]
+
+    return {
+        "chats": await rows(f"SELECT chat_id, user_id, collection, created_at, updated_at, raw_messages FROM chats {where}", args),
+        "feedback": await rows(f"SELECT chat_id, task_id, user_id, rating, description, created_at FROM feedback {where} ORDER BY id", args),
+        "artifacts": await rows(f"SELECT chat_id, task_id, kind, title, row_count FROM artifacts {where}", args),
+        "accounts": await rows("SELECT user_id, email, name, first_seen, last_seen FROM accounts"),
+        "hidden": await rows("SELECT chat_id FROM hidden_chats"),
+    }
+
+
 async def list_artifacts_of_kind(kind: str) -> list[dict]:
     """Every chat's artifacts of one kind (the reply watcher reads all send logs), newest first."""
     db = await get_db()
@@ -717,6 +794,85 @@ async def save_geocode(place: str, lat: float | None, lng: float | None) -> None
     await db.commit()
 
 
+# --- LLM as judge (src/judge.py) ---------------------------------------------------------------------------------
+
+EVAL_COLUMNS = ["id", "chat_id", "task_id", "user_id", "request", "turn_at", "judge_version", "model", "ground_truth",
+                "relevancy", "completeness", "tool_selection", "final_score", "severity", "root_cause", "failing_step",
+                "rationale", "suggested_fix", "facts", "created_at"]
+TRUTH_COLUMNS = ["id", "case_id", "version", "request", "expected_agents", "expected_answer", "query_class",
+                 "source_chat_id", "source_task_id", "author", "retired", "created_at"]
+SUITE_COLUMNS = ["id", "user_id", "config_version", "config", "cases", "passed", "score", "results", "created_at"]
+
+
+def _row(columns: list[str], row, json_fields: tuple = ()) -> dict:
+    out = dict(zip(columns, row))
+    for f in json_fields:
+        out[f] = json.loads(out[f] or "null")
+    return out
+
+
+async def save_eval(result: dict) -> int:
+    """Add one verdict; earlier verdicts on the same turn stay."""
+    db = await get_db()
+    cols = [c for c in EVAL_COLUMNS if c not in ("id", "created_at")]
+    values = [json.dumps(result[c]) if c == "facts" else result[c] for c in cols]
+    cursor = await db.execute(
+        f"INSERT INTO eval_results ({', '.join(cols)}, created_at) VALUES ({', '.join('?' * len(cols))}, ?)", (*values, dt.now_iso()))
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def latest_evals(judge_version: str, chat_id: str | None = None) -> list[dict]:
+    """The newest verdict of one judge version on each turn (of one conversation, or every one)."""
+    db = await get_db()
+    where, args = ("AND chat_id = ?", (chat_id,)) if chat_id else ("", ())
+    cursor = await db.execute(
+        f"SELECT {', '.join(EVAL_COLUMNS)} FROM eval_results WHERE id IN "
+        f"(SELECT MAX(id) FROM eval_results WHERE judge_version = ? {where} GROUP BY chat_id, task_id)", (judge_version, *args))
+    return [_row(EVAL_COLUMNS, r, ("facts",)) for r in await cursor.fetchall()]
+
+
+async def add_truth_version(case: dict) -> dict:
+    """A new version of an expected answer (a new case when case_id is new); nothing is overwritten."""
+    db = await get_db()
+    cursor = await db.execute("SELECT COALESCE(MAX(version), 0) FROM ground_truth WHERE case_id = ?", (case["case_id"],))
+    version = (await cursor.fetchone())[0] + 1
+    cols = [c for c in TRUTH_COLUMNS if c not in ("id", "version", "created_at")]
+    values = [json.dumps(case[c]) if c == "expected_agents" else case[c] for c in cols]
+    await db.execute(
+        f"INSERT INTO ground_truth ({', '.join(cols)}, version, created_at) VALUES ({', '.join('?' * len(cols))}, ?, ?)",
+        (*values, version, dt.now_iso()))
+    await db.commit()
+    return {**case, "version": version}
+
+
+async def current_truths(include_retired: bool = False) -> list[dict]:
+    """Each expected answer at its newest version, newest case first; retired ones only when asked."""
+    db = await get_db()
+    cursor = await db.execute(
+        f"SELECT {', '.join(TRUTH_COLUMNS)} FROM ground_truth WHERE id IN (SELECT MAX(id) FROM ground_truth GROUP BY case_id) ORDER BY id DESC")
+    rows = [_row(TRUTH_COLUMNS, r, ("expected_agents",)) for r in await cursor.fetchall()]
+    return [r for r in rows if include_retired or not r["retired"]]
+
+
+async def save_suite_run(run: dict) -> int:
+    db = await get_db()
+    cols = [c for c in SUITE_COLUMNS if c not in ("id", "created_at")]
+    values = [json.dumps(run[c]) if c in ("config", "results") else run[c] for c in cols]
+    cursor = await db.execute(
+        f"INSERT INTO suite_runs ({', '.join(cols)}, created_at) VALUES ({', '.join('?' * len(cols))}, ?)", (*values, dt.now_iso()))
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def suite_runs(user_id: str, limit: int = 20) -> list[dict]:
+    """One person's gate runs, newest first."""
+    db = await get_db()
+    cursor = await db.execute(
+        f"SELECT {', '.join(SUITE_COLUMNS)} FROM suite_runs WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
+    return [_row(SUITE_COLUMNS, r, ("config", "results")) for r in await cursor.fetchall()]
+
+
 __all__ = [
     "init_db",
     "close_db",
@@ -747,4 +903,10 @@ __all__ = [
     "get_artifact",
     "get_geocode",
     "save_geocode",
+    "save_eval",
+    "latest_evals",
+    "add_truth_version",
+    "current_truths",
+    "save_suite_run",
+    "suite_runs",
 ]

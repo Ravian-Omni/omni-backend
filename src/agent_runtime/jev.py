@@ -55,7 +55,7 @@ ROUTES = {
     "snooze": "Not now: stop this campaign, try again later",
     "handoff": "A person on the team answers",
     "propose_meeting": "Draft a reply with meeting times; the owner approves the send",
-    "answer": "Draft an answer (KnightWatch for competitors); the owner approves the send",
+    "answer": "Draft an answer (MarketWatch for competitors); the owner approves the send",
 }
 
 

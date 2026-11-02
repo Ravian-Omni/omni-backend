@@ -4,6 +4,7 @@ Provides CRUD operations for chat documents, replacing the previous
 cloud MongoDB API calls with local SQLite storage.
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -23,6 +24,8 @@ class ChatRepository:
             db: Active aiosqlite connection.
         """
         self.db = db
+        # append_message reads a row and writes it back; parallel agents append to the same chat row, so one at a time
+        self._append = asyncio.Lock()
 
     async def create_chat(self, document: dict[str, Any], collection: str) -> dict:
         """Insert a new chat document.
@@ -97,29 +100,30 @@ class ChatRepository:
 
         where_sql = " AND ".join(where_clauses)
 
-        cursor = await self.db.execute(
-            f"SELECT id, messages, raw_messages FROM chats WHERE {where_sql}",
-            params,
-        )
-        row = await cursor.fetchone()
+        async with self._append:
+            cursor = await self.db.execute(
+                f"SELECT id, messages, raw_messages FROM chats WHERE {where_sql}",
+                params,
+            )
+            row = await cursor.fetchone()
 
-        if not row:
-            logger.error(f"Chat not found: {chat_id} in collection '{collection}'")
-            return False
+            if not row:
+                logger.error(f"Chat not found: {chat_id} in collection '{collection}'")
+                return False
 
-        row_id = row[0]
-        messages = json.loads(row[1])
-        raw_messages = json.loads(row[2])
+            row_id = row[0]
+            messages = json.loads(row[1])
+            raw_messages = json.loads(row[2])
 
-        raw_messages.append(raw_message)
-        if content_message and content_message.get("content"):
-            messages.append(content_message)
+            raw_messages.append(raw_message)
+            if content_message and content_message.get("content"):
+                messages.append(content_message)
 
-        await self.db.execute(
-            "UPDATE chats SET messages = ?, raw_messages = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(messages), json.dumps(raw_messages), dt.now_iso(), row_id),
-        )
-        await self.db.commit()
+            await self.db.execute(
+                "UPDATE chats SET messages = ?, raw_messages = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(messages), json.dumps(raw_messages), dt.now_iso(), row_id),
+            )
+            await self.db.commit()
 
         logger.debug(f"Appended message to chat {chat_id}")
         return True

@@ -67,4 +67,33 @@ def build(ctx: ToolContext):
         )
         return _text(f"[script: {path}]\n{out}")
 
-    return [execute_command, run_python]
+    @tool(
+        "read_image",
+        "Look at an image file (PNG, JPEG, GIF or WebP up to 10 MB) and answer a question about it: what it shows, "
+        "its text word for word, colours, layout. Use it for images the user attached.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The image's path, as listed in the task"},
+                "question": {"type": "string", "description": "What to look for or read in it"},
+            },
+            "required": ["path", "question"],
+        },
+    )
+    async def read_image(args: dict) -> dict:
+        import mimetypes
+
+        from src.agent_runtime.llm import describe_image
+        from src.agent_runtime.tools.files import _resolve
+
+        try:
+            path = _resolve(ctx, args["path"])  # only the chat's own folders
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+        mime = mimetypes.guess_type(path)[0] or ""
+        if mime not in ("image/png", "image/jpeg", "image/gif", "image/webp") or not os.path.isfile(path) or os.path.getsize(path) > 10_000_000:
+            return {"content": [{"type": "text", "text": f"{args['path']} is not a PNG, JPEG, GIF or WebP image under 10 MB"}], "is_error": True}
+        with open(path, "rb") as f:
+            return _text(await describe_image(f.read(), mime, args["question"]))
+
+    return [execute_command, run_python, read_image]

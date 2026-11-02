@@ -95,6 +95,8 @@ async def write(
         "created_at": dt.now_iso(),
     }
     meta = {**(meta or {}), "rev": int((meta or {}).get("rev") or 0) + 1}  # lets the Console spot agent edits
+    if ctx.data_sources:
+        meta["data_sources"] = sorted(ctx.data_sources)
     payload = {**record, "columns": columns, "rows": rows, "meta": meta}
     with open(record["path"], "w") as f:
         json.dump(payload, f, indent=1, default=str)
@@ -171,6 +173,7 @@ def build(ctx: ToolContext):
             payload = load(ctx, args["artifact_id"])
         except FileNotFoundError as e:
             return _error(str(e))
+        ctx.data_sources.update(payload.get("meta", {}).get("data_sources", []))  # a chart of these rows credits their source
         offset = int(args.get("offset") or 0)
         limit = int(args.get("limit") or 100)
         rows = payload["rows"][offset : offset + limit]

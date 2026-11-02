@@ -13,12 +13,11 @@ class FeedbackIn(BaseModel):
     task_id: str = Field("", description="The run in the conversation being rated")
     rating: int = Field(..., ge=1, le=5)
     description: str = Field("", max_length=5000)
-    user_id: str = "local_user"
 
 
 @router.post("")
-async def submit_feedback(body: FeedbackIn) -> dict:
-    return await save_feedback(body.chat_id, body.task_id, body.user_id, body.rating, body.description.strip())
+async def submit_feedback(body: FeedbackIn, user_id: str = "local_user") -> dict:
+    return await save_feedback(body.chat_id, body.task_id, user_id, body.rating, body.description.strip())
 
 
 @router.get("/{chat_id}")

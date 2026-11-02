@@ -122,7 +122,8 @@ async def run_forever(user_id: str = "local_user") -> None:
     """Started with the app; sweeps whenever Settings say one is due."""
     while True:
         try:
-            if due(await prefs.get(user_id, "inbox"), datetime.now().astimezone(), state["last_sweep"]):
+            if (due(await prefs.get(user_id, "inbox"), datetime.now().astimezone(), state["last_sweep"])
+                    and await prefs.agent_enabled(user_id, "inbox_agent")):
                 result = await sweep(user_id)
                 logger.info(f"[watcher] {result.get('replies', 0)} new replies, {len(result.get('handoffs', []))} handed off")
         except Exception as e:

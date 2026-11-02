@@ -11,8 +11,10 @@ from pydantic import BaseModel, Field
 from src.database import load_mcp_tool_classes, save_mcp_server_flag, save_mcp_tool_class
 from src.mcp_client import auth_type, call_tool, is_connected, list_tools, options, server_names, server_url
 from src.mcp_client.classify import TOOL_CLASSES, classify_tool
+from src.mcp_client.client import refresh_tools, server_info, server_instructions
 from src.mcp_client.config import (
-    add_server, in_mode, is_bundled, is_enabled, is_reserved, remove_server, set_enabled, set_mode, specialist_eligible,
+    add_server, in_mode, is_bundled, is_enabled, is_reserved, personas_for, remove_bundled, remove_server, set_enabled, set_mode,
+    set_personas, set_specialist, specialist_eligible, tools_changed, wants_specialist,
 )
 from src.agent_runtime import specialists
 from src.agent_runtime.specialists import specialist_name
@@ -45,16 +47,45 @@ async def _describe(name: str) -> dict[str, Any]:
         "display_name": opts.get("display_name", name),
         "description": opts.get("description", ""),
         "icon": opts.get("icon", ""),
+        "logo": opts.get("logo", ""),  # wordmark for data credits on charts and maps; icon is the small mark
         "auth": auth_type(name),
-        "personas": opts.get("personas"),
+        "personas": personas_for(name),
+        "hooked_to": _hooked_to(name),  # the agents that really get it in tasks (the runtime's own rule)
+        "own_subagent": wants_specialist(name),
         "bundled": is_bundled(name),
         "connected": await is_connected(name),
         "enabled": is_enabled(name),
         "chat": in_mode(name, "chat"),
         "task": in_mode(name, "task"),
         "reserved": is_reserved(name),
+        # What the server published on initialize() (known once its tools were listed)
+        "server_info": server_info(name),
+        "instructions_chars": len(server_instructions(name)),
         "specialist": specialist_name(name) if specialist_eligible(name) else None,
     }
+
+
+def server_agents() -> list[str]:
+    """The agents a server can be hooked to: the job personas that take remote servers by each server's list
+    (the chat assistant takes every server, specialists their own)."""
+    from src.agent_runtime.personas import PERSONAS
+
+    return [n for n, p in PERSONAS.items() if p.remote_mcp and not p.retired and p.mcp_servers is None]
+
+
+def _hooked_to(server: str) -> list[str]:
+    from src.agent_runtime.personas import PERSONAS
+    from src.agent_runtime.session import offered
+
+    if not (is_enabled(server) and in_mode(server, "task")):
+        return []
+    return [n for n in server_agents() if offered(PERSONAS[n], server)]
+
+
+def _check_agents(personas: list[str] | None) -> None:
+    unknown = sorted(set(personas or []) - set(server_agents()))
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown agents: {', '.join(unknown)}. Choose from: {', '.join(server_agents())}")
 
 
 async def _tools_with_classes(server: str) -> list[dict[str, Any]]:
@@ -67,9 +98,17 @@ async def _tools_with_classes(server: str) -> list[dict[str, Any]]:
 
 
 @router.get("/servers")
-async def list_servers():
-    """List every MCP server (bundled and user-added) with its connection state."""
-    return {"servers": [await _describe(name) for name in server_names()]}
+async def list_servers(user_id: str = "local_user"):
+    """List every MCP server (bundled and user-added) with its connection state. "Hooked to" also names the
+    user's own agents that work in it (Settings > Agents)."""
+    from src.agent_runtime import prefs
+
+    own = await prefs.get(user_id, "custom_agents")
+    servers = [await _describe(name) for name in server_names()]
+    for d in servers:
+        if is_enabled(d["name"]) and in_mode(d["name"], "task"):
+            d["hooked_to"] += [a["name"] for a in own if d["name"] in a["mcp_servers"]]
+    return {"servers": servers}
 
 
 class NewServer(BaseModel):
@@ -86,6 +125,7 @@ class NewServer(BaseModel):
     token_url: str | None = None
     register_url: str | None = None
     personas: list[str] | None = None
+    specialist: bool | None = Field(default=None, description="False: no sub-agent of its own (the agents named above use it)")
     planner_note: str | None = None
     system_prompt_append: str | None = None
 
@@ -109,6 +149,7 @@ async def create_server(body: NewServer):
     name = _slug(body.name or body.display_name or re.sub(r"^https?://", "", url).split("/")[0])
     if name in server_names():
         raise HTTPException(status_code=409, detail=f"An MCP server named '{name}' already exists")
+    _check_agents(body.personas)
 
     daxagent: dict[str, Any] = {
         "display_name": body.display_name or body.name or name,
@@ -119,6 +160,8 @@ async def create_server(body: NewServer):
         value = getattr(body, key)
         if value:
             daxagent[key] = value
+    if body.specialist is False:
+        daxagent["specialist"] = False
 
     auth = body.auth
     discovered_tools: list[dict] = []
@@ -166,15 +209,23 @@ class ServerUpdate(BaseModel):
     display_name: str | None = None
     description: str | None = None
     personas: list[str] | None = None
+    specialist: bool | None = Field(default=None, description="False: no sub-agent of its own (the personas named above use it)")
     planner_note: str | None = None
     system_prompt_append: str | None = None
+    persona_prompt_append: str | None = None
 
 
 @router.put("/servers/{server}")
 async def update_server(server: str, body: ServerUpdate):
-    """Change a server's display fields, persona access or prompt notes."""
+    """Change a server's display fields, agents, own sub-agent or prompt notes (a bundled one: its switches and agents)."""
     _require(server)
     fields = body.model_dump(exclude_none=True)
+    _check_agents(fields.get("personas"))
+    if is_bundled(server):  # its file stays as shipped; the agent choice is kept as switches
+        if (personas := fields.pop("personas", None)) is not None:
+            await set_personas(server, personas)
+        if (own := fields.pop("specialist", None)) is not None:
+            await set_specialist(server, own)
     if token := fields.pop("token", "").strip():
         if auth_type(server) not in ("bearer", "api_key"):
             raise HTTPException(status_code=400, detail=f"{server} does not sign in with a key")
@@ -201,10 +252,13 @@ async def update_server(server: str, body: ServerUpdate):
 
 @router.delete("/servers/{server}")
 async def delete_server(server: str):
-    """Forget a user-added server, its tokens and its tool settings."""
+    """Forget a server and its tokens: a user-added one with its tool settings, a bundled one for good in this app."""
     _require(server)
     if is_bundled(server):
-        raise HTTPException(status_code=400, detail="Bundled servers cannot be removed, only disconnected")
+        await forget_tokens(server)
+        await remove_bundled(server)
+        await specialists.refresh()
+        return {"success": True, "server": server, "composio_server_deleted": False}
     composio = options(server).get("composio") or {}
     composio_id = composio.get("server_id")
     for toolkit in composio.get("toolkits") or []:
@@ -306,6 +360,23 @@ async def server_tools(server: str):
         raise HTTPException(status_code=401, detail=str(e))
 
 
+@router.post("/servers/{server}/refresh")
+async def refresh_server_tools(server: str):
+    """Re-list a server's tools now (its tools changed) and make open chats pick them up."""
+    _require(server)
+    try:
+        await refresh_tools(server)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not list {server}: {e}")
+    tools_changed()
+    await specialists.refresh()
+    tools = await _tools_with_classes(server)
+    logger.info(f"MCP server '{server}' re-listed: {len(tools)} tools")
+    return {"server": server, "count": len(tools), "tools": tools}
+
+
 class ToolClassUpdate(BaseModel):
     tool_class: str | None = Field(default=None, description="read | spend | send, or null to reset")
 
@@ -326,11 +397,19 @@ async def credits(server: str):
     _require(server)
     if not await is_connected(server):
         raise HTTPException(status_code=401, detail=f"{server} is not connected")
-    tools = {t["name"] for t in await list_tools(server)}
-    balance_tool = next((t for t in ("fetch_available_credits", "get_credits", "credit_balance") if t in tools), None)
-    if not balance_tool:
-        return {"server": server, "credits": None}
-    raw = await call_tool(server, balance_tool, {})
+    try:
+        tools = {t["name"] for t in await list_tools(server)}
+        balance_tool = next((t for t in ("fetch_available_credits", "get_credits", "credit_balance") if t in tools), None)
+        if not balance_tool:
+            return {"server": server, "credits": None}
+        raw = await call_tool(server, balance_tool, {})
+    except Exception as e:
+        # An unreachable server is a known state, not a failure of this endpoint: the meter shows no balance.
+        cause = e
+        while getattr(cause, "exceptions", None):  # the MCP client wraps the real error in exception groups
+            cause = cause.exceptions[0]
+        logger.warning(f"Credit balance unavailable for '{server}': {cause}")
+        return {"server": server, "credits": None, "error": f"{server} is unreachable: {cause}"}
     match = re.search(r'"availableCredits"\s*:\s*(\d+)', raw) or re.search(r"(\d+)", raw)
     return {"server": server, "credits": int(match.group(1)) if match else None, "raw": raw[:500]}
 
@@ -393,6 +472,52 @@ async def composio_toolkits():
     return {"toolkits": sorted(by_toolkit.values(), key=lambda t: (not t["connected"], t["toolkit"]))}
 
 
+# Composio's own toolkits and its test ones are nothing a user adds; Polar lists no-auth but fails without an account.
+NOT_OFFERED = {"composio", "bench", "test_app", "polar"}
+_free: dict[str, dict[str, Any]] = {}
+
+
+async def free_toolkits() -> dict[str, dict[str, Any]]:
+    """Composio toolkits that work with no sign-in and no API key, by slug, most used first.
+
+    shortcut: asked once per process, so a toolkit Composio adds later shows after a restart.
+    """
+    import asyncio
+
+    if not _free:
+        client, _ = _composio_client()
+        items, cursor = [], None
+        while True:
+            page = await asyncio.to_thread(client.client.toolkits.list, limit=1000, managed_by="all", sort_by="usage", **({"cursor": cursor} if cursor else {}))
+            items += page.items
+            cursor = getattr(page, "next_cursor", None)
+            if not cursor or not page.items:
+                break
+        _free.update({
+            i.slug: {"toolkit": i.slug, "name": i.name, "description": i.meta.description or "", "logo": i.meta.logo or "",
+                     "tools": int(getattr(i.meta, "tools_count", 0) or 0)}
+            for i in items if i.no_auth and i.slug not in NOT_OFFERED
+        })
+    return _free
+
+
+@router.get("/composio/free")
+async def composio_free_toolkits():
+    """Composio toolkits that need no sign-in or API key, most used first; `server` is the MCP server one was added as."""
+    try:
+        free = await free_toolkits()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Composio error: {e}")
+    added = {}
+    for name in server_names():
+        kits = (options(name).get("composio") or {}).get("toolkits") or []
+        if len(kits) == 1:
+            added[kits[0]] = name
+    return {"toolkits": [{**t, "server": added.get(t["toolkit"])} for t in free.values()]}
+
+
 # Toolkits that find email addresses; Contact Enricher gets them, since Data Axle returns none.
 EMAIL_FINDERS = {"apollo", "hunter", "crustdata", "snov", "dropcontact", "findymail"}
 
@@ -437,6 +562,13 @@ async def create_composio_server(body: ComposioServer):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Composio has no toolkit '{slug}': {str(e)[:120]}")
         if slug not in known:
+            try:
+                free = slug in await free_toolkits()
+            except Exception:
+                free = False  # Composio unreachable: try the auth config as before
+            if free:  # nothing to sign in to: the server takes the toolkit without an auth config
+                known[slug] = {"toolkit": slug, "auth_config": None, "connected": True}
+                continue
             # No auth config yet: create a Composio-managed one so the user can sign in on first use.
             try:
                 created_ac = await asyncio.to_thread(
@@ -463,7 +595,7 @@ async def create_composio_server(body: ComposioServer):
                 created = await asyncio.to_thread(
                     client.mcp.create,
                     name=composio_name,
-                    toolkits=[{"toolkit": t, "auth_config_id": ac} for t, ac in zip(body.toolkits, combo)],
+                    toolkits=[{"toolkit": t, **({"auth_config_id": ac} if ac else {})} for t, ac in zip(body.toolkits, combo)],
                     allowed_tools=body.allowed_tools,
                 )
                 break

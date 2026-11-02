@@ -1,6 +1,7 @@
 """Minimal client for remote (streamable HTTP) MCP servers."""
 
 import asyncio
+import re
 import time
 from typing import Any
 
@@ -8,7 +9,7 @@ from loguru import logger
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from src.mcp_client.config import auth_header_name, auth_type, server_url
+from src.mcp_client.config import auth_header_name, auth_type, options, server_url
 from src.mcp_client.oauth import get_access_token
 
 
@@ -30,6 +31,8 @@ async def auth_headers(server: str) -> dict[str, str]:
     token = await get_access_token(server)
     if not token:
         raise PermissionError(f"{server} is not connected. Visit /mcp/auth/{server} to sign in.")
+    # A pasted key may carry quotes, spaces or its own "Bearer " (sent as "Bearer Bearer kw_...", MarketWatch says Invalid token)
+    token = re.sub(r"^bearer\s+", "", token.strip().strip("\"'").strip(), flags=re.I)
     if auth_type(server) == "api_key":
         return {auth_header_name(server): token}
     return {"Authorization": f"Bearer {token}"}
@@ -57,6 +60,12 @@ async def _refresh_tools(server: str) -> list[dict[str, Any]]:
         _refreshing.discard(server)
 
 
+async def refresh_tools(server: str) -> list[dict[str, Any]]:
+    """Re-list the server now and replace the cached entry: for when its tools changed."""
+    _tools_cache.pop(server, None)
+    return await _refresh_tools(server)
+
+
 async def list_tools(server: str) -> list[dict[str, Any]]:
     """Return the server's tools as {name, description, input_schema, annotations} dicts.
 
@@ -72,10 +81,37 @@ async def list_tools(server: str) -> list[dict[str, Any]]:
     return await _refresh_tools(server)
 
 
+# What each server says about itself on initialize(): its instructions are the agents' guidance
+# on when to call it, published by the server rather than written into our config.
+_instructions: dict[str, str] = {}
+_server_info: dict[str, dict[str, str]] = {}
+
+
+def server_instructions(server: str) -> str:
+    """The server's initialize() instructions, once it has been listed; empty when it publishes none."""
+    return _instructions.get(server, "").strip()
+
+
+def server_notes(server: str) -> str:
+    """The server's own guidance for agents, as a prompt section; empty when it publishes none."""
+    text = server_instructions(server)
+    if not text:
+        return ""
+    display = options(server).get("display_name", server)
+    return f"\n\n## {display} (from its MCP server)\n{text}\n"
+
+
+def server_info(server: str) -> dict[str, str]:
+    """The server's published name and version, once it has been listed."""
+    return _server_info.get(server, {})
+
+
 async def _fetch_tools(server: str) -> list[dict[str, Any]]:
     async with await _session(server) as (read, write, _):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            init = await session.initialize()
+            _instructions[server] = init.instructions or ""
+            _server_info[server] = {"name": init.serverInfo.name, "version": init.serverInfo.version or ""}
             result = await session.list_tools()
             return [
                 {

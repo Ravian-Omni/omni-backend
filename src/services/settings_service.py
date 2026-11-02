@@ -122,7 +122,25 @@ class SettingsService:
                 "is_set": bool(key),
                 "key_preview": SettingsService.mask_token(key) if key else None,
             }
-        return {"providers": providers, "timestamp": time.time()}
+        return {"providers": providers, "models": SettingsService.models_in_use(), "timestamp": time.time()}
+
+    @staticmethod
+    def models_in_use() -> dict:
+        """The model behind multi-agent tasks, and the one behind chat and the persona agents. Never a key."""
+        from src.agent_runtime.openai_runner import OpenAIRunner
+        from src.configs.llm_configs_manager import LLMConfigManager
+
+        try:
+            entry = LLMConfigManager.get_config("default")["config_list"][0]
+            agent_model = OpenAIRunner.model_config()["model"]
+        except ValueError:  # no default model configured
+            entry, agent_model = {}, ""
+        if settings.AGENT_PROVIDER != "openai":
+            agent_model = settings.AGENT_MODEL or ""
+        return {
+            "tasks": {"provider": entry.get("api_type") or "openai", "model": entry.get("model", "")},
+            "agents": {"provider": settings.AGENT_PROVIDER, "model": agent_model},
+        }
 
     @staticmethod
     def clear_api_key(provider: str) -> dict:

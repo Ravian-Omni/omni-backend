@@ -9,6 +9,7 @@ from the database and is called at startup and after every add or remove.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -38,8 +39,9 @@ def _load_bundled() -> dict[str, dict[str, Any]]:
 
 
 def _config() -> dict[str, dict[str, Any]]:
-    """Bundled and runtime servers, keyed by name; runtime wins on a clash."""
-    return {**_load_bundled(), **_runtime}
+    """Bundled and runtime servers, keyed by name; runtime wins on a clash. A bundled one removed in Settings is gone."""
+    bundled = {name: c for name, c in _load_bundled().items() if not _flags.get(f"removed:{name}")}
+    return {**bundled, **_runtime}
 
 
 async def refresh() -> None:
@@ -74,6 +76,11 @@ async def remove_server(name: str) -> bool:
     return removed
 
 
+async def remove_bundled(server: str) -> None:
+    """Remove a bundled server from this app (its config file stays as shipped; adding its URL brings it back)."""
+    await _save_flag(f"removed:{server}", True)
+
+
 def is_bundled(server: str) -> bool:
     return server in _load_bundled() and server not in _runtime
 
@@ -84,8 +91,8 @@ def server_names() -> list[str]:
 
 
 def server_url(server: str) -> str:
-    """The server's endpoint URL."""
-    return _config()[server]["url"]
+    """The server's endpoint URL; MCP_URL_<NAME> overrides it per deployment (e.g. the hosted app's User's Context)."""
+    return os.getenv(f"MCP_URL_{server.upper().replace('-', '_')}") or _config()[server]["url"]
 
 
 def options(server: str) -> dict[str, Any]:
@@ -117,8 +124,29 @@ def oauth_endpoints(server: str) -> dict[str, str]:
 
 
 def personas_for(server: str) -> list[str] | None:
-    """Personas allowed to use the server, or None meaning every persona."""
+    """Personas named for the server, or None (session.offered says what that means). For a bundled server the
+    choice made in Settings wins: a marker switch plus one switch per agent, so its config file stays as shipped."""
+    if _flags.get(f"agents:{server}"):
+        prefix = f"persona:{server}:"
+        return [k[len(prefix):] for k, on in _flags.items() if on and k.startswith(prefix)]
     return options(server).get("personas")
+
+
+async def set_personas(server: str, personas: list[str]) -> None:
+    """Settings' choice of agents for a bundled server (user-added ones keep it in their own config)."""
+    prefix = f"persona:{server}:"
+    for name in {k[len(prefix):] for k in _flags if k.startswith(prefix)} | set(personas):
+        await _save_flag(prefix + name, name in personas)
+    await _save_flag(f"agents:{server}", True)
+
+
+def wants_specialist(server: str) -> bool:
+    """The server's own sub-agent switch: on unless opted out (Settings for a bundled server, else its config)."""
+    return _flags.get(f"specialist:{server}", options(server).get("specialist", True) is not False)
+
+
+async def set_specialist(server: str, on: bool) -> None:
+    await _save_flag(f"specialist:{server}", on)
 
 
 def is_reserved(server: str) -> bool:
@@ -155,11 +183,17 @@ async def _save_flag(key: str, on: bool) -> None:
     _flags_version += 1
 
 
-_flags_version = 0  # bumped on every switch change, so open sessions rebuild their tool list
+_flags_version = 0  # bumped on every switch change or tool re-list, so open sessions rebuild their tool list
 
 
 def flags_version() -> int:
     return _flags_version
+
+
+def tools_changed() -> None:
+    """A server's tools were re-listed: open sessions rebuild their tool table before their next turn."""
+    global _flags_version
+    _flags_version += 1
 
 
 def enabled_servers() -> list[str]:
@@ -172,5 +206,4 @@ def reserved_servers() -> list[str]:
 
 def specialist_eligible(server: str) -> bool:
     """Servers that get their own sub-agent: enabled, not reserved, not opted out."""
-    return is_enabled(server) and in_mode(server, "task") and not is_reserved(server) \
-        and options(server).get("specialist", True) is not False
+    return is_enabled(server) and in_mode(server, "task") and not is_reserved(server) and wants_specialist(server)

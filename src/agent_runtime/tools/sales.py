@@ -3,6 +3,7 @@ the user, and Gmail through Composio."""
 
 import json
 import re
+import uuid
 from typing import Any
 
 from loguru import logger
@@ -211,6 +212,25 @@ def build(ctx: ToolContext):
         return _text({"provided": True, "value": d.value or d.text})
 
     @tool(
+        "suggest_task",
+        "Offer to move this request to Task mode when it needs several steps or specialist agents (a full analysis "
+        "of a file; a lead list with buyers, enrichment and a campaign). The user gets Create Task and Skip buttons; "
+        "Create Task opens a new task with your title, request and files filled in, ready to send. Put what the "
+        "task would do in outline (the user reads it on the card) and do not write it again; call it once.",
+        {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Task name, 2-5 words"},
+            "outline": {"type": "string", "description": "What the task would do, as a short markdown numbered list (one line each); shown above the buttons"},
+            "request": {"type": "string", "description": "The task's first message, in the user's voice: the goal, the scope and every detail they gave"},
+            "files": {"type": "array", "items": {"type": "string"}, "description": "Paths of the attached files the task needs"},
+        }, "required": ["title", "request"]},
+    )
+    async def suggest_task(args: dict) -> dict:
+        suggestion = {"id": uuid.uuid4().hex[:12], "title": str(args["title"])[:80], "request": str(args["request"]), "outline": str(args.get("outline") or ""),
+                      "files": [str(f) for f in args.get("files") or []]}
+        await ctx.emit({"type": "task_suggestion", "suggestion": suggestion})
+        return _text({"shown": True, "message": "The user sees your outline with Create Task and Skip. End here: write nothing more."})
+
+    @tool(
         "review_with_user",
         "Show an artifact to the user for review before you continue. The user can drop rows; "
         "the tool returns the ids they excluded and updates the artifact accordingly.",
@@ -347,5 +367,5 @@ def build(ctx: ToolContext):
 
     return [
         sic_lookup, request_spend_approval, request_send_approval, ask_user, ask_user_choice,
-        ask_user_for_data, review_with_user, gmail_send_email, gmail_create_draft, gmail_search_emails,
+        ask_user_for_data, suggest_task, review_with_user, gmail_send_email, gmail_create_draft, gmail_search_emails,
     ]

@@ -195,7 +195,9 @@ class WebSocketManager:
             task = asyncio.create_task(
                 chat.manager.a_initiate_chat(
                     chat.manager,
-                    message=initial_message.get("task"),
+                    # attached files go along as in task mode; the persona session copies them into the chat
+                    message=str({"task": initial_message.get("task"), "files": initial_message.get("files")})
+                    if initial_message.get("files") else initial_message.get("task"),
                     clear_history=False,
                 )
             )

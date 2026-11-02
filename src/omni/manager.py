@@ -18,8 +18,8 @@ from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import CapabilityType, settings
 from src.configs.system_ai_config import GroupchatConfigurationManager
 from src.dependencies import get_websocket_manager
-from src.omni import prompts
-from src.agent_runtime import PERSONAS, run_persona, specialists
+from src.omni import orchestrator, prompts
+from src.agent_runtime import PERSONAS, prefs, run_persona, specialists
 from src.agent_runtime.prompts import (
     BUYER_FINDER_DESCRIPTION,
     CAMPAIGN_BUILDER_DESCRIPTION,
@@ -29,11 +29,10 @@ from src.agent_runtime.prompts import (
     LEAD_FINDER_DESCRIPTION,
     ML_ENGINEER_DESCRIPTION,
     OUTREACH_DESCRIPTION,
+    USER_CONTEXT_DESCRIPTION,
 )
 from src.omni.capabilities_descriptions import (
     email_manager_description,
-    software_developer_description,
-    web_browser_description,
 )
 from src.utilities.custom_manager import ChatContext, create_capability_chat
 from src.omni.capability_manager import CapabilityConfig, CapabilityManager
@@ -46,7 +45,7 @@ from src.omni.response_format import (
     QuestionClassification,
 )
 from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
-from src.mcp_client import is_connected, list_tools, options, server_names
+from src.mcp_client.config import reserved_servers
 from src.mcp_client.registry import register_mcp_tools
 from src.utilities.async_helpers import async_to_sync
 from src.database import answer_decision, log_decision, update_chat_history
@@ -55,28 +54,11 @@ from src.utilities.storage import a_speak
 today_date = dt.now()
 
 
-async def _mcp_planner_context() -> str:
-    """Describe the connected MCP servers for the planner's system message.
-
-    The planner routes by capability name, and MCP tools are not capabilities:
-    like Composio tools they are called by name on agent_caller. Naming them
-    here keeps the planner from reaching for web_browser instead.
-    """
-    from src.mcp_client.config import enabled_servers, in_mode
-
-    sections = []
-    for server in enabled_servers():
-        note = options(server).get("planner_note") if in_mode(server, "task") else None
-        if not note or not await is_connected(server):
-            continue
-        try:
-            names = ", ".join(t["name"] for t in await list_tools(server))
-        except Exception as e:
-            logger.warning(f"Could not describe MCP server '{server}' to planner: {e}")
-            continue
-        display = options(server).get("display_name", server)
-        sections.append(f"\n\n## {display} (connected)\n{note}Tools: {names}.\n")
-    return "".join(sections)
+def _steady(llm_config: dict) -> dict:
+    """Same request, same decision: the agents that classify, ask, plan and route run at temperature 0
+    (measured 2026-10-29: plans for one request varied run to run at the default temperature)."""
+    llm_config["temperature"] = 0  # top level: autogen forbids it inside a config_list entry
+    return llm_config
 
 
 class OmniGroupChatManager(autogen.GroupChatManager):
@@ -497,6 +479,7 @@ class Omni:
         instance = cls(chat_id=chat_id, user_id=user_id, chat_dir=chat_dir)
         await instance.initialize_composio_tools_async()
         await instance.register_mcp_specialists()
+        await instance.refresh_user_context()
         return instance
 
     def _persona_function(self, persona_name: str):
@@ -522,7 +505,6 @@ class Omni:
             return 0
         if not personas:
             return 0
-        lines = []
         for name, persona in personas.items():
             autogen.agentchat.register_function(
                 self._persona_function(name),
@@ -531,14 +513,6 @@ class Omni:
                 name=name,
                 description=persona.description,
             )
-            lines.append(f"- {name} ({persona.display_name}): {persona.description}")
-        block = (
-            "\n\n## Connected-app specialists\n"
-            "These are capabilities exactly like lead_finder: assign a task to one by its name. "
-            "Each owns one connected app and asks the user before spending or sending.\n" + "\n".join(lines) + "\n"
-        )
-        for agent in (self.planner, self.agent_router, self.clarifier):
-            agent.update_system_message(agent.system_message + block)
         logger.info(f"Registered {len(personas)} MCP specialist(s): {', '.join(personas)}")
         return len(personas)
 
@@ -618,8 +592,7 @@ class Omni:
                         app_context += f"- **{app}**: {desc}\n"
                     app_context += (
                         "\nFor tasks involving connected apps, use the corresponding capability name "
-                        "(e.g., 'email_sender' for Gmail, 'google_calendar' for Google Calendar). "
-                        "Do NOT use 'ml_engineer' or 'software_developer' for tasks these apps can handle directly.\n"
+                        "(e.g., 'email_sender' for Gmail, 'google_calendar' for Google Calendar).\n"
                     )
 
                 if not_connected:
@@ -632,10 +605,10 @@ class Omni:
                     "\nCRITICAL RULE: If a user's task requires an app that is NOT connected, "
                     "you MUST use 'manual_verification' capability to tell the user: "
                     "\"This task requires [App Name] to be connected. Please connect it in Settings > Connections, "
-                    "then try again.\" Do NOT attempt the task with ml_engineer, software_developer or any other workaround.\n"
+                    "then try again.\" Do NOT attempt the task with any workaround.\n"
                 )
 
-                self.planner.update_system_message(self.planner.system_message + app_context)
+                self._apps_context = app_context
                 logger.info(f"Updated planner: {len(connected_apps)} connected, {len(not_connected)} available to connect")
             except Exception as e:
                 logger.warning(f"Failed to update planner with app info: {e}")
@@ -646,9 +619,6 @@ class Omni:
                 tool_count += await register_mcp_tools(
                     self.agent_caller, self.agent_executor, self.conversation_agent,
                                     only=reserved_servers(), mode="task",
-                )
-                self.planner.update_system_message(
-                    self.planner.system_message + await _mcp_planner_context()
                 )
             except Exception as e:
                 logger.warning(f"MCP tool registration failed: {e}")
@@ -703,17 +673,29 @@ class Omni:
         self.cancellation_token = cancellation_token
 
     async def refresh_user_context(self) -> None:
-        """Give the clarifier and planner the user's saved memory as it is now (Settings > Memory), once per run."""
-        from src.agent_runtime import prefs
-
+        """Rebuild every step's prompt from the user's settings as they are now (Settings > Orchestrator, Agents and
+        Memory), and register the user's own agents. Runs before every task."""
         try:
-            notes = await prefs.memory_notes(self.user_id)
-            agents = (self.clarifier, self.planner)
-            self._base_prompts = getattr(self, "_base_prompts", None) or {a.name: a.system_message for a in agents}
-            for agent in agents:
-                agent.update_system_message(self._base_prompts[agent.name] + notes)
+            cards = await orchestrator.user_cards(self.user_id)
+            listed = orchestrator.render(cards) + orchestrator.specialists_block()
+            notes = await prefs.memory_notes(self.user_id) + await prefs.off_agents_notes(self.user_id)
+            mine = await orchestrator.stage_prompts(self.user_id)  # each step's prompt, as the user has it
+            self.judge_question.update_system_message(mine["judge"])
+            self.conversation_agent.update_system_message(mine["conversation"])
+            self.clarifier.update_system_message(orchestrator.with_cards(mine["clarifier"], listed) + notes)
+            self.planner.update_system_message(await orchestrator.planner_prompt(self.user_id) + getattr(self, "_apps_context", ""))
+            self.agent_aligner.update_system_message(mine["aligner"])
+            self.agent_router.update_system_message(orchestrator.with_cards(mine["router"], listed))
+            self.manual_verification.update_system_message(mine["verification"])
+            self.process_completion.update_system_message(mine["wrap_up"])
+            for c in cards:
+                if c["kind"] == "custom" and c["enabled"]:
+                    autogen.agentchat.register_function(  # registering a name again replaces it
+                        self._persona_function(c["name"]), caller=self.agent_caller, executor=self.agent_executor,
+                        name=c["name"], description=f"{c['display_name']} (the user's own agent). {c['call_when']}"[:1000],
+                    )
         except Exception as e:
-            logger.warning(f"Planner memory not refreshed: {e}")
+            logger.warning(f"Planner prompts not refreshed: {e}")
 
     def set_task_id(self, task_id):
         """Set the current task ID for tracking."""
@@ -818,15 +800,22 @@ class Omni:
 
 
     async def run_persona_capability(self, name: str, query: str):
-        """Run one persona (software_developer, ml_engineer, lead_finder, ...) on the agent runtime.
+        """Run one persona (lead_finder, buyer_finder, ...) on the agent runtime.
 
         Personas are Claude Agent SDK sessions rather than AutoGen groupchats, so
         they are driven directly instead of through CapabilityManager.
         """
         cm = self.capability_manager
+        if not await prefs.agent_enabled(cm.user_id, name):
+            return f"{name} is switched off in Settings > Agents, so it did not run. Finish without it, or ask the user to switch it on."
+        persona = None
+        if name.startswith("custom_"):
+            persona = await orchestrator.custom_persona(cm.user_id, name)
+            if persona is None:
+                return f"{name} was deleted in Settings > Agents, so it did not run. Finish without it."
         websocket_manager = await get_websocket_manager()
         return await run_persona(
-            name,
+            persona or name,
             query,
             user_id=cm.user_id,
             chat_id=cm.chat_id,
@@ -845,61 +834,6 @@ class Omni:
     def _register_functions(self):
 
         # Wrapper functions before registring to agents
-
-
-        async def web_browser_wrapper(
-            query: Annotated[
-                str,
-                "The complete search query with all the details like subject relationship with the message",
-            ]
-        ) -> Annotated[str, "The search results"]:
-            """Web search via Tavily, falling back to browser-use automation.
-
-            Tavily answers plain lookups in about a second; browser-use drives a
-            real Chrome browser and handles everything else (a specific URL to
-            open, interaction, or any Tavily failure).
-            """
-            tavily_key = getattr(settings, "TAVILY_API_KEY", None)
-            if tavily_key:
-                try:
-                    import httpx
-
-                    logger.info(f"Executing Tavily search for: {query[:100]}")
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(
-                            "https://api.tavily.com/search",
-                            json={
-                                "api_key": tavily_key,
-                                "query": query,
-                                "max_results": 5,
-                                "search_depth": "basic",
-                                "include_answer": True,
-                                "include_raw_content": False,
-                            },
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-
-                    results = [
-                        {
-                            "title": r.get("title", ""),
-                            "url": r.get("url", ""),
-                            "content": r.get("content", "")[:300],
-                        }
-                        for r in data.get("results", [])
-                    ]
-                    logger.info(f"Tavily search returned {len(results)} results")
-                    return json.dumps({
-                        "status": "success",
-                        "query": query,
-                        "answer": data.get("answer", ""),
-                        "results": results,
-                        "source": "tavily",
-                    })
-                except Exception as e:
-                    logger.warning(f"Tavily search failed ({e}); using browser-use")
-
-            return await self.get_web_browser(query)
 
 
         async def email_sender_wrapper(
@@ -984,39 +918,16 @@ class Omni:
             description=email_manager_description,
         )
 
-        # python_coder is not registered: software_developer handles all code and
-        # data work. get_python_coder() remains available to re-enable it.
-
-
-        autogen.agentchat.register_function(
-            web_browser_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="web_browser",
-            # description="This tool will be used to search the web.",
-            description=web_browser_description,
-        )
-
-        async def software_developer_wrapper(
-            query: Annotated[
-                str,
-                "The complete coding task: what to build, the platform/language, the required features and how the result should be delivered",
-            ]
-        ) -> Annotated[str, "The results"]:
-            return await self.get_software_developer(query)
-
-        autogen.agentchat.register_function(
-            software_developer_wrapper,
-            caller=self.agent_caller,
-            executor=self.agent_executor,
-            name="software_developer",
-            description=software_developer_description,
-        )
+        # Not offered in tasks (2026-10-06): python_coder, web_browser and software_developer
+        # (Growth Engineer). get_python_coder(), get_web_browser() and get_software_developer()
+        # remain to re-enable them; the personas still answer older chats that used them.
+        # ml_engineer (Data Analyst) was brought back on 2026-10-14 to work on attached files.
 
         # Personas on the agent runtime. Each is one function the caller can invoke;
         # the persona asks the user for approvals and inputs through decision cards.
         persona_descriptions = {
-            "ml_engineer": ML_ENGINEER_DESCRIPTION,
+            "user_context": USER_CONTEXT_DESCRIPTION,
+        "ml_engineer": ML_ENGINEER_DESCRIPTION,
             "lead_finder": LEAD_FINDER_DESCRIPTION,
             "buyer_finder": BUYER_FINDER_DESCRIPTION,
             "contact_enricher": CONTACT_ENRICHER_DESCRIPTION,
@@ -1055,7 +966,7 @@ class Omni:
             self.groupchat_config.get_agent_config("judge_question").llm_config
             or "default"
         )
-        llm_config_judge_question = LLMConfigManager.get_config(llm_config_name)
+        llm_config_judge_question = _steady(LLMConfigManager.get_config(llm_config_name))
         llm_config_judge_question["response_format"] = QuestionClassification
         return autogen.AssistantAgent(
             name="judge_question",
@@ -1082,12 +993,13 @@ class Omni:
             self.groupchat_config.get_agent_config("conversation_agent").llm_config
             or "default"
         )
-        llm_planner_agent = LLMConfigManager.get_config(llm_config_name)
+        llm_planner_agent = _steady(LLMConfigManager.get_config(llm_config_name))
         llm_planner_agent["response_format"] = PlannerResponse
         return autogen.AssistantAgent(
             name="planner_agent",
             llm_config=llm_planner_agent,
-            system_message=Template(prompts.planner).substitute(today_date=today_date),
+            system_message=Template(orchestrator.PLANNER_CORE).safe_substitute(today_date=today_date)
+            + "\n\n" + orchestrator.render(orchestrator.card_list([], {})),
         )
 
     def get_user_acceptance(self):
@@ -1106,7 +1018,7 @@ class Omni:
             self.groupchat_config.get_agent_config("agent_aligner").llm_config
             or "default"
         )
-        llm_agent_aligner = LLMConfigManager.get_config(llm_config_name)
+        llm_agent_aligner = _steady(LLMConfigManager.get_config(llm_config_name))
         llm_agent_aligner["response_format"] = AgentSelectionResponse
         return autogen.AssistantAgent(
             name="agent_aligner",
@@ -1121,13 +1033,13 @@ class Omni:
             self.groupchat_config.get_agent_config("agent_router").llm_config
             or "default"
         )
-        llm_agent_router = LLMConfigManager.get_config(llm_config_name)
+        llm_agent_router = _steady(LLMConfigManager.get_config(llm_config_name))
         llm_agent_router["response_format"] = CapabilityRoutingResponse
         return autogen.AssistantAgent(
             name="agent_router",
             llm_config=llm_agent_router,
             description="""From the initial information route to the capability which will solve the user's question.""",
-            system_message=prompts.agent_router,
+            system_message=prompts.agent_router.replace(orchestrator.AGENTS_SLOT, orchestrator.render(orchestrator.card_list([], {}))),
         )
 
     def get_agent_caller(self):
@@ -1180,12 +1092,12 @@ class Omni:
 
     def get_clarifier(self):
         """Create the intake agent that asks for missing inputs before planning."""
-        llm_config = self._llm_config_for("clarifier")
+        llm_config = _steady(self._llm_config_for("clarifier"))
         llm_config["response_format"] = ClarifierResponse
         return autogen.AssistantAgent(
             name="clarifier",
             llm_config=llm_config,
-            system_message=prompts.clarifier,
+            system_message=prompts.clarifier.replace(orchestrator.AGENTS_SLOT, orchestrator.render(orchestrator.card_list([], {}))),
         )
 
     def get_user_form(self):

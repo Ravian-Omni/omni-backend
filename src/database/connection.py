@@ -204,11 +204,91 @@ CREATE TABLE IF NOT EXISTS hidden_chats (
     hidden_at TEXT NOT NULL
 );
 
+-- Sign-in for the hosted app (src/auth.py): accounts and their live sessions; one shared workspace.
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+-- Who each signed-in person is. Clerk's session token names only the user id, so the app reports the person's
+-- email and name when it opens (PUT /auth/me). Labels for the admin dashboard; never used to decide access.
+CREATE TABLE IF NOT EXISTS accounts (
+    user_id TEXT PRIMARY KEY,
+    email TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS geocode_cache (
     place TEXT PRIMARY KEY,
     lat REAL,
     lng REAL,
     resolved_at TEXT NOT NULL
+);
+
+-- LLM as judge (src/judge.py): one row per verdict on one turn, never overwritten, so judge versions can be compared.
+CREATE TABLE IF NOT EXISTS eval_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    request TEXT NOT NULL DEFAULT '',
+    turn_at TEXT NOT NULL DEFAULT '',
+    judge_version TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    ground_truth TEXT NOT NULL DEFAULT '',  -- "<case id>@<version>" it was compared against; '' when none
+    relevancy REAL NOT NULL,
+    completeness REAL NOT NULL,
+    tool_selection REAL NOT NULL,
+    final_score REAL NOT NULL,
+    severity TEXT NOT NULL,
+    root_cause TEXT NOT NULL,
+    failing_step INTEGER NOT NULL DEFAULT -1,
+    rationale TEXT NOT NULL DEFAULT '',
+    suggested_fix TEXT NOT NULL DEFAULT '',
+    facts TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_results_turn ON eval_results(chat_id, task_id);
+
+-- Expected answers curated by Data Axle: one row per version of a case; editing or retiring adds a version.
+CREATE TABLE IF NOT EXISTS ground_truth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    request TEXT NOT NULL,
+    expected_agents TEXT NOT NULL DEFAULT '[]',
+    expected_answer TEXT NOT NULL DEFAULT '',
+    query_class TEXT NOT NULL DEFAULT '',
+    source_chat_id TEXT NOT NULL DEFAULT '',
+    source_task_id TEXT NOT NULL DEFAULT '',
+    author TEXT NOT NULL DEFAULT '',
+    retired INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE (case_id, version)
+);
+
+-- The gate: each run replays the planner on the expected answers with one person's prompts and cards (config).
+CREATE TABLE IF NOT EXISTS suite_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    config_version TEXT NOT NULL,
+    config TEXT NOT NULL,
+    cases INTEGER NOT NULL,
+    passed INTEGER NOT NULL,
+    score REAL NOT NULL,
+    results TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 """
 
@@ -235,7 +315,17 @@ async def init_db() -> None:
     await _db.execute("PRAGMA foreign_keys=ON")
 
     await _db.executescript(SCHEMA_SQL)
+    # Data made while everyone was "local_user" (local runs, the shared workspace, the Teams and Slack bots) goes to
+    # the hosted app's owner: DAXAGENT_OWNER, their Clerk user id or email. Never set it on a local run.
+    owner = os.getenv("DAXAGENT_OWNER", "")
+    for table in ("chats", "user_prefs", "feedback", "handoffs", "shared_chats") if owner else ():
+        moved = await _db.execute(f"UPDATE OR IGNORE {table} SET user_id = ? WHERE user_id = 'local_user'", (owner,))
+        if moved.rowcount:
+            logger.info(f"[owner] {moved.rowcount} {table} rows moved from local_user to {owner}")
     await _db.commit()
+    from src.database.copy_account import copy_requested
+
+    await copy_requested(_db)  # DAXAGENT_COPY_ACCOUNT: one account's data copied to another, once
 
     logger.info("SQLite database initialized successfully")
 

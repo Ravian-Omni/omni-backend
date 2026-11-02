@@ -75,9 +75,6 @@ country = _get_user_country(country_codes)
 class Capability(str, Enum):
     """Enum for available agent capabilities."""
 
-    WEB_BROWSER = "web_browser"
-    SOFTWARE_DEVELOPER = "software_developer"
-    ML_ENGINEER = "ml_engineer"
     LEAD_FINDER = "lead_finder"
     BUYER_FINDER = "buyer_finder"
     CONTACT_ENRICHER = "contact_enricher"
@@ -85,6 +82,7 @@ class Capability(str, Enum):
     CAMPAIGN_BUILDER = "campaign_builder"
     OUTREACH = "outreach"
     INBOX_AGENT = "inbox_agent"
+    ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
     EMAIL_SENDER = "email_sender"
     MANUAL_VERIFICATION = "manual_verification"
 
@@ -109,7 +107,7 @@ class Task(BaseModel):
 
     task_id: int
     task: str
-    capability: str = Field(..., description="A capability name from the list you were given: a built-in one (lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, inbox_agent, ml_engineer, software_developer, web_browser, email_sender, manual_verification) or a connected-app specialist (names starting with mcp_)")
+    capability: str = Field(..., description="The assign_as value of a capability from available_capabilities (e.g. lead_finder): a built-in agent, a connected-app specialist (starting with mcp_) or one of the user's own agents (starting with custom_)")
     status: Status
     details: str
     estimated_time: str = Field(
@@ -287,8 +285,6 @@ class AgentSelectionResponse(BaseModel):
 class Capability(str, Enum):
     """Enum for routing agent capabilities."""
 
-    SOFTWARE_DEVELOPER = "software_developer"
-    ML_ENGINEER = "ml_engineer"
     LEAD_FINDER = "lead_finder"
     BUYER_FINDER = "buyer_finder"
     CONTACT_ENRICHER = "contact_enricher"
@@ -296,8 +292,8 @@ class Capability(str, Enum):
     CAMPAIGN_BUILDER = "campaign_builder"
     OUTREACH = "outreach"
     INBOX_AGENT = "inbox_agent"
+    ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
     EMAIL_SENDER = "email_sender"
-    WEB_BROWSER = "web_browser"
 
 
 class TaskCapabilityMapping(BaseModel):

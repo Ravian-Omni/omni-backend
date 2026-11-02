@@ -13,6 +13,7 @@ import ast
 import asyncio
 import json
 import os
+import shutil
 import uuid
 from typing import Any
 
@@ -20,7 +21,7 @@ from loguru import logger
 
 from src.agent_runtime import prefs
 from src.agent_runtime.decisions import DecisionCards
-from src.agent_runtime.personas import Persona, get_persona
+from src.agent_runtime.personas import Persona, fill, get_persona
 from src.agent_runtime.tools import ToolContext, build_server, full_name
 from src.configs.datetime_utils import dt
 from src.configs.settings import settings
@@ -28,7 +29,7 @@ from src.database import update_chat_history, update_chat_history_by_context
 from src.managers.cancellation_token import CancellationToken
 from src.agent_runtime.tools.context import server_of
 from src.mcp_client import auth_headers, call_tool, is_connected, list_tools, options, server_names, server_url
-from src.mcp_client.client import warm
+from src.mcp_client.client import server_notes, warm
 from src.mcp_client.classify import classify_tool
 from src.mcp_client.config import personas_for
 from src.database import load_mcp_tool_classes
@@ -68,10 +69,41 @@ def _result_text(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _routed(server: str, tool: str):
+def _attach(files: list, folder: str) -> list[str]:
+    """Copy the files a message attached into the chat's files folder; return their paths there.
+
+    Uploads from the web UI land in a shared uploads folder, so each chat keeps its own copy
+    next to its other files. A path that cannot be read is passed through unchanged.
+    """
+    paths = []
+    for f in files:
+        src = str((f.get("filePath") or f.get("path")) if isinstance(f, dict) else f)
+        dst = os.path.join(folder, os.path.basename(src))
+        if os.path.isfile(src) and os.path.abspath(src) != os.path.abspath(dst):
+            os.makedirs(folder, exist_ok=True)
+            shutil.copy2(src, dst)
+        paths.append(dst if os.path.isfile(dst) else src)
+    return paths
+
+
+def offered(persona: Persona, server: str) -> bool:
+    """Whether a persona gets a remote server. A server's `personas` list names exactly the job personas that
+    use it (reserved ones too, e.g. Data Axle for the three sales finders); without a list a reserved server
+    goes to every job persona and any other belongs to its own specialist. Specialists and the chat assistant
+    carry an explicit list of servers instead ("*" = all)."""
+    from src.mcp_client.config import is_reserved
+
+    if persona.mcp_servers is not None:
+        return "*" in persona.mcp_servers or server in persona.mcp_servers
+    allowed = personas_for(server)
+    return persona.name in allowed if allowed is not None else is_reserved(server)
+
+
+def _routed(server: str, tool: str, ctx: ToolContext):
     """Handler for an app tool served by the built-in server: calls the app over its kept-open connection."""
 
     async def handler(args: dict[str, Any]) -> dict[str, Any]:
+        ctx.data_sources.add(server)
         try:
             return {"content": [{"type": "text", "text": await call_tool(server, tool, args)}]}
         except Exception as e:
@@ -99,7 +131,7 @@ class PersonaManager:
             except (ValueError, SyntaxError):
                 pass
         if files:
-            listed = "\n".join(f"- {f.get('filePath') or f.get('path') or f}" for f in files)
+            listed = "\n".join(f"- {p}" for p in _attach(files, self.session.file_location))
             task = f"{task}\n\nFiles the user attached (under {self.session.file_location}):\n{listed}"
         return await self.session.chat(task)
 
@@ -140,6 +172,8 @@ class PersonaSession:
         self._primed = False  # the current SDK client has seen this chat (else the history is replayed)
         self._warm_task: asyncio.Task | None = None
         self._usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+        self._run_start = dict(self._usage)  # the counter at the start of the current run (it runs on across a chat's turns)
+        self._model = ""
 
         self.working_directory = ensure_path(os.path.join(context.chat_dir, "workspace"))
         self.file_location = ensure_path(os.path.join(context.chat_dir, "files"))
@@ -178,27 +212,11 @@ class PersonaSession:
         classes: dict[str, str] = {}
         if not self.persona.remote_mcp:
             return servers, classes
-        from src.mcp_client.config import in_mode, is_enabled, is_reserved
+        from src.mcp_client.config import in_mode, is_enabled
 
         mode = "chat" if self.persona.name == "assistant" else "task"  # chat mode runs only the assistant
-        wanted: list[str] = []
         self._remote_tools = {}
-        for name in server_names():
-            if not is_enabled(name) or not in_mode(name, mode):
-                continue
-            if self.persona.mcp_servers is not None:
-                # specialists (and any persona with an explicit list) get exactly their servers
-                if "*" not in self.persona.mcp_servers and name not in self.persona.mcp_servers:
-                    continue
-            else:
-                # job personas: the reserved servers plus servers assigned to them by name;
-                # everything else is owned by that server's specialist
-                allowed = personas_for(name)
-                if not is_reserved(name) and not (allowed and self.persona.name in allowed):
-                    continue
-                if allowed is not None and self.persona.name not in allowed and not is_reserved(name):
-                    continue
-            wanted.append(name)
+        wanted = [name for name in server_names() if is_enabled(name) and in_mode(name, mode) and offered(self.persona, name)]
 
         async def probe(name: str):
             if not await is_connected(name):
@@ -238,12 +256,12 @@ class PersonaSession:
                 name = f"{alias}__{t['name']}"
                 tools.append(SdkMcpTool(name=name, description=t["description"],
                                         input_schema=t["input_schema"] or {"type": "object", "properties": {}},
-                                        handler=_routed(server, t["name"])))
+                                        handler=_routed(server, t["name"], self.tool_context)))
                 classes[full_name(name)] = remote_classes.get(f"mcp__{server}__{t['name']}", "read")
         return tools, classes
 
     def _system_prompt(self, remote_notes: str) -> str:
-        text = self.persona.system_prompt.format(
+        values = dict(
             working_directory=self.working_directory,
             file_location=self.file_location,
             artifacts_dir=self.artifacts_dir,
@@ -251,7 +269,8 @@ class PersonaSession:
             today=dt.now().strftime("%Y-%m-%d"),
             custom_instructions=self.custom_instructions,
         )
-        return text + remote_notes
+        own = getattr(self, "_own_prompt", "")  # the user's rewrite (Settings > Orchestrator), loaded before each build
+        return (fill(own, values) if own else self.persona.system_prompt.format(**values)) + remote_notes
 
     async def _build_options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
@@ -275,9 +294,11 @@ class PersonaSession:
             note = options(name).get("persona_prompt_append") or options(name).get("system_prompt_append")
             if note:
                 notes += note
+            notes += server_notes(name)  # when to call it, as the server itself publishes on initialize()
         notes += await prefs.prompt_notes(self.context.user_id, self.persona.name)  # Settings > Memory and Agents
+        self._own_prompt = await prefs.agent_prompt(self.context.user_id, self.persona.name)
         api_key = settings.ANTHROPIC_API_KEY or os.environ.get("ANTHROPIC_API_KEY", "")
-        model = getattr(settings, "AGENT_MODEL", None) or "claude-haiku-4-5-20251001"
+        model = self._model = getattr(settings, "AGENT_MODEL", None) or "claude-haiku-4-5-20251001"
         self._budget = float(getattr(settings, "AGENT_MAX_BUDGET_USD", None) or self.persona.max_budget_usd or 0) or None
         opts = ClaudeAgentOptions(
             system_prompt=self._system_prompt(notes),
@@ -373,7 +394,7 @@ class PersonaSession:
     async def _emit_event(self, content: dict[str, Any]) -> None:
         """Stream an event (artifact, ...) and keep it in history so it survives a reload."""
         await self._stream_message(content)
-        if content.get("type") in ("artifact", "handoff"):
+        if content.get("type") in ("artifact", "handoff", "task_suggestion"):
             await self._persist("assistant", self.persona.name, content)
 
     async def _persist(self, role: str, name: str, raw_message: Any, content: str | None = None, usage: dict | None = None) -> None:
@@ -463,9 +484,11 @@ class PersonaSession:
         """Run the persona on one user message; returns its final text."""
         if self._check_cancellation():
             raise asyncio.CancelledError("Operation cancelled before start")
+        self._run_start = dict(self._usage)
         # An approval covers the turn it was given in, never a later one.
         self.tool_context.spend_allowance.clear()
         self.tool_context.send_allowance.clear()
+        self.tool_context.data_sources.clear()
         self._notes_seen = []
         if notes := self._take_notes():
             user_message = f"{user_message}\n\n{_NOTE_INTRO}{notes}"
@@ -548,7 +571,7 @@ class PersonaSession:
                             await self._persist("assistant", self.persona.name, event)
                 elif isinstance(msg, ResultMessage):
                     usage = msg.usage or {}
-                    self._usage["prompt_tokens"] += int(usage.get("input_tokens", 0) or 0)
+                    self._usage["prompt_tokens"] += sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
                     self._usage["completion_tokens"] += int(usage.get("output_tokens", 0) or 0)
                     self._usage["total_tokens"] = self._usage["prompt_tokens"] + self._usage["completion_tokens"]
                     self._usage["cost_usd"] += float(msg.total_cost_usd or 0.0)
@@ -599,7 +622,7 @@ class PersonaSession:
             }
             try:
                 await self._stream_message(finished_event)
-                await self._persist("assistant", self.persona.name, finished_event)
+                await self._persist("assistant", self.persona.name, finished_event, usage=self.run_usage(self._model))
             except Exception as e:
                 logger.debug(f"[{self.persona.name}] could not emit finish status: {e}")
 
@@ -609,8 +632,7 @@ class PersonaSession:
             raise asyncio.CancelledError("Operation cancelled during execution")
         self._history.append({"role": "assistant", "content": final_text})
         await self._persist(
-            "assistant", self.persona.name, {"role": "assistant", "content": final_text, "final": True},
-            content=None, usage=self._usage.copy(),
+            "assistant", self.persona.name, {"role": "assistant", "content": final_text, "final": True}, content=None,
         )
         if self._notes_seen:  # the orchestrator must learn the request changed, or it redoes the old version
             final_text += "\n\nUSER UPDATE (sent while this step ran; it supersedes the original request):\n" + "\n".join(
@@ -681,6 +703,12 @@ class PersonaSession:
 
     def get_usage_summary(self) -> dict[str, Any]:
         return self._usage.copy()
+
+    def run_usage(self, model: str) -> dict[str, Any]:
+        """This run's tokens and model, kept on its finish line for the admin dashboard, whatever the outcome (per_run
+        marks figures for one run; before 2026-10-29 a run's final message carried the session's running total)."""
+        run = {k: self._usage[k] - self._run_start.get(k, 0) for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
+        return {**run, "cost_usd": round(self._usage["cost_usd"] - self._run_start.get("cost_usd", 0.0), 6), "model": model, "per_run": True}
 
     def provide_input(self, process_id: str | None, user_input: str) -> bool:
         return self.tool_registry.provide_input(process_id, user_input)

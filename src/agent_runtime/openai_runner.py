@@ -21,7 +21,7 @@ from src.agent_runtime.tools import all_tools, build_server, files, full_name
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.configs.settings import settings
-from src.mcp_client.client import call_tool
+from src.mcp_client.client import call_tool, server_notes
 from src.mcp_client.config import options as server_options
 
 RESULT_PREVIEW = 4000        # chars of a tool result shown in the UI
@@ -119,6 +119,7 @@ class OpenAIRunner:
             note = server_options(server).get("persona_prompt_append") or server_options(server).get("system_prompt_append")
             if note:
                 notes += note
+            notes += server_notes(server)  # when to call it, as the server itself publishes on initialize()
             schemas = s._remote_tools.get(server, [])
             if len(schemas) > share:
                 logger.warning(f"[{s.persona.name}] {server}: offering {share} of {len(schemas)} tools (OpenAI allows {MAX_TOOLS})")
@@ -130,6 +131,7 @@ class OpenAIRunner:
                     name = _safe_name(fname)
 
                 async def _call(args: dict, _server=server, _tool=t["name"]) -> str:
+                    s.tool_context.data_sources.add(_server)
                     return await call_tool(_server, _tool, args)
 
                 self.tools[name] = ToolDef(name, fname, t.get("description") or "", t.get("input_schema") or {}, _call)
@@ -232,6 +234,7 @@ class OpenAIRunner:
         client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg.get("base_url") or None)
         notes = await self._collect_tools()
         notes += await prefs.prompt_notes(s.context.user_id, s.persona.name)  # Settings > Memory and Agents
+        s._own_prompt = await prefs.agent_prompt(s.context.user_id, s.persona.name)
         specs = [t.spec() for t in self.tools.values()]
         logger.info(f"[{s.persona.name}] openai runner: model={cfg['model']} tools={len(specs)}")
 
@@ -320,7 +323,7 @@ class OpenAIRunner:
             }
             try:
                 await s._stream_message(finished_event)
-                await s._persist("assistant", s.persona.name, finished_event)
+                await s._persist("assistant", s.persona.name, finished_event, usage=s.run_usage(cfg["model"]))
             except Exception as e:
                 logger.debug(f"[{s.persona.name}] could not emit finish status: {e}")
 
@@ -328,5 +331,5 @@ class OpenAIRunner:
         if s._notes_seen:  # the orchestrator must learn the request changed, or it redoes the old version
             final_text += "\n\nUSER UPDATE (sent while this step ran; it supersedes the original request):\n" + "\n".join(f"- {n}" for n in s._notes_seen)
         s._history.append({"role": "assistant", "content": final_text})
-        await s._persist("assistant", s.persona.name, {"role": "assistant", "content": final_text, "final": True}, content=None, usage=s._usage.copy())
+        await s._persist("assistant", s.persona.name, {"role": "assistant", "content": final_text, "final": True}, content=None)
         return final_text

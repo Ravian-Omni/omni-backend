@@ -21,13 +21,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 
 from src.configs.settings import settings  # loads .env first
-from src.auth import ClerkGate
+from src.auth import SessionGate
 from src.dependencies import init_managers
 from src.routers.agents import router as agents_router
 from src.routers.campaigns import router as campaigns_router
 from src.routers import chat
 from src.routers import settings as settings_router
-from src.routers import feedback, handoffs, mcp, share, software_developer, websocket
+from src.routers import auth as auth_router
+from src.routers import admin, evals, feedback, handoffs, mcp, share, slack, software_developer, teams, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -44,7 +45,7 @@ middleware = [
         allow_methods=["*"],
         allow_headers=["*"],
     ),
-    Middleware(ClerkGate),  # Clerk sign-in when CLERK_PUBLISHABLE_KEY is set (the hosted app)
+    Middleware(SessionGate),  # email and password sign-in when DAXAGENT_AUTH=on (the hosted app)
 ]
 # The built frontend, when this server also serves the page (Railway: one service, one domain).
 STATIC_DIR = os.getenv("DAXAGENT_STATIC_DIR", "")
@@ -140,7 +141,12 @@ app.include_router(
 app.include_router(agents_router, prefix="/agents", tags=["Agent Runtime"])
 app.include_router(campaigns_router, prefix="/campaigns", tags=["Campaigns"])
 app.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(evals.router, prefix="/admin/evals", tags=["Evaluation"])
 app.include_router(handoffs.router, prefix="/handoffs", tags=["Handoffs"])
+app.include_router(teams.router, prefix="/teams", tags=["Teams bot"])
+app.include_router(slack.router, prefix="/slack", tags=["Slack bot"])
+app.include_router(auth_router.router, prefix="/auth", tags=["Sign-in"])
 
 
 # @app.get("/")

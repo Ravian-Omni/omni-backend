@@ -20,19 +20,62 @@ router = APIRouter()
 
 
 @router.get("/personas")
-async def personas():
-    """The personas the runtime offers, for pickers and cards in the UI."""
+async def personas(user_id: str = "local_user"):
+    """The personas the runtime offers, the user's own agents included, for pickers and cards in the UI."""
     from src.agent_runtime import specialists
+    from src.agent_runtime.personas import custom
 
-    everyone = list(PERSONAS.values()) + list(specialists.all().values())
+    from src.agent_runtime.session import offered
+    from src.mcp_client.config import enabled_servers, in_mode, options
+
+    def servers(p) -> list[str]:  # the MCP servers it gets: the chat assistant in chat mode, everyone else in tasks
+        mode = "chat" if p.name == "assistant" else "task"
+        return [options(s).get("display_name", s) for s in enabled_servers() if p.remote_mcp and in_mode(s, mode) and offered(p, s)]
+
+    everyone = ([p for p in PERSONAS.values() if not p.retired] + list(specialists.all().values())
+                + [custom(a) for a in await prefs.get(user_id, "custom_agents")])
     return {
         "personas": [
             {
                 "name": p.name, "display_name": p.display_name, "tagline": p.tagline, "kind": p.kind,
                 "server": p.server, "icon": p.icon, "remote_mcp": p.remote_mcp, "tools": p.daxagent_tools,
+                "servers": servers(p),
             }
             for p in everyone
         ]
+    }
+
+
+@router.get("/orchestrator")
+async def orchestrator(user_id: str = "local_user"):
+    """How a task runs and every prompt it reads (Settings > Orchestrator): the happy-path workflow, each core agent's
+    prompt (read only) with the user's note on it, each agent's card and own prompt, the connected-app specialists the
+    planner can also assign, the chat assistant's prompt, and the planner's whole prompt as a task gets it now."""
+    from src.agent_runtime.personas import readable
+    from src.omni import orchestrator as orch
+
+    notes = (await prefs.get(user_id, "orchestrator"))["notes"]
+    agents = await prefs.get(user_id, "agents")
+
+    def own_prompt(name: str) -> dict | None:  # an agent's own prompt, as the user reads and edits it
+        if name not in PERSONAS:
+            return None
+        default, theirs = readable(PERSONAS[name].system_prompt), (agents.get(name) or {}).get("prompt", "").strip()
+        return {"text": theirs or default, "default": default, "edited": bool(theirs)}
+
+    cards, specialists = await orch.add_abilities(await orch.user_cards(user_id)), await orch.specialist_cards()
+    for c in cards:
+        if c["kind"] == "built_in":
+            c["prompt"] = own_prompt(c["name"])
+    return {
+        "workflow": orch.WORKFLOW,
+        "stages": {key: {"name": name, "does": does, "text": default, "note": notes.get(key, "")}
+                   for key, (name, does, default) in orch.STAGES.items()},
+        "cards": cards,
+        "specialists": specialists,
+        "capabilities": orch.capabilities(cards, specialists),  # available_capabilities exactly as the planner reads it
+        "chat": own_prompt("assistant"),
+        "prompt": await orch.planner_prompt(user_id),
     }
 
 
@@ -69,6 +112,8 @@ async def put_prefs(key: str, body: PrefValue, user_id: str = "local_user"):
         return {"value": await prefs.put(user_id, key, body.value)}
     except ValidationError as e:
         err = e.errors()[0]
+        if err["type"] == "value_error":  # our own checks already say what is wrong, in words for the user
+            raise HTTPException(status_code=422, detail=err["msg"].removeprefix("Value error, "))
         raise HTTPException(status_code=422, detail=f"{'.'.join(map(str, err['loc']))}: {err['msg']}")
 
 
