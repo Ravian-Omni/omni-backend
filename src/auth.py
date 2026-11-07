@@ -28,7 +28,7 @@ CLERK_COOKIE = "__session"
 SESSION_DAYS = 30
 # Reachable without signing in: the app shell and its files (they hold no data), health, the login
 # itself, OAuth returns, the token-guarded admin endpoints and the Teams and Slack bots (each checks its own signature).
-OPEN = re.compile(r"^/(?:$|health$|assets/|auth/(?:login|me|users)$|mcp/callback/|settings/admin/seed$|teams/messages$|slack/events$"
+OPEN = re.compile(r"^/(?:$|health$|hands/|assets/|auth/(?:login|me|users)$|mcp/callback/|settings/admin/seed$|teams/messages$|slack/events$"
                   r"|[^/]+\.(?:svg|png|ico|jpg|jpeg|webp|gif|json|txt|webmanifest|js|css)$)")
 
 

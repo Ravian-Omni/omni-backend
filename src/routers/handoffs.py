@@ -89,6 +89,8 @@ async def send_handoff(handoff_id: str, body: HandoffSend) -> dict:
         raise HTTPException(status_code=404, detail="No such handoff")
     if h["status"] == "sent":
         raise HTTPException(status_code=409, detail="Already sent")
+    if h["route"] == "bounce":  # its contact is the mailer-daemon; the address it names takes no mail
+        raise HTTPException(status_code=409, detail="A bounce has no one to answer: mark it done")
     if h["thread_id"]:
         slug, args = "GMAIL_REPLY_TO_THREAD", {"thread_id": h["thread_id"], "recipient_email": h["contact"], "message_body": body.body}
     else:

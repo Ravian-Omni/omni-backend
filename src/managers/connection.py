@@ -60,6 +60,8 @@ class WebSocketManager:
         self._input_responses: dict[str, asyncio.Queue[str]] = {}
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._pending_requests: dict[str, dict[str, Any]] = {}  # the question each run waits on
+        # Slack, Teams and MCP threads driving a run that the web app also has open: they keep getting its events
+        self._watchers: dict[str, list[Any]] = {}
         self.active_browser: dict[str, asyncio.Task] = {}
         self.active_executor: dict = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
@@ -96,6 +98,9 @@ class WebSocketManager:
 
             # Thread-safe state updates
             async with self._connections_lock:
+                old = self._connections.get(session_id)
+                if getattr(old, "drives_run", False) and old is not websocket:
+                    self._watchers.setdefault(session_id, []).append(old)
                 self._connections[session_id] = websocket
                 self._closed_connections.discard(session_id)
                 self._input_responses[session_id] = asyncio.Queue()
@@ -625,14 +630,19 @@ class WebSocketManager:
         else:
             logger.warning(f"Received input response for inactive session {session_id}")
 
-    async def resend_pending(self, session_id: str) -> None:
-        """Show again the question a run is waiting on (the page reconnected or lost it)."""
+    async def resend_pending(self, session_id: str, websocket: Any) -> None:
+        """Show again the question a run is waiting on to the socket that lost it (the page reconnected); threads
+        watching the run already have it, and a second copy could make them answer twice."""
         if session_id in self._pending_requests:
-            await self._send_message(session_id, self._pending_requests[session_id])
+            await websocket.send_json(self._pending_requests[session_id])
 
     def is_running(self, session_id: str) -> bool:
         task = self._active_tasks.get(session_id)
         return bool(task and not task.done())
+
+    def pending_request(self, session_id: str) -> dict[str, Any] | None:
+        """The input_request the session's run waits on, if any."""
+        return self._pending_requests.get(session_id)
 
     def add_note(self, session_id: str, text: str) -> None:
         self._notes.setdefault(session_id, []).append(text)
@@ -888,8 +898,17 @@ class WebSocketManager:
             session_id: Session identifier.
             websocket: The socket that closed; an older one the page already replaced leaves the session alone.
         """
+        watchers = self._watchers.get(session_id) or []
+        if websocket is not None and websocket in watchers:
+            watchers.remove(websocket)
+            return
         if websocket is not None and self._connections.get(session_id) not in (None, websocket):
             logger.info(f"Superseded socket closed for session {session_id}; the newer one keeps the run")
+            return
+        if watchers:
+            async with self._connections_lock:
+                self._connections[session_id] = watchers.pop()
+            logger.info(f"Page left session {session_id}; the thread driving the run keeps it")
             return
         LLMConfigManager.clear_cache()
         logger.info(f"Disconnecting session {session_id}")
@@ -905,6 +924,7 @@ class WebSocketManager:
         async with self._connections_lock:
             self._connections.pop(session_id, None)
             self._input_responses.pop(session_id, None)
+            self._watchers.pop(session_id, None)
 
         async with self._tasks_lock:
             self._cancellation_tokens.pop(session_id, None)
@@ -936,6 +956,13 @@ class WebSocketManager:
                 )
 
             websocket = self._connections.get(session_id)
+            watchers = list(self._watchers.get(session_id) or [])
+
+        for watcher in watchers:
+            try:
+                await watcher.send_json(message)
+            except Exception as e:  # a chat app failing to post must not stop the run
+                logger.warning(f"Thread watching session {session_id} missed an event: {e}")
 
         if websocket is None:
             return

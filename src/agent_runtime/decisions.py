@@ -86,6 +86,9 @@ def parse_response(card: str, raw: Any) -> Decision:
         try:
             raw = json.loads(text)
         except (TypeError, ValueError):
+            if card in ("confirm_spend", "confirm_send"):
+                # Free text to a spend or send is an instruction, never a yes ("draft only" once read as approval)
+                return Decision(card, approved=False, text=text, raw={"action": "revise", "text": text})
             # A free-text reply to a choice or data card is the answer itself.
             return Decision(card, approved=bool(text), text=text, value=text, raw=raw)
     if isinstance(raw, dict):

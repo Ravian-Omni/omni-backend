@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import os
@@ -325,6 +326,9 @@ class CustomUserProxyAgent(UserProxyAgent):
         # return await aioconsole.ainput(prompt)
 
 
+SKIPPED = "The user skipped the questions. Proceed with the stated assumptions and sensible defaults; do not ask again."
+
+
 class FormProxyAgent(CustomUserProxyAgent):
     """User proxy that shows the clarifier's questions as a form card and returns the answers.
 
@@ -356,10 +360,7 @@ class FormProxyAgent(CustomUserProxyAgent):
         if isinstance(reply, str):
             return f"User verification answer: {reply}", reply[:80]
         if not isinstance(reply, dict) or reply.get("action") in ("reject", "skip"):
-            return (
-                "The user skipped the questions. Proceed with the stated assumptions and sensible defaults; do not ask again.",
-                "skipped",
-            )
+            return SKIPPED, "skipped"
         values = reply.get("values") or {}
         lines = []
         for q in questions:
@@ -840,6 +841,12 @@ class Omni:
             query: Annotated[str, "The complete user query for email operations"]
         ):
             """Email capability via Composio Gmail. Executes directly or returns connect prompt."""
+            assigned = self._assigned(self.groupchat.messages)
+            if "email_sender" not in assigned:
+                # It sends at once, with no approval: the caller once picked it for Campaign Builder's step (four campaign
+                # emails marked "do not send"), and only an unparseable recipient stopped it.
+                return json.dumps({"error": f"Not sent: this step is for {', '.join(sorted(assigned)) or 'another agent'}. Call that "
+                                            "agent with the same query. Campaign emails are drafted and sent only by outreach."})
             try:
                 from composio import Composio
 
@@ -884,12 +891,27 @@ class Omni:
                 )
                 email_fields = json.loads(extraction.choices[0].message.content)
                 logger.info(f"Extracted email fields: {email_fields}")
+                to = str(email_fields.get("recipient_email") or "").strip()
+                if not to:
+                    return json.dumps({"error": "Not sent: the task names no single recipient email address.", "query": query})
+                # The same send card Outreach raises: the user (or an MCP caller's grants) approves every email that leaves
+                from src.agent_runtime.decisions import DecisionCards
+
+                cards = DecisionCards(await get_websocket_manager(), self.chat_id, "email_sender", task_id=self.task_id)
+                cards.persist = lambda payload: update_chat_history(self.chat_id, {"role": "assistant", "name": "email_sender", "raw_message": payload,
+                                                                                    "usage": {}, "task_id": self.task_id}, settings.OMNI_COLLECTION)
+                decision = await cards.confirm_send(tool="GMAIL_SEND_EMAIL", server="composio", channel="email", recipients=[to],
+                                                    subject=str(email_fields.get("subject") or ""), body_preview=str(email_fields.get("body") or ""),
+                                                    detail="One-off email")
+                if not decision.approved:
+                    return json.dumps({"status": "not_sent", "message": f"The user did not approve this email. They said: {decision.suggestion}"
+                                       if decision.suggestion else "The user declined this email; nothing was sent."})
 
                 result = composio_client.tools.execute(
                     slug="GMAIL_SEND_EMAIL",
                     user_id=self.user_id,
                     arguments={
-                        "recipient_email": email_fields.get("recipient_email", ""),
+                        "recipient_email": to,
                         "subject": email_fields.get("subject", "No Subject"),
                         "body": email_fields.get("body", ""),
                         "user_id": "me",
@@ -897,6 +919,8 @@ class Omni:
                     dangerously_skip_version_check=True,
                 )
                 logger.info(f"GMAIL_SEND_EMAIL result: {result}")
+                if isinstance(result, dict) and not result.get("successful", True):
+                    return json.dumps({"error": f"Not sent: {result.get('error')}", "query": query})
                 return json.dumps({
                     "status": "sent",
                     "message": f"Email sent to {email_fields.get('recipient_email', '')}",
@@ -1052,11 +1076,13 @@ class Omni:
             llm_config_caller["config_list"][0]["tool_choice"] = (
                 agent_config.custom_properties.get("tool_choice")
             )
-        return autogen.AssistantAgent(
+        caller = autogen.AssistantAgent(
             name="agent_caller",
             llm_config=llm_config_caller,
             # system_message=prompts.agent_caller,
         )
+        caller.register_reply([autogen.Agent, None], self._call_assigned_agent, position=0)
+        return caller
 
     def get_agent_executor(self):
         """Create and configure the agent executor."""
@@ -1156,6 +1182,73 @@ class Omni:
     @classmethod
     def _is_approval(cls, content: Any) -> bool:
         return bool(cls._APPROVAL.match(str(content or "")))
+
+    @staticmethod
+    def _skipped_verification(messages: list) -> bool:
+        """The user skipped a "Your call" form (manual_verification's) since their last request."""
+        start = max((i for i, m in enumerate(messages) if m.get("name") == "chat_manager"), default=0)
+        asker = None
+        for m in messages[start:]:
+            if m.get("name") in ("clarifier", "manual_verification"):
+                asker = m.get("name")
+            elif m.get("name") == "user_form" and asker == "manual_verification" and str(m.get("content") or "").startswith(SKIPPED):
+                return True
+        return False
+
+    @staticmethod
+    def _request_text(content: Any) -> str:
+        """The text of a request: chat_manager's content is str({"task": ..., "files": ...})."""
+        try:
+            parsed = ast.literal_eval(str(content or ""))
+        except (ValueError, SyntaxError):
+            return str(content or "")
+        return str(parsed.get("task") or "") if isinstance(parsed, dict) else str(content)
+
+    @staticmethod
+    def _assignments(messages: list) -> list[dict]:
+        """The task assignments of the router's latest message."""
+        for m in reversed(messages):
+            if m.get("name") == "agent_router":
+                try:
+                    return [a for a in json.loads(m["content"]).get("task_assignments") or [] if isinstance(a, dict)]
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    return []
+        return []
+
+    @staticmethod
+    def _assigned(messages: list) -> set[str]:
+        """The capabilities the router's latest assignment names."""
+        return {str(a.get("capability")) for a in Omni._assignments(messages)}
+
+    @staticmethod
+    def _direct_calls(messages: list, tools: list) -> list | None:
+        """The tool calls for the router's assignment just made, when every agent it names takes only the task
+        (personas, specialists, email_sender); None leaves the pick to the caller model (an app tool's own fields)."""
+        if not messages or messages[-1].get("name") != "agent_router":
+            return None
+        takes_task = {t["function"]["name"] for t in tools if set(t["function"].get("parameters", {}).get("properties") or {}) == {"query"}}
+        tasks = Omni._assignments(messages)
+        if not tasks or any(a.get("capability") not in takes_task or not a.get("task") for a in tasks):
+            return None
+        return [{"id": f"call_{uuid.uuid4().hex[:24]}", "type": "function",
+                 "function": {"name": a["capability"], "arguments": json.dumps({"query": str(a["task"])})}} for a in tasks]
+
+    def _call_assigned_agent(self, recipient, messages=None, sender=None, config=None):
+        # The router already named the agent and wrote its task. Asking the model to pick again went wrong once a chat
+        # carried ~180k tokens of history (6e0faa26): it called the wrong agent, or wrote "did not complete" and no call.
+        calls = self._direct_calls(self.groupchat.messages, recipient.llm_config.get("tools") or [])
+        return (True, {"role": "assistant", "content": None, "tool_calls": calls}) if calls else (False, None)
+
+    @staticmethod
+    def _caller_stopped_mid_plan(messages: list) -> bool:
+        """The caller answered in prose (blocked, a detail missing, a step it did not run) while the plan has steps left."""
+        if len(messages) < 2 or messages[-2].get("name") != "agent_caller":
+            return False
+        plan = next((m for m in reversed(messages) if m.get("name") == "planner_agent"), None)
+        try:
+            return json.loads(plan["content"]).get("overall_status") != "completed"
+        except (TypeError, ValueError, KeyError, AttributeError):
+            return False
 
     @staticmethod
     def _has_pending_plan(messages: list) -> bool:
@@ -1264,6 +1357,10 @@ class Omni:
                 except (TypeError, ValueError):
                     form = {}
                 if form.get("questions"):
+                    # asked again after a skip, the details it needs have no default: end with what is missing instead of
+                    # re-asking (a caller that kept skipping got the same form 17 times in a minute)
+                    if self._skipped_verification(messages[:-1]):
+                        return groupchat.agent_by_name("process_completion_agent")
                     return groupchat.agent_by_name("user_form")
                 return groupchat.agent_by_name("user_input")
             if last_speaker.name in ["user_input"]:
@@ -1290,13 +1387,17 @@ class Omni:
                     return groupchat.agent_by_name("agent_executor")
                 # If agent_caller gave a text response (no tool call), route to conversation
                 return groupchat.agent_by_name("conversation_agent")
+            if last_speaker.name == "conversation_agent" and self._caller_stopped_mid_plan(messages):
+                # Wait for the user's reply and carry on, instead of ending with the plan half done: over the MCP the
+                # calling agent gets this as a question and can send the verified detail (a run ended "still pending").
+                return groupchat.agent_by_name("user_input")
             if last_speaker.name == "agent_executor":
                 return groupchat.agent_by_name("planner_agent")
             if last_speaker.name == "chat_manager":
-                # A plan that was approved but never finished must resume execution.
-                # Otherwise a short reply like "ok" is classified as small talk and
-                # the accepted plan is never carried out.
-                if self._has_pending_plan(messages):
+                # A plan that was approved but never finished resumes on a short "ok" / "continue"; otherwise that is
+                # classified as small talk and the accepted plan is never carried out. Anything longer is a new request:
+                # resuming took it over (an outreach re-run on a stopped chat ended at once, its new task never read).
+                if self._is_approval(self._request_text(messages[-1].get("content"))) and self._has_pending_plan(messages):
                     return groupchat.agent_by_name("agent_aligner")
                 return groupchat.agent_by_name("judge_question")
 

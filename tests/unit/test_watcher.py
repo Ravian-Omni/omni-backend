@@ -12,6 +12,7 @@ from src.agent_runtime.tools import campaign
 from src.database import connection, save_artifact
 
 ON = {**InboxRules().model_dump(), "watch": True}
+REAL_FETCH, REAL_RECORD_REPLY = campaign.fetch_replies, campaign.record_reply
 MONDAY_10 = datetime(2026, 10, 5, 10, 0).astimezone()
 
 
@@ -37,7 +38,7 @@ def world(tmp_path, monkeypatch):
     recorded, handed = [], []
 
     async def fetch(ctx, plan_id):
-        return {"threads_checked": 2, "decided_by": "jev", "errors": [], "replies": [
+        return {"threads_checked": 2, "decided_by": "jev", "errors": [], "bounces": [], "replies": [
             {"to": "a@x.com", "thread_id": "t1", "message_id": "m1", "text": "Please remove me", "route": "suppress", "read": {"intent": "unsubscribe"}},
             {"to": "b@x.com", "thread_id": "t2", "message_id": "m2", "text": "What does it cost?", "route": "answer", "read": {"intent": "question"}},
         ]}
@@ -73,3 +74,32 @@ def test_dry_run_records_nothing(world, monkeypatch):
     asyncio.run(prefs.put("u", "inbox", {"dry_run": True}))
     summary = asyncio.run(watcher.sweep("u"))
     assert summary["dry_run"] and summary["routes"] == {"suppress": 1, "answer": 1} and recorded == [] and handed == []
+
+
+def test_a_bounce_holds_the_address_and_hands_the_notice_to_a_person(world, tmp_path, monkeypatch):
+    from src.agent_runtime.tools import sales
+
+    recorded, handed = world
+    monkeypatch.setattr(campaign, "fetch_replies", REAL_FETCH)
+    monkeypatch.setattr(campaign, "record_reply", REAL_RECORD_REPLY)
+    log = tmp_path / "send_log-plan0001.json"
+    log.write_text(json.dumps({"rows": [{"plan_id": "campaign_plan-plan0001", "to": to, "status": "sent", "step": 1, "thread_id": t}
+                                        for to, t in (("a@x.com", "t1"), ("b@x.com", "t2"))]}))
+    ours = {"messageId": "s1", "sender": "Me <me@co.com>", "subject": "Quick idea"}
+    delay = {"messageId": "d0", "sender": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+             "subject": "Delivery Status Notification (Delay)", "messageText": "Delivery to b@x.com has been delayed."}
+    failed = {"messageId": "d1", "sender": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+              "subject": "Delivery Status Notification (Failure)", "messageText": "Address not found: a@x.com"}
+
+    async def gmail_call(user_id, slug, arguments):
+        return {"successful": True, "data": {"messages": [ours, failed] if arguments["thread_id"] == "t1" else [ours, delay]}}
+
+    monkeypatch.setattr(sales, "gmail_call", gmail_call)
+    summary = asyncio.run(watcher.sweep("u"))
+    assert summary["bounces"] == 1 and summary["replies"] == 0  # a delay notice is not a bounce
+    assert [(h["contact"], h["route"], h["subject"], h["reply"]) for h in handed] == [
+        ("mailer-daemon@googlemail.com", "bounce", "Delivery Status Notification (Failure)", "Address not found: a@x.com")]
+    rows = json.loads(log.read_text())["rows"]
+    assert [(r["to"], r["status"]) for r in rows if r["status"] == "bounced"] == [("a@x.com", "bounced")]
+    watcher.state["running"] = False
+    assert asyncio.run(watcher.sweep("u"))["bounces"] == 0 and len(handed) == 1  # held: not checked or handed off again

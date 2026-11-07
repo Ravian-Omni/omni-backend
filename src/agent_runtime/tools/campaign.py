@@ -1,7 +1,9 @@
 """The tools Outreach sends from: rendered approved steps, the send log, and the replies that stop follow-ups."""
 
+import re
 from collections import Counter
 from datetime import datetime, timedelta
+from email.utils import parseaddr
 from typing import Any
 
 from src.agent_runtime import creatives, jev, prefs
@@ -9,6 +11,9 @@ from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
 from src.database import list_artifacts, list_creatives
+
+# A delivery failure in a sent thread (a "Delay" notice is not one: the mail still goes out)
+BOUNCE = re.compile(r"mailer-daemon|postmaster|delivery status|undeliver|returned to sender|delivery (has )?failed|address not found|failure notice", re.I)
 
 
 def log_id(plan_id: str) -> str:
@@ -41,7 +46,7 @@ async def _history(ctx: ToolContext, plan_id: str) -> dict[str, dict[str, Any]]:
             if row.get("status") == "sent":
                 h["sent_at"].setdefault(row.get("step"), row.get("at"))
                 h["thread_id"] = h["thread_id"] or row.get("thread_id")
-            h["replied"] |= row.get("status") == "replied"  # an auto_reply (out of office) does not hold follow-ups
+            h["replied"] |= row.get("status") in ("replied", "bounced")  # an auto_reply (out of office) does not hold follow-ups
             if row.get("message_id"):
                 h["handled"].add(row["message_id"])
     return seen
@@ -61,12 +66,19 @@ async def fetch_replies(ctx, plan_id: str) -> dict[str, Any]:
 
     history = await _history(ctx, plan_id)
     threads = {to: h for to, h in history.items() if h["thread_id"] and not h["replied"]}
-    replies, errors = [], []
+    replies, bounces, errors = [], [], []
     for to, h in threads.items():
         result = await gmail_call(ctx.user_id, "GMAIL_FETCH_MESSAGE_BY_THREAD_ID", {"thread_id": h["thread_id"], "user_id": "me"})
         messages = ((result or {}).get("data") or {}).get("messages") or []
         theirs = [m for m in messages if to in str(m.get("sender") or "").lower()]
-        if theirs and theirs[-1].get("messageId") not in h["handled"]:
+        dsn = [m for m in messages if m not in theirs and m.get("messageId") not in h["handled"] and "delay" not in str(m.get("subject") or "").lower()
+               and BOUNCE.search(f"{m.get('sender') or ''} {m.get('subject') or ''}")]
+        if dsn:  # the address does not take mail: no reply will come
+            m = dsn[-1]
+            bounces.append({"to": to, "thread_id": h["thread_id"], "message_id": m.get("messageId"),
+                            "from": parseaddr(str(m.get("sender") or ""))[1] or str(m.get("sender") or ""),
+                            "subject": m.get("subject") or "", "text": str(m.get("messageText") or m.get("preview") or "")[:1500]})
+        elif theirs and theirs[-1].get("messageId") not in h["handled"]:
             last = theirs[-1]
             replies.append({"to": to, "thread_id": h["thread_id"], "message_id": last.get("messageId"),
                             "received": last.get("messageTimestamp"), "subject": last.get("subject") or "",
@@ -81,8 +93,21 @@ async def fetch_replies(ctx, plan_id: str) -> dict[str, Any]:
                 r["route"] = jev.route(r["read"], rules)
             except jev.JevError as e:
                 r["read_error"] = str(e)  # this one is classified by the agent (or handed to a person) instead
-    return {"threads_checked": len(threads), "replies": replies, "errors": errors,
+    return {"threads_checked": len(threads), "replies": replies, "bounces": bounces, "errors": errors,
             "decided_by": "jev" if jev.configured() else "you"}
+
+
+async def settle_bounces(ctx, plan_id: str, bounces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hold the sequence for each bounced address and hand the delivery failure to a person (route "bounce", from the
+    mailer-daemon, its text naming the address); returns the handoffs."""
+    from src.agent_runtime import inbox
+
+    opened = []
+    for b in bounces:
+        await record(ctx, plan_id, {"to": b["to"], "status": "bounced", "message_id": b["message_id"], "summary": b["subject"]})
+        opened.append(await inbox.open_handoff(ctx, contact=b["from"], route="bounce", reply=b["text"], read={"intent": "bounce", "address": b["to"]},
+                                               plan_id=plan_id, thread_id=b["thread_id"], subject=b["subject"]))
+    return opened
 
 
 async def record_reply(ctx, plan_id: str, to: str, intent: str, route: str = "", summary: str = "", message_id: str = "") -> dict[str, Any]:
@@ -172,7 +197,10 @@ def build(ctx: ToolContext):
             found = await fetch_replies(ctx, args["plan_id"])
         except RuntimeError as e:
             return artifacts._error(str(e))
-        return artifacts._text({**found, "routes": jev.ROUTES})
+        found["bounces"] = [{"to": b["to"], "subject": b["subject"], "handoff": h["id"]}
+                            for b, h in zip(found["bounces"], await settle_bounces(ctx, args["plan_id"], found["bounces"]))]
+        return artifacts._text({**found, "routes": jev.ROUTES, "bounces_note": "Bounced addresses are recorded already "
+                                "(their follow-ups are held and a person has the handoff); do not record_reply them."})
 
     @tool(
         "record_reply",

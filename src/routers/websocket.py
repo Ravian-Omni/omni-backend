@@ -134,7 +134,7 @@ async def _resume_running(websocket: WebSocket, chat_id: str, ws_manager: WebSoc
     """A run that outlived a reload: tell the page it is working, and show what it waits on."""
     if ws_manager.is_running(chat_id):
         await websocket.send_json({"type": "run_started"})
-        await ws_manager.resend_pending(chat_id)
+        await ws_manager.resend_pending(chat_id, websocket)
 
 
 async def _handle_messages(
@@ -169,7 +169,7 @@ async def _handle_messages(
             # state) is a note for the agents, and the question the run waits on is shown again.
             elif msg_type == "start" and ws_manager.is_running(chat_id):
                 message, msg_type = {"type": "user_note", "text": message.get("task")}, "user_note"
-                await ws_manager.resend_pending(chat_id)
+                await ws_manager.resend_pending(chat_id, websocket)
 
             # === START: Begin chat stream ===
             if msg_type == "start":

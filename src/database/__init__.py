@@ -614,6 +614,11 @@ async def list_conversations(user_id: str) -> list[dict]:
         (user_id,),
     )
     rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at"), r)) for r in await cursor.fetchall()]
+    # tasks an AI started over the MCP (hands_mcp.start_run saves who)
+    cursor = await db.execute("SELECT key, value FROM user_prefs WHERE user_id = ? AND key LIKE 'run_by:%'", (user_id,))
+    run_by = {key.removeprefix("run_by:"): json.loads(value) for key, value in await cursor.fetchall()}
+    for r in rows:
+        r["run_by"] = run_by.get(r["chat_id"])
     return sorted(rows, key=lambda r: str(r["updated_at"]).replace(" ", "T"), reverse=True)
 
 

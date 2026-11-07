@@ -48,8 +48,9 @@ def _context(record: dict, user_id: str) -> SimpleNamespace:
         except Exception as e:
             logger.debug(f"[watcher] chat {record['chat_id']} not open: {e}")
 
+    # data_sources: artifacts.write reads it; without it every record_reply from a sweep raised AttributeError
     return SimpleNamespace(chat_id=record["chat_id"], user_id=user_id, task_id=record.get("task_id"), persona="inbox_agent",
-                           artifacts_dir=os.path.dirname(record["path"]), emit=emit)
+                           artifacts_dir=os.path.dirname(record["path"]), emit=emit, data_sources=set())
 
 
 async def _draft(ctx, plan_id: str, route: str, reply: str, read: dict) -> str:
@@ -82,7 +83,7 @@ async def sweep(user_id: str = "local_user") -> dict:
         return state["summary"] or {}
     state["running"] = True
     rules = await prefs.get(user_id, "inbox")
-    summary: dict[str, Any] = {"threads_checked": 0, "replies": 0, "routes": Counter(), "handoffs": [], "errors": [],
+    summary: dict[str, Any] = {"threads_checked": 0, "replies": 0, "bounces": 0, "routes": Counter(), "handoffs": [], "errors": [],
                                "dry_run": rules["dry_run"], "at": dt.now_iso()}
     try:
         for record in await list_artifacts_of_kind("send_log"):
@@ -98,6 +99,10 @@ async def sweep(user_id: str = "local_user") -> dict:
                     summary["errors"].append(str(e))
                     return summary
                 summary["threads_checked"] += found["threads_checked"]
+                summary["bounces"] += len(found["bounces"])
+                for h in [] if rules["dry_run"] else await campaign.settle_bounces(ctx, plan_id, found["bounces"]):
+                    summary["handoffs"].append({"id": h["id"], "contact": h["contact"], "owner": h["owner"] or "shared inbox",
+                                                "notified": h["notified"]})
                 for r in found["replies"]:
                     route = r.get("route") or "handoff"  # without Jev's reading, a person decides
                     read = r.get("read") or {}

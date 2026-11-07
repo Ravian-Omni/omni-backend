@@ -7,6 +7,7 @@ text through ``say``. Which task chat a thread belongs to is kept in user_prefs 
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -16,7 +17,9 @@ from src.database import load_pref, save_pref
 from src.dependencies import get_websocket_manager
 from src.services.chat_service import ChatService
 
-USER_ID = "local_user"  # the shared workspace: tasks started from an app show in the web app like any other
+# whose workspace the apps and the MCP act in: the hosted app's owner (their tasks show in their web app at once),
+# else the local workspace. init_db moves local_user rows to the owner anyway, but only at the next start.
+USER_ID = os.getenv("DAXAGENT_OWNER") or "local_user"
 IDLE_SECONDS = 1800  # a quiet thread drops its agents; the next message reopens the chat from history
 _threads: dict[str, "Thread"] = {}
 _lock = asyncio.Lock()
@@ -103,6 +106,8 @@ def text_of(event: dict, notes: dict[str, str | None]) -> str | None:
 
 class Thread:
     """One app thread driving one task chat; it is the WebSocket the omni route talks to."""
+
+    drives_run = True  # opening the chat in the web app must not take the run's events (or the run) away from it
 
     def __init__(self, app: str, key: str, chat_id: str, say: Callable[[str], Awaitable[None]]):
         self.app, self.key, self.chat_id, self.say = app, key, chat_id, say

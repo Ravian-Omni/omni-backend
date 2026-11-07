@@ -28,7 +28,7 @@ from src.routers.campaigns import router as campaigns_router
 from src.routers import chat
 from src.routers import settings as settings_router
 from src.routers import auth as auth_router
-from src.routers import admin, evals, feedback, handoffs, mcp, share, slack, software_developer, teams, websocket
+from src.routers import admin, evals, feedback, handoffs, hands_mcp, mcp, share, slack, software_developer, teams, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -84,7 +84,8 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to start application: {e}")
         raise
 
-    yield  # App is running and handling requests here
+    async with hands_mcp.running():  # the Brain_Hands MCP server's sessions live with the app
+        yield  # App is running and handling requests here
 
     # Shutdown: Close database connections and cleanup
     logger.info("🛑 Shutting down FastAPI application...")
@@ -147,6 +148,7 @@ app.include_router(handoffs.router, prefix="/handoffs", tags=["Handoffs"])
 app.include_router(teams.router, prefix="/teams", tags=["Teams bot"])
 app.include_router(slack.router, prefix="/slack", tags=["Slack bot"])
 app.include_router(auth_router.router, prefix="/auth", tags=["Sign-in"])
+app.mount("/hands", hands_mcp.app())  # Brain_Hands: MCP at /hands/mcp
 
 
 # @app.get("/")
