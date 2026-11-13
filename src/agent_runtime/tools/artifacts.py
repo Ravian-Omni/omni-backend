@@ -3,6 +3,9 @@
 Each artifact is a JSON file under ``<chat_dir>/artifacts`` plus a row in the
 ``artifacts`` table, and saving one pushes an ``artifact`` message to the
 chat so the UI can show it.
+
+An artifact belongs to the user: any of their chats can read it by id (``find``).
+Only the chat that made it changes it; elsewhere a change is saved as a copy (``rewrite``).
 """
 
 import json
@@ -12,6 +15,8 @@ from typing import Any
 
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
+from src.database import chat_owner
+from src.database import find_artifacts as db_find_artifacts
 from src.database import get_artifact as db_get_artifact
 from src.database import list_artifacts as db_list_artifacts
 from src.database import save_artifact as db_save_artifact
@@ -36,6 +41,32 @@ def load(ctx: ToolContext, artifact_id: str) -> dict[str, Any]:
         raise FileNotFoundError(f"No artifact '{artifact_id}' in this chat")
     with open(path) as f:
         return json.load(f)
+
+
+def _origin(path: str) -> str:
+    """Where an artifact from another chat was made, in words the user knows (a task is named by its folder)."""
+    name = os.path.basename(os.path.dirname(os.path.dirname(path)))
+    # shortcut: the two folders every plain chat shares are named here; give chats names of their own to say more
+    return "another chat" if name in ("daxagent", "daxagent-chats") else f"the task '{name}'"
+
+
+async def find(ctx: ToolContext, artifact_id: str) -> tuple[dict[str, Any], str]:
+    """An artifact's payload and where it was made: "" for this chat's own, else the other chat or task.
+
+    A user's artifacts open from any of their chats. A file with no record (older data) opens from this chat's folder only."""
+    record = await db_get_artifact(artifact_id)
+    path, origin = _path(ctx, artifact_id), ""
+    if record and record["chat_id"] != ctx.chat_id:
+        owner = await chat_owner(record["chat_id"])
+        same_folder = os.path.realpath(record["path"]) == os.path.realpath(path)
+        # an unknown owner in this chat's own folder still opens, as it did before artifacts had an owner check
+        if owner != ctx.user_id and (owner or not same_folder):
+            raise FileNotFoundError(f"No artifact '{artifact_id}' in your chats")
+        path, origin = record["path"], _origin(record["path"])
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No artifact '{artifact_id}' in your chats")
+    with open(path) as f:
+        return json.load(f), origin
 
 
 async def load_record(chat_id: str, artifact_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -113,6 +144,20 @@ async def write(
     return record
 
 
+async def rewrite(ctx: ToolContext, payload: dict[str, Any], origin: str, rows: list[dict[str, Any]], title: str | None = None) -> dict[str, Any]:
+    """Save changed rows: in place for this chat's artifact; as a copy in this chat for one made elsewhere, which stays as it was."""
+    meta = payload.get("meta") or {}
+    if origin:
+        meta = {**meta, "copied_from": payload["id"], "rev": 0}
+        ctx.data_sources.update(meta.get("data_sources", []))  # the copy still credits where its rows came from
+        if payload["kind"] == "campaign_plan":  # an approval does not travel: the user approves the copy's steps again
+            rows = [{**r, "status": "draft"} if r.get("status") == "approved" else r for r in rows]
+    return await write(
+        ctx, payload["kind"], title or payload["title"], rows, payload.get("columns"), payload.get("source", ""),
+        artifact_id=None if origin else payload["id"], meta=meta,
+    )
+
+
 def _text(payload: Any) -> dict:
     return {"content": [{"type": "text", "text": payload if isinstance(payload, str) else json.dumps(payload, default=str)}]}
 
@@ -147,17 +192,55 @@ def build(ctx: ToolContext):
         rows = args.get("rows") or []
         if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
             return _error("rows must be a list of objects")
-        record = await write(ctx, args["kind"], args["title"], rows, args.get("columns"), args.get("source", ""), meta=args.get("meta"))
-        return _text({"artifact_id": record["id"], "row_count": record["row_count"], "path": record["path"]})
+        meta, copied = args.get("meta"), {}
+        audience_id = (meta or {}).get("audience_artifact_id") if args["kind"] == "campaign_plan" else None
+        if audience_id:
+            try:
+                audience, origin = await find(ctx, audience_id)
+            except FileNotFoundError:
+                origin = ""  # render_campaign reports a missing audience, as before
+            if origin:
+                # The campaign page and the send tools read the audience from the plan's own chat
+                copy = await rewrite(ctx, audience, origin, audience["rows"])
+                meta = {**meta, "audience_artifact_id": copy["id"]}
+                copied = {"audience_artifact_id": copy["id"], "note": f"The audience `{audience_id}` is from {origin}: it was copied into this chat as `{copy['id']}` and the plan points at the copy."}
+        record = await write(ctx, args["kind"], args["title"], rows, args.get("columns"), args.get("source", ""), meta=meta)
+        return _text({"artifact_id": record["id"], "row_count": record["row_count"], "path": record["path"], **copied})
 
-    @tool("list_artifacts", "List the artifacts saved in this chat (id, kind, title, row count, source).", {"type": "object", "properties": {}})
+    @tool(
+        "list_artifacts",
+        "List the artifacts saved in this chat (id, kind, title, row count, source, date). With everywhere: true, list the "
+        "user's artifacts from all their chats and tasks instead, newest first. read_artifact opens any of them by id.",
+        {
+            "type": "object",
+            "properties": {
+                "everywhere": {"type": "boolean", "description": "True to look across all the user's chats and tasks, not only this chat"},
+                "search": {"type": "string", "description": "Only artifacts with these words in the title, source or id, e.g. 'dental austin'"},
+                "kind": {"type": "string", "enum": list(KINDS), "description": "Only this kind"},
+            },
+        },
+    )
     async def list_artifacts(args: dict) -> dict:
-        rows = await db_list_artifacts(ctx.chat_id)
-        return _text([{k: r[k] for k in ("id", "kind", "title", "row_count", "source", "persona", "created_at")} for r in rows])
+        fields = ("id", "kind", "title", "row_count", "source", "persona", "created_at")
+        search, kind = str(args.get("search") or ""), str(args.get("kind") or "")
+        if args.get("everywhere"):
+            rows = await db_find_artifacts(ctx.user_id, search, kind)
+            return _text([{**{k: r[k] for k in fields}, "from": "this chat" if r["chat_id"] == ctx.chat_id else _origin(r["path"])} for r in rows])
+        words = search.lower().split()
+        rows = [
+            r for r in await db_list_artifacts(ctx.chat_id)
+            if (not kind or r["kind"] == kind) and all(w in f"{r['title']} {r['source'] or ''} {r['id']}".lower() for w in words)
+        ]
+        return _text({
+            "artifacts": [{k: r[k] for k in fields} for r in rows],
+            "elsewhere": "These are this chat's only. The user's artifacts from other chats and tasks are not listed here: "
+                         "pass everywhere: true to find them (search and kind narrow it), and read_artifact opens any of them by id.",
+        })
 
     @tool(
         "read_artifact",
-        "Read rows of an artifact by id. Use offset and limit to page through large lists.",
+        "Read rows of an artifact by id: one from this chat or from any other chat or task of the user. "
+        "Use offset and limit to page through large lists.",
         {
             "type": "object",
             "properties": {
@@ -170,7 +253,7 @@ def build(ctx: ToolContext):
     )
     async def read_artifact(args: dict) -> dict:
         try:
-            payload = load(ctx, args["artifact_id"])
+            payload, origin = await find(ctx, args["artifact_id"])
         except FileNotFoundError as e:
             return _error(str(e))
         ctx.data_sources.update(payload.get("meta", {}).get("data_sources", []))  # a chart of these rows credits their source
@@ -180,12 +263,14 @@ def build(ctx: ToolContext):
         return _text({
             "artifact_id": payload["id"], "kind": payload["kind"], "title": payload["title"],
             "columns": payload["columns"], "row_count": payload["row_count"],
-            "offset": offset, "rows": rows, "meta": payload.get("meta", {}),
+            "offset": offset, "rows": rows, "meta": payload.get("meta", {}), "created_at": payload.get("created_at"),
+            **({"from": origin} if origin else {}),  # made elsewhere: the reader weighs its age before reusing it
         })
 
     @tool(
         "update_artifact",
-        "Replace the rows of an artifact, or remove rows by their _id. Keeps the same artifact id.",
+        "Replace the rows of an artifact, or remove rows by their _id. Keeps the same artifact id. An artifact from another "
+        "chat or task is never changed: the result is saved in this chat as a copy with a new id (pass only artifact_id to copy it as it is).",
         {
             "type": "object",
             "properties": {
@@ -200,7 +285,7 @@ def build(ctx: ToolContext):
     )
     async def update_artifact(args: dict) -> dict:
         try:
-            payload = load(ctx, args["artifact_id"])
+            payload, origin = await find(ctx, args["artifact_id"])
         except FileNotFoundError as e:
             return _error(str(e))
         rev = int((payload.get("meta") or {}).get("rev") or 0)
@@ -211,10 +296,8 @@ def build(ctx: ToolContext):
         if args.get("remove_ids"):
             drop = set(args["remove_ids"])
             rows = [r for r in rows if r.get("_id") not in drop]
-        record = await write(
-            ctx, payload["kind"], args.get("title") or payload["title"], rows, payload.get("columns"),
-            payload.get("source", ""), artifact_id=payload["id"], meta=payload.get("meta"),
-        )
-        return _text({"artifact_id": record["id"], "row_count": record["row_count"]})
+        record = await rewrite(ctx, payload, origin, rows, args.get("title"))
+        copied = {"copied_from": payload["id"], "note": f"`{payload['id']}` is from {origin} and stays as it was. Use `{record['id']}`, the copy in this chat, from now on."} if origin else {}
+        return _text({"artifact_id": record["id"], "row_count": record["row_count"], **copied})
 
     return [save_artifact, list_artifacts, read_artifact, update_artifact]

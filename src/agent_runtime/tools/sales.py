@@ -238,7 +238,7 @@ def build(ctx: ToolContext):
     )
     async def review_with_user(args: dict) -> dict:
         try:
-            payload = artifacts.load(ctx, args["artifact_id"])
+            payload, origin = await artifacts.find(ctx, args["artifact_id"])
         except FileNotFoundError as e:
             return _error(str(e))
         d = await ctx.decisions.review_artifact(
@@ -251,10 +251,13 @@ def build(ctx: ToolContext):
         excluded = []
         if isinstance(d.raw, dict):
             excluded = [int(x) for x in (d.raw.get("excluded_ids") or d.raw.get("excluded") or []) if str(x).isdigit()]
+        saved = {}
         if excluded:
             rows = [r for r in payload["rows"] if r.get("_id") not in set(excluded)]
-            await artifacts.write(ctx, payload["kind"], payload["title"], rows, payload.get("columns"), payload.get("source", ""), artifact_id=payload["id"], meta=payload.get("meta"))
-        return _text({"approved": d.approved, "excluded_ids": excluded, "remaining_rows": payload["row_count"] - len(excluded), "note": d.text})
+            record = await artifacts.rewrite(ctx, payload, origin, rows)
+            if origin:
+                saved = {"saved_as": record["id"], "message": f"`{payload['id']}` is from {origin} and stays as it was. The reviewed list is `{record['id']}`, a copy in this chat: use it from now on."}
+        return _text({"approved": d.approved, "excluded_ids": excluded, "remaining_rows": payload["row_count"] - len(excluded), "note": d.text, **saved})
 
     # ---- Gmail through Composio -------------------------------------------------
     async def _gmail_execute(slug: str, arguments: dict) -> dict:

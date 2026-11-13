@@ -512,6 +512,34 @@ async def recent_artifacts(user_id: str, limit: int = 20) -> list[dict]:
     return [{"kind": r[0], "title": r[1], "rows": r[2]} for r in await cursor.fetchall()]
 
 
+async def chat_owner(chat_id: str) -> str | None:
+    """Whose chat this is, or None for a chat the database does not know."""
+    db = await get_db()
+    cursor = await db.execute("SELECT user_id FROM chats WHERE chat_id = ? LIMIT 1", (chat_id,))
+    row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def find_artifacts(user_id: str, search: str = "", kind: str = "", limit: int = 30) -> list[dict]:
+    """A user's artifacts across all their chats, newest first; every word of search must be in the title, source or id."""
+    where, args = "", [user_id]
+    for word in search.split():
+        where += " AND (title LIKE ? OR source LIKE ? OR id LIKE ?)"
+        args += [f"%{word}%"] * 3
+    if kind:
+        where += " AND kind = ?"
+        args.append(kind)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""SELECT id, chat_id, persona, kind, title, path, row_count, source, created_at FROM artifacts
+            WHERE chat_id IN (SELECT chat_id FROM chats WHERE user_id = ?){where}
+            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 - where holds fixed text only; every value is bound
+        (*args, limit),
+    )
+    keys = ["id", "chat_id", "persona", "kind", "title", "path", "row_count", "source", "created_at"]
+    return [dict(zip(keys, r)) for r in await cursor.fetchall()]
+
+
 async def load_pref(user_id: str, key: str, default: Any = None) -> Any:
     """One of the user's stored preferences (JSON), or the default."""
     db = await get_db()
@@ -906,6 +934,8 @@ __all__ = [
     "save_artifact",
     "list_artifacts",
     "get_artifact",
+    "chat_owner",
+    "find_artifacts",
     "get_geocode",
     "save_geocode",
     "save_eval",

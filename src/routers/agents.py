@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from src.agent_runtime import PERSONAS, prefs
 from src.agent_runtime.tools.artifacts import load_record, save_payload
-from src.database import get_artifact, list_artifacts, list_decisions
+from src.database import chat_owner, get_artifact, list_artifacts, list_decisions
 
 router = APIRouter()
 
@@ -229,9 +229,11 @@ def _cell(value):
 
 
 @router.get("/download/{artifact_id}")
-async def download_artifact(artifact_id: str, format: str = "csv"):
-    """Download every row of an artifact as csv, xlsx or json."""
+async def download_artifact(artifact_id: str, format: str = "csv", user_id: str | None = None):
+    """Download every row of an artifact as csv, xlsx or json. On a signed-in site (the gate sets user_id) only its owner may."""
     record = await get_artifact(artifact_id)
+    if record and user_id and await chat_owner(record["chat_id"]) != user_id:
+        record = None  # the same answer as an id that does not exist
     if not record or not os.path.exists(record["path"]):
         raise HTTPException(status_code=404, detail=f"Unknown artifact {artifact_id}")
     with open(record["path"]) as f:
