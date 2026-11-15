@@ -147,17 +147,22 @@ def test_an_outside_agent_reads_the_files_a_task_saved(tmp_path, monkeypatch):
     async def go():
         await connection.init_db()
         repo = await get_chat_repository()
-        for chat_id in ("mine", "other"):
-            await repo.create_chat({"user_id": hm.USER_ID, "chat_id": chat_id, "chat_dir": str(tmp_path), "messages": [],
+        for user, chat_id in ((hm.USER_ID, "mine"), (hm.USER_ID, "other"), ("someone-else", "theirs")):
+            await repo.create_chat({"user_id": user, "chat_id": chat_id, "chat_dir": str(tmp_path), "messages": [],
                                     "raw_messages": [], "created_at": "2026-11-06T08:00:00", "updated_at": "2026-11-06T08:00:00"}, "omni")
-        await save_artifact({"id": "lead_list-1", "chat_id": "mine", "persona": "lead_finder", "kind": "lead_list",
-                             "title": "Retail leads", "path": str(path), "row_count": 5})
+        for artifact_id, chat_id in (("lead_list-1", "mine"), ("lead_list-2", "theirs")):
+            await save_artifact({"id": artifact_id, "chat_id": chat_id, "persona": "lead_finder", "kind": "lead_list",
+                                 "title": "Retail leads", "path": str(path), "row_count": 5})
         listed = (await hm.list_artifacts("mine"))["artifacts"]
-        page = await hm.read_artifact("mine", "lead_list-1", offset=3, limit=10)
+        page = await hm.read_artifact("lead_list-1", "mine", offset=3, limit=10)
+        # the account's files open by id from any task, and list across tasks; another account's do neither
+        assert (await hm.read_artifact("lead_list-1", "other"))["chat_id"] == (await hm.read_artifact("lead_list-1"))["chat_id"] == "mine"
+        assert [(a["id"], a["chat_id"]) for a in (await hm.list_artifacts(search="retail"))["artifacts"]] == [("lead_list-1", "mine")]
+        assert (await hm.list_artifacts(kind="buyer_map"))["artifacts"] == []
         errors = []
-        for args in (("other", "lead_list-1"), ("nobody", "lead_list-1")):  # another task's file, a task that is not there
+        for artifact_id in ("lead_list-9", "lead_list-2"):  # a file that is not there, another account's file
             try:
-                await hm.read_artifact(*args)
+                await hm.read_artifact(artifact_id)
             except ValueError as e:
                 errors.append(str(e))
         # a plan's steps are drafts until approved; over the MCP there is no campaign page to click
@@ -212,6 +217,7 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch)
         def __init__(self, key, chat_id):
             self.chat_id, self.queue, self.inbox = chat_id, asyncio.Queue(), asyncio.Queue()
             self.task, self.ask_text, self.plan = SimpleNamespace(done=lambda: False), "", []
+            self.agenda_id, self.polling, self.last_poll = "", 0, 0.0
 
     async def get_chat(_user, chat_id, _mode):
         return {"chat_id": chat_id} if chat_id in ("old", "busy") else None
@@ -233,6 +239,7 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch)
     monkeypatch.setattr(hm, "get_chat_repository", repo)
     monkeypatch.setattr(hm, "get_websocket_manager", manager)
     monkeypatch.setattr(hm, "save_pref", nothing)
+    monkeypatch.setattr(hm.needs, "agenda_of", lambda _chat_id: nothing())
     monkeypatch.setattr(hm, "ChatService", SimpleNamespace(create_omni_chat=create_omni_chat))
     ctx = SimpleNamespace(session=SimpleNamespace(client_params=None))
 

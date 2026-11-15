@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -20,11 +21,11 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from src.agent_runtime.tools.artifacts import load_record, save_payload
-from src.database import get_chat_repository, list_conversations, list_handoffs, save_pref
+from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
+from src.database import find_artifacts, get_chat_repository, list_conversations, list_handoffs, save_pref
 from src.database import list_artifacts as db_list_artifacts
 from src.dependencies import get_websocket_manager
-from src.services import chat_bridge, task_status as status
+from src.services import chat_bridge, needs, task_status as status
 from src.services.chat_bridge import USER_ID, Thread
 from src.services.chat_service import ChatService
 
@@ -38,10 +39,11 @@ INSTRUCTIONS = (
     "each step's status), agent (an agent started or finished), saved (a list or document it saved), input_request, "
     "summary, completion, error. Every input_request carries a `question` with its kind and `answer_with`: clarify (a "
     "few details before planning), plan_approval, choose, credit_request (credits to spend: approve or decline), "
-    "send_approval, review, provide_data, text. Reply with answer(key, response) exactly as answer_with says; the run "
+    "send_approval, review, provide_data, text. Reply with answer(key, response, request_id) exactly as answer_with says "
+    "(request_id is in the input_request: a question already answered, in the web app or by you, is refused with reason not_open); the run "
     "waits until you do. task_status(key or chat_id) tells where any task is (also ones started in the web app): stage, "
     "each plan step's status, percent finished, the agents at work and their current step, the open question, credits "
-    "approved, saved work and the final summary; list_tasks lists recent tasks. list_artifacts(chat_id) lists the files a task saved (lead lists, buyer maps, enriched contacts, campaign plans) with their ids, and read_artifact(chat_id, id, offset, limit) reads one's rows a page at a time. A campaign plan's steps are drafts until approved: approve_plan_steps(chat_id, plan_id) approves them, as the user does on the campaign page, so Outreach can draft or send them; call it only when you are allowed to approve the copy for the user. A run's completion event and task_status carry campaigns: per campaign plan, newest first, the email steps approved, drafted, sent, replied and bounced, and `next`, what it waits on: approve_steps, create_drafts, send (the drafts are in Gmail) or watch_replies; next.start_run is the task to pass to start_run with the same chat_id, as the campaign page's buttons do. Sending still asks send_approval first. answer also takes a chat_id, to answer a "
+    "approved, saved work and the final summary; list_tasks lists recent tasks. list_artifacts(chat_id) lists the files a task saved (lead lists, buyer maps, enriched contacts, campaign plans) with their ids; without chat_id it lists the files of every task (search and kind narrow it), so earlier work can be reused. read_artifact(artifact_id, offset, limit) reads one's rows a page at a time, whichever task saved it. A campaign plan's steps are drafts until approved: approve_plan_steps(chat_id, plan_id) approves them, as the user does on the campaign page, so Outreach can draft or send them; call it only when you are allowed to approve the copy for the user. A run's completion event and task_status carry campaigns: per campaign plan, newest first, the email steps approved, drafted, sent, replied and bounced, and `next`, what it waits on: approve_steps, create_drafts, send (the drafts are in Gmail) or watch_replies; next.start_run is the task to pass to start_run with the same chat_id, as the campaign page's buttons do. Sending still asks send_approval first. answer also takes a chat_id, to answer a "
     "web-app task's open question. handoffs lists replies that need a person, with Jev's reading and a drafted answer; "
     "send_handoff sends that answer in the contact's thread; sweep checks Gmail for new replies now."
 )
@@ -49,6 +51,7 @@ INSTRUCTIONS = (
 mcp = FastMCP("daxagent", instructions=INSTRUCTIONS, streamable_http_path="/mcp",
               host="0.0.0.0")  # no localhost-only Host check: it is mounted behind the bearer gate and may be reached by domain
 _threads: dict[str, "HandsThread"] = {}
+_watching: set[asyncio.Task] = set()  # needs waiting to be pushed
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 READ = ToolAnnotations(readOnlyHint=True)
 
@@ -92,6 +95,9 @@ class HandsThread(Thread):
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.ask_text = ""  # Omni's last verification text, or the message a stopped plan waits on
         self.plan: list[dict[str, Any]] = []  # the latest plan's steps
+        self.agenda_id = ""  # Brain_Hands' agenda this run serves, echoed in every event
+        self.polling = 0  # next_event calls waiting right now
+        self.last_poll = time.monotonic()  # when the last one ended
 
         async def say(_: str) -> None:
             pass
@@ -109,7 +115,31 @@ class HandsThread(Thread):
                 self.plan = simple["steps"]
             if simple["type"] == "input_request":
                 simple["chat_id"] = self.chat_id  # the conversation to answer in, and to continue later
+                await self._announce(simple, event)
+            if self.agenda_id:
+                simple["agenda_id"] = self.agenda_id
             self.queue.put_nowait(simple)
+
+    async def _announce(self, simple: dict[str, Any], event: dict[str, Any]) -> None:
+        """Give the question the fields of a need (contract [7]) and push it if nobody polls for it."""
+        need = await needs.build(self.chat_id, str(event.get("request_id") or ""), simple["question"], simple["card"], str(event.get("timestamp") or ""))
+        simple.update({k: v for k, v in need["data"].items() if k != "card"})  # `card` is already there, raw
+        if need["id"]:
+            task = asyncio.create_task(self._push_unattended(need))
+            _watching.add(task)
+            task.add_done_callback(_watching.discard)
+
+    async def _push_unattended(self, need: dict[str, Any]) -> None:
+        """Push the need once, when nobody has polled this run for UNATTENDED_S since it was asked and it is still open."""
+        opened = time.monotonic()
+        while True:
+            await asyncio.sleep(1 if self.polling else max(0.05, needs.UNATTENDED_S - (time.monotonic() - max(opened, self.last_poll))))
+            open_ = (await get_websocket_manager()).pending_request(self.chat_id)
+            if not open_ or open_.get("request_id") != need["id"] or open_.get("answered") or self.task.done():
+                return
+            if not self.polling and time.monotonic() - max(opened, self.last_poll) >= needs.UNATTENDED_S:
+                await needs.push(need)
+                return
 
 
 def _find(key: str) -> HandsThread | None:
@@ -124,11 +154,26 @@ def _thread(key: str) -> HandsThread:
     return t
 
 
+async def _source(ctx: Context) -> str:
+    """Who is calling: the client's own name and version (self-reported) and the key it used (which the app made)."""
+    info = ctx.session.client_params.clientInfo if ctx.session.client_params else None
+    client = f"{info.name} {info.version}".strip() if info and info.name not in ("", "mcp") else "AI agent"  # "mcp" is the SDK default
+    request = getattr(getattr(ctx, "request_context", None), "request", None)
+    key = ((request.scope.get("state") or {}).get("dax_key") if request else None) or {}
+    if key.get("id"):
+        from src.database import note_hands_client
+
+        await note_hands_client(key["id"], client)
+    return f"{client} · {key['name']}" if key.get("name") else client
+
+
 @mcp.tool(annotations=WRITE)
-async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | None = None, chat_id: str = "") -> dict[str, Any]:
+async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | None = None, chat_id: str = "",
+                    agenda_id: str = "") -> dict[str, Any]:
     """Start a task run (a lead search, a campaign, outreach, a reply) and return its chat_id; drive it with next_event and answer.
     chat_id: the conversation to continue, so its agents see what was done there before; empty starts a new one.
-    key: optionally your own id for the run (defaults to the chat_id). files: paths on this machine to attach (a deck, a list)."""
+    key: optionally your own id for the run (defaults to the chat_id). files: paths on this machine to attach (a deck, a list).
+    agenda_id: the agenda this run serves; kept on the chat and echoed in every event."""
     if key and (t := _threads.get(key)) and not t.task.done():
         raise ValueError(f"run {key} is still going")
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
@@ -137,17 +182,18 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
         raise ValueError(f"task {chat_id} is still running")
     chat_id = chat_id or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
     key = key or chat_id
-    info = ctx.session.client_params.clientInfo if ctx.session.client_params else None
-    # the web app marks the task as run by this AI; "mcp" is the Python SDK's default name, which says nothing
-    await save_pref(USER_ID, f"run_by:{chat_id}", info.name if info and info.name not in ("", "mcp") else "AI agent")
+    await save_pref(USER_ID, f"run_by:{chat_id}", await _source(ctx))  # the web app marks the task as run by it
+    if agenda_id:
+        await save_pref(USER_ID, f"agenda:{chat_id}", agenda_id)
     # a chat whose thread is still open takes the next task on it; a closed one reopens from its history
     t = next((o for o in _threads.values() if o.chat_id == chat_id and not o.task.done()), None) or HandsThread(key, chat_id)
     while not t.queue.empty():
         t.queue.get_nowait()  # the last run's leftovers are not this run's events
     t.ask_text, t.plan = "", []
+    t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
     _threads[key] = t
     t.inbox.put_nowait(json.dumps({"type": "start", "task": task, "files": files or []}))
-    return {"key": key, "chat_id": chat_id}
+    return {"key": key, "chat_id": chat_id, **({"agenda_id": t.agenda_id} if t.agenda_id else {})}
 
 
 @mcp.tool(annotations=READ)
@@ -157,10 +203,14 @@ async def next_event(key: str, timeout: int = 25) -> dict[str, Any]:
     the run is over and drained."""
     t = _thread(key)
     events: list[dict[str, Any]] = []
+    t.polling += 1
     try:
         events.append(await asyncio.wait_for(t.queue.get(), min(max(timeout, 1), 60)))
     except asyncio.TimeoutError:
         pass
+    finally:
+        t.polling -= 1
+        t.last_poll = time.monotonic()
     while not t.queue.empty():
         events.append(t.queue.get_nowait())
     if done := next((e for e in events if e["type"] == "completion"), None):
@@ -170,10 +220,12 @@ async def next_event(key: str, timeout: int = 25) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=WRITE)
-async def answer(key: str, response: str) -> dict[str, Any]:
+async def answer(key: str, response: str, request_id: str = "") -> dict[str, Any]:
     """Answer the open question of a task (its chat_id, or the key of a run started here), as the
     question's answer_with says: 'yes', 'no', free text, or a JSON object such as {"values": {...}} for a clarify
-    form, {"action": "choose", "selected": [...]}, {"action": "revise", "text": "..."} or {"action": "skip"}."""
+    form, {"action": "choose", "selected": [...]}, {"action": "revise", "text": "..."} or {"action": "skip"}.
+    request_id: the question the answer is for (from its input_request). A question already answered, here or in the
+    web app, or a stale one is not applied: {ok: false, reason: "not_open"}."""
     reply: Any = response.strip()
     if reply.startswith("{"):
         try:
@@ -182,20 +234,17 @@ async def answer(key: str, response: str) -> dict[str, Any]:
             pass
     manager = await get_websocket_manager()
     t = _find(key)
-    if t:
-        if t.task.done():
-            raise ValueError(f"run {key} is over")
-        if not manager.pending_request(t.chat_id):  # the live question, not t.pending: the web app may have answered it
-            return {"ok": False, "note": "nothing is waiting for an answer (it may have been answered in the web app)"}
-        t.pending = False
-        t.inbox.put_nowait(json.dumps({"type": "input_response", "response": reply}))
-        return {"ok": True, "chat_id": t.chat_id}
-    if not await (await get_chat_repository()).get_chat(USER_ID, key, "omni"):
+    if t and t.task.done():
+        raise ValueError(f"run {key} is over")
+    chat_id = t.chat_id if t else key
+    if not t and not await (await get_chat_repository()).get_chat(USER_ID, key, "omni"):
         raise ValueError(f"no run or task {key}")
-    if not manager.pending_request(key):
-        return {"ok": False, "note": "nothing is waiting for an answer"}
-    await manager.handle_input_response(key, reply)
-    return {"ok": True, "chat_id": key}
+    open_id = (manager.pending_request(chat_id) or {}).get("request_id")  # the live question: the web app may have answered it
+    if not await manager.handle_input_response(chat_id, reply, request_id or None):
+        return {"ok": False, "reason": "not_open", "note": "that question is not open (nothing waits, or it was answered in the web app, or request_id is stale)"}
+    if t:
+        t.pending = False
+    return {"ok": True, "chat_id": chat_id, "task_id": chat_id, "request_id": open_id}
 
 
 @mcp.tool(annotations=READ)
@@ -226,28 +275,31 @@ async def list_tasks(limit: int = 10) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=READ)
-async def list_artifacts(chat_id: str) -> dict[str, Any]:
+async def list_artifacts(chat_id: str = "", search: str = "", kind: str = "") -> dict[str, Any]:
     """The files a task saved (lead lists, buyer maps, enriched contacts, campaign plans, …), newest first: id, kind,
-    title, rows and the agent that saved it. Read one with read_artifact."""
-    if not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
+    title, rows, the agent that saved it and its task's chat_id. Without chat_id: the newest 50 files of every task,
+    narrowed by search (words in the title, source or id) and kind. Read one with read_artifact."""
+    if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
         raise ValueError(f"no task {chat_id}")
+    found = await db_list_artifacts(chat_id) if chat_id else await find_artifacts(USER_ID, search, kind, 50)
     return {"chat_id": chat_id, "artifacts": [
-        {"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"], "agent": a["persona"], "created_at": a["created_at"]}
-        for a in await db_list_artifacts(chat_id)]}
+        {"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"], "agent": a["persona"],
+         "created_at": a["created_at"], "chat_id": a.get("chat_id", chat_id)}
+        for a in found]}
 
 
 @mcp.tool(annotations=READ)
-async def read_artifact(chat_id: str, artifact_id: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
+async def read_artifact(artifact_id: str, chat_id: str = "", offset: int = 0, limit: int = 100) -> dict[str, Any]:
     """A saved file's rows, a page at a time (limit at most 500), with its columns, row_count and meta. Page on with
-    offset until offset + len(rows) reaches row_count."""
-    if not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
-        raise ValueError(f"no task {chat_id}")
+    offset until offset + len(rows) reaches row_count. Any task's file opens by its id; chat_id in the result is the
+    task that saved it."""
+    # chat_id is taken for callers that still pass it; the id alone finds the file
     try:
-        record, payload = await load_record(chat_id, artifact_id)  # checks the file belongs to this chat
+        record, payload = await load_owned(USER_ID, artifact_id)
     except FileNotFoundError as e:
         raise ValueError(str(e)) from e
     rows, offset, limit = payload.get("rows", []), max(offset, 0), min(max(limit, 1), 500)
-    return {"chat_id": chat_id, "id": artifact_id, "kind": record["kind"], "title": record["title"],
+    return {"chat_id": record["chat_id"], "id": artifact_id, "kind": record["kind"], "title": record["title"],
             "columns": payload.get("columns", []), "row_count": len(rows), "offset": offset,
             "rows": rows[offset : offset + limit], "meta": payload.get("meta", {})}
 
@@ -328,8 +380,11 @@ def app() -> Any:
     async def gate(scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] == "http":
             headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
-            token = os.environ.get("DAXAGENT_HANDS_TOKEN", "")
-            if not token or headers.get("authorization") != f"Bearer {token}":
+            from src.routers.hands_keys import accepted  # the env token, or a key made in Settings > Connections > DAX MCP
+
+            key = await accepted(headers.get("authorization", "").removeprefix("Bearer ").strip())
+            scope.setdefault("state", {})["dax_key"] = key  # start_run names the task's source by it
+            if not key:
                 await send({"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"text/plain")]})
                 await send({"type": "http.response.body", "body": b"Brain_Hands token missing or wrong"})
                 return

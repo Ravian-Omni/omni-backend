@@ -137,7 +137,7 @@ async def conversations(user_id: str = "local_user") -> dict:
 
     return {"conversations": [
         {"chat_id": c["chat_id"], "type": "task" if c["collection"] == "omni" else "chat",
-         "name": os.path.basename(str(c["chat_dir"] or "").rstrip("/")) if c["collection"] == "omni" else "",
+         "name": (os.path.basename(str(c["chat_dir"] or "").rstrip("/")) if c["collection"] == "omni" else "") or c["title"] or "",
          "folder": c["chat_dir"] or "", "created_at": str(c["created_at"]).replace(" ", "T"), "updated_at": str(c["updated_at"]).replace(" ", "T"),
          "run_by": c["run_by"]}
         for c in await list_conversations(user_id)

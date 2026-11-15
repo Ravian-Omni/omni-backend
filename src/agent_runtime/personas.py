@@ -181,6 +181,17 @@ _register(Persona(
 ))
 
 _register(Persona(
+    name="signal_play",
+    display_name="Signal Play",
+    tagline="Turns a detected buying signal into an outreach you approve",
+    description=prompts.SIGNAL_PLAY_DESCRIPTION,
+    system_prompt=prompts.SIGNAL_PLAY,
+    builtin_tools=["Read", "WebSearch"],  # no WebFetch: the signal's link comes from outside and is cited, never opened
+    daxagent_tools=["request_spend_approval", *COMMON_TOOLS],  # no send tools: nothing leaves from here
+    remote_mcp=True,  # Data Axle (its server config names this persona)
+))
+
+_register(Persona(
     name="assistant",
     display_name="DAXAGENT",
     tagline="Chat mode: answers and acts with every connected tool",
@@ -196,7 +207,7 @@ _register(Persona(
     max_turns=30,
 ))
 
-SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach", "inbox_agent"]
+SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach", "inbox_agent", "signal_play"]
 
 
 # The values a persona prompt is filled with when its session starts (PersonaSession._system_prompt).

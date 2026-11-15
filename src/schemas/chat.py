@@ -67,6 +67,7 @@ class SimplifiedChatHistory(BaseModel):
 
     chat_id: str = Field(..., description="Unique chat session identifier")
     chat_dir: str | None = Field(default=None, description="Chat data directory path")
+    title: str | None = Field(default=None, description="Name made from the first message; None until it is written")
     raw_messages: list[RawMessage] = Field(
         default_factory=list, description="List of raw messages"
     )

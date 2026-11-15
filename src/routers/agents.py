@@ -13,8 +13,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
 from src.agent_runtime import PERSONAS, prefs
-from src.agent_runtime.tools.artifacts import load_record, save_payload
-from src.database import chat_owner, get_artifact, list_artifacts, list_decisions
+from src.agent_runtime.tools.artifacts import _origin, load_record, save_payload
+from src.database import chat_owner, find_artifacts, get_artifact, list_artifacts, list_decisions
 
 router = APIRouter()
 
@@ -155,6 +155,15 @@ async def starter_prompts(mode: str = "chat", user_id: str = "local_user"):
     from src.agent_runtime.suggestions import suggestions
 
     return {"templates": await suggestions(user_id, mode)}
+
+
+@router.get("/library")
+async def library(user_id: str = "local_user", search: str = "", kind: str = ""):
+    """The user's artifacts from all their chats and tasks, newest first (metadata only): the composer's picker.
+    Every word of search must be in the title, source or id."""
+    fields = ("id", "chat_id", "kind", "title", "row_count", "created_at")
+    return {"artifacts": [{**{k: a[k] for k in fields}, "from": _origin(a["path"])}
+                          for a in await find_artifacts(user_id, search, kind, 50) if a["kind"] != "send_log"]}
 
 
 @router.get("/artifacts/{chat_id}")

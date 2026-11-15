@@ -5,6 +5,7 @@ that serve as drop-in replacements for the previous cloud API calls.
 """
 
 import json
+import os
 from typing import Any
 
 from loguru import logger
@@ -416,9 +417,9 @@ async def log_decision(
     """Record a confirmation card the moment it is shown; returns its row id."""
     db = await get_db()
     cursor = await db.execute(
-        """INSERT INTO decision_log (chat_id, task_id, persona, card, request, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (chat_id, task_id, persona, card, json.dumps(request), dt.now_iso()),
+        """INSERT INTO decision_log (chat_id, task_id, persona, card, request, created_at, owner_pid)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (chat_id, task_id, persona, card, json.dumps(request), dt.now_iso(), os.getpid()),
     )
     await db.commit()
     return cursor.lastrowid
@@ -432,6 +433,14 @@ async def answer_decision(decision_id: int, response: Any) -> None:
         (json.dumps(response), dt.now_iso(), decision_id),
     )
     await db.commit()
+
+
+async def list_open_decisions() -> list[dict]:
+    """The cards shown and not answered yet, oldest first, with the process that shows each (None: made before that was recorded)."""
+    cursor = await (await get_db()).execute(
+        "SELECT id, chat_id, persona, request, created_at, owner_pid FROM decision_log WHERE answered_at IS NULL ORDER BY id")
+    return [{"id": r[0], "chat_id": r[1], "persona": r[2], "request": json.loads(r[3]), "created_at": r[4], "owner_pid": r[5]}
+            for r in await cursor.fetchall()]
 
 
 async def list_decisions(chat_id: str) -> list[dict]:
@@ -632,16 +641,30 @@ async def delete_creative(creative_id: str) -> None:
     await db.commit()
 
 
+async def get_chat_title(chat_id: str) -> str | None:
+    cursor = await (await get_db()).execute("SELECT title FROM chats WHERE chat_id = ? AND collection IN ('omni', 'chats') AND title IS NOT NULL", (chat_id,))
+    row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def set_chat_title(chat_id: str, title: str) -> bool:
+    """Name the chat unless it already has a title; True when this call wrote it."""
+    db = await get_db()
+    cursor = await db.execute("UPDATE chats SET title = ? WHERE chat_id = ? AND collection IN ('omni', 'chats') AND title IS NULL", (title, chat_id))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
 async def list_conversations(user_id: str) -> list[dict]:
     """Every task and chat-mode conversation with something in it, newest first (the sidebar's source of truth)."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT chat_id, collection, chat_dir, created_at, updated_at FROM chats "
+        "SELECT chat_id, collection, chat_dir, created_at, updated_at, title FROM chats "
         "WHERE user_id = ? AND collection IN ('omni', 'chats') AND length(raw_messages) > 2 "
         "AND chat_id NOT IN (SELECT chat_id FROM hidden_chats)",
         (user_id,),
     )
-    rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at"), r)) for r in await cursor.fetchall()]
+    rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at", "title"), r)) for r in await cursor.fetchall()]
     # tasks an AI started over the MCP (hands_mcp.start_run saves who)
     cursor = await db.execute("SELECT key, value FROM user_prefs WHERE user_id = ? AND key LIKE 'run_by:%'", (user_id,))
     run_by = {key.removeprefix("run_by:"): json.loads(value) for key, value in await cursor.fetchall()}
@@ -913,6 +936,8 @@ __all__ = [
     "get_chat_repository",
     "reset_chat_repository",
     "update_chat_history",
+    "get_chat_title",
+    "set_chat_title",
     "update_chat_history_by_context",
     "create_capability_chat",
     "ChatRepository",
@@ -931,6 +956,7 @@ __all__ = [
     "log_decision",
     "answer_decision",
     "list_decisions",
+    "list_open_decisions",
     "save_artifact",
     "list_artifacts",
     "get_artifact",
@@ -945,3 +971,43 @@ __all__ = [
     "save_suite_run",
     "suite_runs",
 ]
+
+
+# ---- DAX MCP keys (Settings > Connections > DAX MCP) -------------------------------------------
+async def save_hands_key(key_id: str, name: str, key_hash: str, created_by: str) -> None:
+    db = await get_db()
+    await db.execute("INSERT INTO hands_keys (id, name, key_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (key_id, name, key_hash, created_by, dt.now_iso()))
+    await db.commit()
+
+
+async def list_hands_keys() -> list[dict]:
+    db = await get_db()
+    cols = ("id", "name", "created_by", "created_at", "last_used_at", "last_client")
+    cursor = await db.execute(f"SELECT {', '.join(cols)} FROM hands_keys ORDER BY created_at DESC")
+    return [dict(zip(cols, row)) for row in await cursor.fetchall()]
+
+
+async def delete_hands_key(key_id: str) -> bool:
+    db = await get_db()
+    cursor = await db.execute("DELETE FROM hands_keys WHERE id = ?", (key_id,))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def touch_hands_key(key_hash: str) -> dict | None:
+    """The key with this hash ({id, name}), or None; records the use."""
+    db = await get_db()
+    row = await (await db.execute("SELECT id, name FROM hands_keys WHERE key_hash = ?", (key_hash,))).fetchone()
+    if not row:
+        return None
+    await db.execute("UPDATE hands_keys SET last_used_at = ? WHERE id = ?", (dt.now_iso(), row[0]))
+    await db.commit()
+    return {"id": row[0], "name": row[1]}
+
+
+async def note_hands_client(key_id: str, client: str) -> None:
+    """Which outside agent (its own name and version) last used a key."""
+    db = await get_db()
+    await db.execute("UPDATE hands_keys SET last_client = ? WHERE id = ?", (client, key_id))
+    await db.commit()

@@ -10,6 +10,7 @@ This module provides:
 """
 
 import asyncio
+import json
 import logging
 import traceback
 import uuid
@@ -21,6 +22,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.managers.cancellation_token import CancellationToken
+from src.omni import signal_play
 from src.utilities.async_errors import (
     AsyncErrorCode,
     AsyncErrorDetails,
@@ -197,6 +199,7 @@ class WebSocketManager:
             chat._set_cancellation_token(
                 self._cancellation_tokens.get(session_id, None)
             )
+            asyncio.create_task(self._name_chat(session_id, initial_message.get("task")))
             task = asyncio.create_task(
                 chat.manager.a_initiate_chat(
                     chat.manager,
@@ -272,6 +275,13 @@ class WebSocketManager:
             async with self._flags_lock:
                 self._stop_flags.pop(session_id, None)
 
+    async def _name_chat(self, session_id: str, request: str) -> None:
+        """Title a chat from its first message and tell the page (the sidebar shows it)."""
+        from src.services import chat_title
+
+        if title := await chat_title.name_chat(session_id, request or ""):
+            await self._send_message(session_id, {"type": "chat_title", "title": title, "timestamp": dt.now_iso()})
+
     async def start_chat_stream(
         self,
         session_id: str,
@@ -337,17 +347,15 @@ class WebSocketManager:
             )
             omni.set_task_id(str(uuid.uuid4()))
             await omni.refresh_user_context()
+            request, reason = initial_message.get("task"), ""
+            if signal_play.is_signal(request) and hasattr(omni.manager, "refuse"):  # only the orchestrator takes signal plays
+                request, reason = signal_play.prepare(request)
+            message = str({"task": request, "files": initial_message.get("files")})
+            asyncio.create_task(self._name_chat(session_id, request))
             task = asyncio.create_task(
-                omni.manager.a_initiate_chat(
-                    omni.manager,
-                    message=str(
-                        {
-                            "task": initial_message.get("task"),
-                            "files": initial_message.get("files"),
-                        }
-                    ),
-                    clear_history=False,
-                )
+                omni.manager.refuse(message, reason)
+                if reason
+                else omni.manager.a_initiate_chat(omni.manager, message=message, clear_history=False)
             )
 
             async with self._tasks_lock:
@@ -422,7 +430,21 @@ class WebSocketManager:
             async with self._flags_lock:
                 self._stop_flags.pop(session_id, None)
 
-    def _create_input_func(self, session_id: str, timeout: int = 600) -> InputFuncType:
+    @staticmethod
+    async def _request_id(session_id: str, prompt: str, input_type: str, source: str) -> tuple[str, bool]:
+        """The id a question is answered by, and whether it is a new decision_log row: a decision card has its own;
+        a plan approval or a plain prompt gets one, so every open question is in the log."""
+        from src.database import log_decision
+
+        try:
+            card = json.loads(prompt)
+        except ValueError:
+            card = None
+        if input_type == "decision_card" and isinstance(card, dict) and card.get("id") is not None:
+            return str(card["id"]), False
+        return str(await log_decision(session_id, None, source, "prompt", card if isinstance(card, dict) else {"prompt": prompt})), True
+
+    def _create_input_func(self, session_id: str, timeout: int | None = None) -> InputFuncType:
         """Create an input function for requesting user input during chat.
 
         Returns an async function that can be called to request input from
@@ -430,7 +452,7 @@ class WebSocketManager:
 
         Args:
             session_id: Session identifier.
-            timeout: Timeout in seconds for input response. Defaults to 600.
+            timeout: Seconds to wait for an answer; None (the default) waits until one comes or the run is stopped.
 
         Returns:
             Async input function that accepts prompt and input_type parameters.
@@ -465,6 +487,7 @@ class WebSocketManager:
                 logger.info(
                     f"Requesting input for session {session_id}: ({input_type}) {prompt}"
                 )
+                request["request_id"], logged = await self._request_id(session_id, prompt, input_type, source)
 
                 # Send input request to client (and keep it to show again after a reconnect)
                 self._pending_requests[session_id] = request
@@ -488,7 +511,7 @@ class WebSocketManager:
                                 try:
                                     response = await asyncio.wait_for(
                                         self._input_responses[session_id].get(),
-                                        timeout=min(timeout, 5),
+                                        timeout=5,
                                     )
                                     return response
                                 except TimeoutError:
@@ -497,6 +520,10 @@ class WebSocketManager:
                         response = await asyncio.wait_for(
                             poll_for_response(), timeout=timeout
                         )
+                        if logged:
+                            from src.database import answer_decision
+
+                            await answer_decision(int(request["request_id"]), response)
                         return response
 
                     except TimeoutError:
@@ -518,7 +545,7 @@ class WebSocketManager:
         return input_handler
 
     async def request_input(
-        self, session_id: str, message: dict[str, Any], timeout: int = 600
+        self, session_id: str, message: dict[str, Any], timeout: int | None = None
     ) -> Any:
         """Send a message that asks the user something, then wait for the reply.
 
@@ -531,7 +558,7 @@ class WebSocketManager:
         Args:
             session_id: Session identifier.
             message: Message to send; ``type`` defaults to ``input_request``.
-            timeout: Seconds to wait before the session is stopped.
+            timeout: Seconds to wait before the session is stopped; None (the default) waits until the user answers.
 
         Returns:
             The client's response payload.
@@ -541,6 +568,8 @@ class WebSocketManager:
             ValueError: If the session has no input queue or was closed.
         """
         message = {"type": "input_request", "timestamp": dt.now_iso(), **message}
+        if (card := (message.get("data") or {}).get("content")) and isinstance(card, dict) and card.get("id") is not None:
+            message["request_id"] = str(card["id"])  # the decision card's log id
         self._pending_requests[session_id] = message  # shown again after a reconnect
         await self._send_message(session_id, message)
 
@@ -556,7 +585,7 @@ class WebSocketManager:
                     raise ValueError("Session was closed or stopped")
                 try:
                     return await asyncio.wait_for(
-                        self._input_responses[session_id].get(), timeout=min(timeout, 5)
+                        self._input_responses[session_id].get(), timeout=5
                     )
                 except TimeoutError:
                     continue
@@ -615,20 +644,26 @@ class WebSocketManager:
         """
         await self.send_chat_message(session_id, content, source=agent_name)
 
-    async def handle_input_response(self, session_id: str, response: str) -> None:
-        """Handle input response from client.
-
-        Places the user's response into the input queue for processing
-        by the waiting input handler.
+    async def handle_input_response(self, session_id: str, response: str, request_id: str | None = None) -> bool:
+        """Give the user's answer to the question the run waits on, once.
 
         Args:
             session_id: Session identifier.
             response: User's input response.
+            request_id: The question the answer is for, when the caller knows it.
+
+        Returns:
+            False when no question waits, it is not request_id's, or it was already answered
+            (in the web app or by an MCP caller): nothing changes then.
         """
-        if session_id in self._input_responses:
-            await self._input_responses[session_id].put(response)
-        else:
-            logger.warning(f"Received input response for inactive session {session_id}")
+        pending = self._pending_requests.get(session_id)
+        if not pending or pending.get("answered") or (request_id and request_id != pending.get("request_id")) \
+                or session_id not in self._input_responses:
+            logger.warning(f"Input response for session {session_id} not applied: no open question, a stale one or an answered one")
+            return False
+        pending["answered"] = True
+        await self._input_responses[session_id].put(response)
+        return True
 
     async def resend_pending(self, session_id: str, websocket: Any) -> None:
         """Show again the question a run is waiting on to the socket that lost it (the page reconnected); threads

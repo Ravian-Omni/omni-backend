@@ -12,6 +12,9 @@ from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
 from src.database import list_artifacts, list_creatives
 
+# Replies DAX settles itself, with no handoff: Brain_Hands is told of them from record_reply
+SETTLED_ROUTES = ("suppress", "snooze", "auto_reply")
+
 # A delivery failure in a sent thread (a "Delay" notice is not one: the mail still goes out)
 BOUNCE = re.compile(r"mailer-daemon|postmaster|delivery status|undeliver|returned to sender|delivery (has )?failed|address not found|failure notice", re.I)
 
@@ -110,15 +113,76 @@ async def settle_bounces(ctx, plan_id: str, bounces: list[dict[str, Any]]) -> li
     return opened
 
 
-async def record_reply(ctx, plan_id: str, to: str, intent: str, route: str = "", summary: str = "", message_id: str = "") -> dict[str, Any]:
-    """Log a reply: it holds further follow-ups, except an out-of-office; not_now gets its snooze date."""
+async def record_reply(ctx, plan_id: str, to: str, intent: str, route: str = "", summary: str = "", message_id: str = "",
+                       text: str = "", subject: str = "", thread_id: str = "") -> dict[str, Any]:
+    """Log a reply: it holds further follow-ups, except an out-of-office; not_now gets its snooze date. A reply settled
+    here (unsubscribe, not now, out of office) is also pushed to Brain_Hands, keyed on its Gmail message."""
     auto = intent == "out_of_office" or route == "auto_reply"
     row = {"to": to.lower(), "status": "auto_reply" if auto else "replied", "intent": intent, "route": route,
            "summary": summary, "message_id": message_id}
     if intent == "not_now" or route == "snooze":
         row["snooze_until"] = (dt.now() + timedelta(days=(await prefs.get(ctx.user_id, "inbox"))["snooze_days"])).date().isoformat()
     await record(ctx, plan_id, row)
+    if route in SETTLED_ROUTES and message_id:
+        from src.services import brain_hands
+
+        brain_hands.push_in_background(f"reply:{message_id}", subject, text or summary, email=to.lower(), thread_id=thread_id,
+                                       intent=intent, route=route, campaign_id=plan_id)
     return row
+
+
+async def own_plan(ctx: ToolContext, plan_id: str) -> dict[str, Any]:
+    """The plan, which must be this chat's own: its approvals and its send log live with it.
+    Raises FileNotFoundError for a plan made in another chat (saying what to do) and for one that is not the user's."""
+    plan, origin = await artifacts.find(ctx, plan_id)
+    if origin:
+        raise FileNotFoundError(
+            f"The plan '{plan_id}' belongs to {origin}, where its approvals and send log are. Send it from there, or copy it into "
+            "this chat with update_artifact (pass only artifact_id): the copy's steps go back to draft for the user to approve")
+    return plan
+
+
+async def render_plan(ctx: ToolContext, plan_id: str, only_step: int | None = None, segment: str | None = None) -> dict[str, Any]:
+    """The plan's approved email steps rendered per recipient: ready messages and why the rest are held.
+    Raises FileNotFoundError when the plan is not this chat's own or its audience is missing."""
+    plan = await own_plan(ctx, plan_id)
+    audience = (await artifacts.find(ctx, (plan.get("meta") or {}).get("audience_artifact_id") or ""))[0]["rows"]
+    brief = (plan.get("meta") or {}).get("brief") or {}
+    assets = {c["id"]: c for c in await list_creatives(ctx.chat_id, plan_id)}
+    history = await _history(ctx, plan_id)
+    ready, skipped, seen = [], Counter(), set()
+    for row in audience:
+        steps = creatives.steps_for(plan, row)
+        emails = sorted({int(s.get("step") or 1) for s in steps if s.get("channel", "email") == "email"})
+        for step in steps:
+            n = int(step.get("step") or 1)
+            if step.get("status") != "approved" or step.get("channel", "email") != "email":
+                continue
+            if only_step is not None and n != only_step:
+                continue
+            if segment and str(step.get("segment")) != segment:
+                continue
+            m = creatives.message(step, row, brief, assets)
+            key = (m["to"].lower(), n)
+            h = history.get(key[0], {"thread_id": None, "sent_at": {}, "replied": False, "handled": set()})
+            prev = max((e for e in emails if e < n), default=None)
+            first_sent = h["sent_at"].get(emails[0]) if emails else None
+            held = creatives.blocking(m["issues"]) or [
+                reason for reason, hit in (
+                    ("replied", h["replied"]),
+                    ("already sent", n in h["sent_at"]),
+                    ("previous step not sent", prev is not None and prev not in h["sent_at"]),
+                    ("not due yet", prev is not None and first_sent and not _due(first_sent, int(step.get("send_after_days") or 0))),
+                    ("duplicate email", key in seen),
+                ) if hit
+            ]
+            if held:
+                skipped.update(held[:1])
+                continue
+            seen.add(key)
+            ready.append({**{k: m[k] for k in ("to", "subject", "body", "segment", "attachments", "inline_image")}, "plan_id": plan_id,
+                          "step": n, "thread_id": h["thread_id"] if prev is not None else None})
+    return {"ready": ready, "skipped": dict(skipped), "approved_steps": sum(1 for s in plan.get("rows", []) if s.get("status") == "approved")}
 
 
 def build(ctx: ToolContext):
@@ -142,47 +206,11 @@ def build(ctx: ToolContext):
     )
     async def render_campaign(args: dict) -> dict:
         try:
-            plan = artifacts.load(ctx, args["plan_id"])
-            audience = artifacts.load(ctx, (plan.get("meta") or {}).get("audience_artifact_id") or "")["rows"]
+            return artifacts._text(await render_plan(ctx, args["plan_id"], args.get("step"), args.get("segment")))
         except FileNotFoundError as e:
-            return artifacts._error(f"{e}. The plan needs meta.audience_artifact_id pointing at the contacts artifact.")
-        brief = (plan.get("meta") or {}).get("brief") or {}
-        assets = {c["id"]: c for c in await list_creatives(ctx.chat_id, args["plan_id"])}
-        history = await _history(ctx, args["plan_id"])
-        ready, skipped, seen = [], Counter(), set()
-        for row in audience:
-            steps = creatives.steps_for(plan, row)
-            emails = sorted({int(s.get("step") or 1) for s in steps if s.get("channel", "email") == "email"})
-            for step in steps:
-                n = int(step.get("step") or 1)
-                if step.get("status") != "approved" or step.get("channel", "email") != "email":
-                    continue
-                if args.get("step") is not None and n != args["step"]:
-                    continue
-                if args.get("segment") and str(step.get("segment")) != args["segment"]:
-                    continue
-                m = creatives.message(step, row, brief, assets)
-                key = (m["to"].lower(), n)
-                h = history.get(key[0], {"thread_id": None, "sent_at": {}, "replied": False, "handled": set()})
-                prev = max((e for e in emails if e < n), default=None)
-                first_sent = h["sent_at"].get(emails[0]) if emails else None
-                held = creatives.blocking(m["issues"]) or [
-                    reason for reason, hit in (
-                        ("replied", h["replied"]),
-                        ("already sent", n in h["sent_at"]),
-                        ("previous step not sent", prev is not None and prev not in h["sent_at"]),
-                        ("not due yet", prev is not None and first_sent and not _due(first_sent, int(step.get("send_after_days") or 0))),
-                        ("duplicate email", key in seen),
-                    ) if hit
-                ]
-                if held:
-                    skipped.update(held[:1])
-                    continue
-                seen.add(key)
-                ready.append({**{k: m[k] for k in ("to", "subject", "body", "segment", "attachments", "inline_image")}, "plan_id": args["plan_id"],
-                              "step": n, "thread_id": h["thread_id"] if prev is not None else None})
-        return artifacts._text({"ready": ready, "skipped": dict(skipped), "approved_steps": sum(
-            1 for s in plan.get("rows", []) if s.get("status") == "approved")})
+            # the hint is for a missing audience; an error that names the plan is about the plan itself
+            hint = "" if args["plan_id"] in str(e) else " The plan needs meta.audience_artifact_id pointing at the contacts artifact."
+            return artifacts._error(f"{e}.{hint}")
 
     @tool(
         "check_replies",
@@ -194,8 +222,9 @@ def build(ctx: ToolContext):
     )
     async def check_replies(args: dict) -> dict:
         try:
+            await own_plan(ctx, args["plan_id"])
             found = await fetch_replies(ctx, args["plan_id"])
-        except RuntimeError as e:
+        except (RuntimeError, FileNotFoundError) as e:
             return artifacts._error(str(e))
         found["bounces"] = [{"to": b["to"], "subject": b["subject"], "handoff": h["id"]}
                             for b, h in zip(found["bounces"], await settle_bounces(ctx, args["plan_id"], found["bounces"]))]
@@ -221,6 +250,10 @@ def build(ctx: ToolContext):
         },
     )
     async def record_reply_tool(args: dict) -> dict:
+        try:
+            await own_plan(ctx, args["plan_id"])  # a reply logged from another chat would take the plan's send log with it
+        except FileNotFoundError as e:
+            return artifacts._error(str(e))
         row = await record_reply(ctx, args["plan_id"], args["to"], args["intent"], args.get("route", ""),
                                  args.get("summary", ""), args.get("message_id", ""))
         return artifacts._text({"recorded": True, "send_log": log_id(args["plan_id"]), "status": row["status"],

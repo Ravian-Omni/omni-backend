@@ -110,7 +110,8 @@ async def sweep(user_id: str = "local_user") -> dict:
                     summary["routes"][route] += 1
                     if rules["dry_run"]:
                         continue
-                    await campaign.record_reply(ctx, plan_id, r["to"], read.get("intent", "other"), route, "", r.get("message_id") or "")
+                    await campaign.record_reply(ctx, plan_id, r["to"], read.get("intent", "other"), route, "", r.get("message_id") or "",
+                                                text=r["text"], subject=r.get("subject", ""), thread_id=r["thread_id"])
                     if route in PERSON_ROUTES:
                         h = await inbox.open_handoff(ctx, contact=r["to"], route=route, reply=r["text"], read=read, plan_id=plan_id,
                                                      thread_id=r["thread_id"], subject=r.get("subject", ""),

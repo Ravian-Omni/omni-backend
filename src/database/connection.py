@@ -218,6 +218,17 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TEXT NOT NULL
 );
 
+-- Bearer keys made in Settings > Connections > DAX MCP, for outside agents calling /hands/mcp.
+CREATE TABLE IF NOT EXISTS hands_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    last_client TEXT
+);
+
 -- Who each signed-in person is. Clerk's session token names only the user id, so the app reports the person's
 -- email and name when it opens (PUT /auth/me). Labels for the admin dashboard; never used to decide access.
 CREATE TABLE IF NOT EXISTS accounts (
@@ -315,6 +326,18 @@ async def init_db() -> None:
     await _db.execute("PRAGMA foreign_keys=ON")
 
     await _db.executescript(SCHEMA_SQL)
+    try:  # databases made before last_client existed
+        await _db.execute("ALTER TABLE hands_keys ADD COLUMN last_client TEXT")
+    except aiosqlite.OperationalError:
+        pass  # already there
+    try:  # databases made before cards recorded the process that shows them
+        await _db.execute("ALTER TABLE decision_log ADD COLUMN owner_pid INTEGER")
+    except aiosqlite.OperationalError:
+        pass  # already there
+    try:  # databases made before chats had a title
+        await _db.execute("ALTER TABLE chats ADD COLUMN title TEXT")
+    except aiosqlite.OperationalError:
+        pass  # already there
     # Data made while everyone was "local_user" (local runs, the shared workspace, the Teams and Slack bots) goes to
     # the hosted app's owner: DAXAGENT_OWNER, their Clerk user id or email. Never set it on a local run.
     owner = os.getenv("DAXAGENT_OWNER", "")

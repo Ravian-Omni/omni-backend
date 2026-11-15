@@ -7,6 +7,7 @@ This module initializes and configures the FastAPI application with:
 - OpenAPI documentation
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -23,12 +24,13 @@ from starlette.middleware.cors import CORSMiddleware
 from src.configs.settings import settings  # loads .env first
 from src.auth import SessionGate
 from src.dependencies import init_managers
+from src.services import needs
 from src.routers.agents import router as agents_router
 from src.routers.campaigns import router as campaigns_router
 from src.routers import chat
 from src.routers import settings as settings_router
 from src.routers import auth as auth_router
-from src.routers import admin, evals, feedback, handoffs, hands_mcp, mcp, share, slack, software_developer, teams, websocket
+from src.routers import admin, evals, feedback, handoffs, hands_keys, hands_mcp, mcp, share, slack, software_developer, teams, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
 # Initialize application
@@ -77,6 +79,7 @@ async def lifespan(app: FastAPI):
         logger.info("📊 Websocket Manager...")
         await init_managers()
         logger.info("✅ Websocket Manager established")
+        asyncio.create_task(needs.close_lost())  # questions whose run died with the last process
         # Add any other startup tasks here
         logger.info("🎯 Application startup completed successfully")
 
@@ -148,6 +151,7 @@ app.include_router(handoffs.router, prefix="/handoffs", tags=["Handoffs"])
 app.include_router(teams.router, prefix="/teams", tags=["Teams bot"])
 app.include_router(slack.router, prefix="/slack", tags=["Slack bot"])
 app.include_router(auth_router.router, prefix="/auth", tags=["Sign-in"])
+app.include_router(hands_keys.router, prefix="/settings/hands-keys", tags=["DAX MCP"])
 app.mount("/hands", hands_mcp.app())  # Brain_Hands: MCP at /hands/mcp
 
 

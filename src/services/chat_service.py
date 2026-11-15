@@ -235,6 +235,7 @@ class ChatService:
             "chat_id": document.get("chat_id", ""),
             "chat_dir": document.get("chat_dir", ""),
             "raw_messages": raw_messages,
+            "title": document.get("title"),
             "feedback": {"data": await load_feedback(chat_id)},
         }
 

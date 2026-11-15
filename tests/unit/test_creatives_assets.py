@@ -95,3 +95,42 @@ def test_a_send_uploads_attachments_and_shows_the_inline_image(env, monkeypatch)
     assert args["attachment"] == [{"name": "banner.png", "mimetype": "image/png", "s3key": "key-GMAIL_SEND_EMAIL"}]
     refused = asyncio.run(send({"to": "a@x.com", "subject": "Hi", "body": "Hello", "attachments": ["creative-other"]}))
     assert refused.get("is_error") and len(calls) == 1  # another chat's creative is never sent
+
+
+def test_the_send_card_shows_the_first_recipients_email_signed_once(env):
+    # campaign_plan-be8d6513: the copy signed off itself and the renderer added a second footer; the card showed the
+    # agent's words about the batch ("subjects vary by recipient") instead of an email
+    from src.agent_runtime.decisions import Decision
+    from src.agent_runtime.tools import campaign
+
+    brief = {"sender_name": "Lokesh Kumar", "postal_address": "Senapati Bapat Rd, Pune 411016", "opt_out": "Reply stop to opt out."}
+    signed = "Hi there,\n\nShort note.\n\nLokesh Kumar\nSenapati Bapat Rd,  Pune 411016\nReply stop to opt out."
+    rows = [{"segment": "Pereira", "step": 1, "channel": "email", "status": "approved", "subject": "A competitor read", "body": signed,
+             "recipient_email": "newbiz@pereiraodell.com"},
+            {"segment": "Liquid", "step": 1, "channel": "email", "status": "approved", "subject": "For Liquid", "body": "Hi,\n\nNote.",
+             "recipient_email": "hello@liquidagency.com"}]
+    (env / "campaign_plan-p1.json").write_text(json.dumps({"rows": rows, "meta": {"audience_artifact_id": "buyer_map-a1", "segment_field": "company", "brief": brief}}))
+    (env / "buyer_map-a1.json").write_text(json.dumps({"rows": [{"company": "Pereira"}, {"company": "Liquid"}]}))
+    cards = []
+
+    class Cards:
+        async def confirm_send(self, **kw):
+            cards.append(kw)
+            return Decision("confirm_send", approved=True)
+
+    ctx = SimpleNamespace(chat_id="chat-1", artifacts_dir=str(env), decisions=Cards(), send_allowance={}, send_approved=set(),
+                          user_id="u", persona="outreach", task_id=None, emit=None)
+    ready = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p1", 1))["ready"]
+    assert next(m for m in ready if m["to"] == "newbiz@pereiraodell.com")["body"] == signed  # its own sign-off, no second footer
+    liquid = next(m for m in ready if m["to"] == "hello@liquidagency.com")["body"]
+    assert liquid.startswith("Hi,\n\nNote.\n\nLokesh Kumar") and liquid.count("Reply stop to opt out.") == 1
+    ask = next(t for t in sales.build(ctx) if t.name == "request_send_approval").handler
+    asyncio.run(ask({"channel": "email", "recipients": ["hello@liquidagency.com", "newbiz@pereiraodell.com"], "subject": "Step 1: subjects vary",
+                     "body_preview": "Exact rendered bodies are recipient-specific", "plan_id": "campaign_plan-p1", "step": 1}))
+    assert (cards[0]["subject"], cards[0]["body_preview"]) == ("For Liquid", liquid) and ctx.send_allowance["*"] == 2
+    # Outreach asked again for the same batch (chat e6579adb): no second card, and still 2 sends, not 4
+    again = json.loads(asyncio.run(ask({"channel": "Gmail", "recipients": ["newbiz@pereiraodell.com", "hello@liquidagency.com"], "subject": "x",
+                                        "body_preview": "x", "plan_id": "campaign_plan-p1", "step": 1}))["content"][0]["text"])
+    assert again["already_approved"] and len(cards) == 1 and ctx.send_allowance["*"] == 2
+    asyncio.run(ask({"channel": "email", "recipients": ["a@x.com"], "subject": "Hi", "body_preview": "Hello"}))
+    assert (cards[1]["subject"], cards[1]["body_preview"]) == ("Hi", "Hello")  # a one-off batch keeps what the agent wrote

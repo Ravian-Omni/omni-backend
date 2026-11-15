@@ -29,6 +29,8 @@ class ToolContext:
     # Approved call counts, keyed by full tool name, consumed by the permission gate.
     spend_allowance: dict[str, int] = field(default_factory=dict)
     send_allowance: dict[str, int] = field(default_factory=dict)
+    # Send batches approved this turn (recipients, subject, body): asking again adds no card and no sends
+    send_approved: set = field(default_factory=set)
     # Remote servers whose data this turn touched, stamped on artifacts as meta.data_sources.
     data_sources: set[str] = field(default_factory=set)
 

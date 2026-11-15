@@ -26,6 +26,14 @@ def test_email_message_gets_footer_and_blocks_without_address():
     assert m["body"].endswith("Reply 'stop' to opt out.") and creatives.blocking(m["issues"]) == ["no email"]
 
 
+def test_a_step_written_for_one_recipient_goes_to_its_address():
+    # campaign_plan-be8d6513: the audience (a buyer map) had no email column, each company's step held recipient_email
+    step = {"step": 1, "channel": "email", "subject": "Hi", "body": "Body", "recipient_email": " newbiz@pereiraodell.com "}
+    m = creatives.message(step, {"company": "Pereira O'Dell LLC", "public_route": "newbiz@pereiraodell.com; +1 415"}, BRIEF)
+    assert m["to"] == "newbiz@pereiraodell.com" and creatives.blocking(m["issues"]) == []
+    assert creatives.message({**step, "recipient_email": ""}, {"email": "ann@x.com"}, BRIEF)["to"] == "ann@x.com"
+
+
 def test_steps_for_segment_and_all():
     plan = {"meta": {"segment_field": "sic"}, "rows": [{"segment": "8021"}, {"segment": "all"}, {"segment": "5411"}]}
     assert [s["segment"] for s in creatives.steps_for(plan, {"sic": "8021"})] == ["8021", "all"]

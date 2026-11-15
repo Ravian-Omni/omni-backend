@@ -3,7 +3,11 @@ Pytest configuration and shared fixtures.
 """
 
 import asyncio
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from collections.abc import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
@@ -14,6 +18,11 @@ from httpx import AsyncClient
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Before src is imported (its settings read this then): the suite never opens the real ~/.daxagent database or files
+_DATA_DIR = tempfile.mkdtemp(prefix="daxagent-tests-")
+os.environ["DAXAGENT_DATA_DIR"] = _DATA_DIR
+atexit.register(shutil.rmtree, _DATA_DIR, True)
 
 from src.main import app
 from src.managers.connection import WebSocketManager

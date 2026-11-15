@@ -43,7 +43,7 @@ def world(tmp_path, monkeypatch):
             {"to": "b@x.com", "thread_id": "t2", "message_id": "m2", "text": "What does it cost?", "route": "answer", "read": {"intent": "question"}},
         ]}
 
-    async def record_reply(ctx, plan_id, to, intent, route="", summary="", message_id=""):
+    async def record_reply(ctx, plan_id, to, intent, route="", summary="", message_id="", **_):
         recorded.append((to, intent, route, message_id))
 
     async def open_handoff(ctx, **kw):

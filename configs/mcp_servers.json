@@ -19,7 +19,8 @@
         "personas": [
           "lead_finder",
           "buyer_finder",
-          "contact_enricher"
+          "contact_enricher",
+          "signal_play"
         ]
       }
     },

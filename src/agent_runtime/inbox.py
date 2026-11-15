@@ -27,6 +27,8 @@ def owner_for(team: dict, email: str, row_owner: str = "") -> dict | None:
 async def open_handoff(ctx, *, contact: str, route: str, reply: str, read: dict | None = None, plan_id: str = "",
                        thread_id: str = "", subject: str = "", draft: str = "", row_owner: str = "") -> dict:
     """Store the handoff, assign its owner and show it in the chat; returns it with the owner's details."""
+    from src.services import brain_hands
+
     team = await prefs.get(ctx.user_id, "team")
     owner = owner_for(team, contact, row_owner)
     handoff = await save_handoff({
@@ -35,7 +37,12 @@ async def open_handoff(ctx, *, contact: str, route: str, reply: str, read: dict 
         "subject": subject, "reply": reply, "read": read or {}, "draft": draft,
     })
     await ctx.emit({"type": "handoff", "handoff": handoff})
-    return {**handoff, "owner_details": owner, "notified": await notify(ctx.user_id, handoff, owner, team)}
+    notified = await notify(ctx.user_id, handoff, owner, team)
+    await brain_hands.push_reply(
+        handoff["id"], handoff["subject"], handoff["reply"], email=handoff["contact"], thread_id=handoff["thread_id"],
+        intent=handoff["read"].get("intent", "other"), route=handoff["route"], draft=handoff["draft"],
+        campaign_id=handoff["plan_id"], handoff_id=handoff["id"])
+    return {**handoff, "owner_details": owner, "notified": notified}
 
 
 def pick_slots(busy: list[tuple[datetime, datetime]], start: datetime, days: int = 5, minutes: int = 30, limit: int = 3) -> list[datetime]:

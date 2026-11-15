@@ -488,6 +488,7 @@ class PersonaSession:
         # An approval covers the turn it was given in, never a later one.
         self.tool_context.spend_allowance.clear()
         self.tool_context.send_allowance.clear()
+        self.tool_context.send_approved.clear()
         self.tool_context.data_sources.clear()
         self._notes_seen = []
         if notes := self._take_notes():

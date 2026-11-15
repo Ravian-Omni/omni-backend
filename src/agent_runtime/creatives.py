@@ -93,9 +93,13 @@ def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any], as
 
         issues += lint(step, assets)
     channel = step.get("channel") or "email"
+    # a step written for one recipient names them (Campaign Builder puts a public route there when the list has no email)
+    to = str(step.get("recipient_email") or "").strip() or field(row, "email")
     if channel == "email":
-        body = f"{body.rstrip()}\n\n{footer(brief)}".rstrip()
-        if not field(row, "email"):
+        legal = [" ".join(str(brief[k]).split()) for k in ("postal_address", "opt_out") if brief.get(k)]
+        if not (legal and all(v in " ".join(body.split()) for v in legal)):  # copy that signs off itself keeps its own
+            body = f"{body.rstrip()}\n\n{footer(brief)}".rstrip()
+        if not to:
             issues.append("no email")
         if not brief.get("opt_out") or not brief.get("postal_address"):
             issues.append("footer incomplete")
@@ -105,7 +109,7 @@ def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any], as
         issues.append(f"over {MAX_WORDS} words")
     return {
         "step": step.get("step"), "role": step.get("role"), "channel": channel, "segment": step.get("segment"),
-        "to": field(row, "email"), "phone": field(row, "phone"), "subject": subject, "body": body,
+        "to": to, "phone": field(row, "phone"), "subject": subject, "body": body,
         "attachments": list(step.get("attachments") or []), "inline_image": step.get("inline_image") or "",
         "issues": sorted(set(issues)),
     }

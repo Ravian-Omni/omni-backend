@@ -125,6 +125,12 @@ CARDS: dict[str, dict[str, str]] = {
         "not_when": "Nothing has been sent yet.",
         "needs": "A campaign that outreach has sent.",
     },
+    "signal_play": {
+        "does": "Turns one detected buying signal into a drafted outreach: enriches the company, finds the buyer (and, for a champion who moved, their replacement) and saves a campaign_plan whose first email cites the signal. Sends nothing.",
+        "call_when": "The request starts with SIGNAL PLAY: followed by a JSON object. Plan this agent alone, as one step, and give it the request word for word.",
+        "not_when": "The request does not start with SIGNAL PLAY:.",
+        "needs": "Data Axle connected, for the company and the buyer.",
+    },
     "email_sender": {
         "does": "Sends one email from the user's connected Gmail; the recipient, subject and body come from the task. It cannot read, search or reply to email.",
         "call_when": "A one-off email to send to someone while no Gmail specialist (an mcp_*gmail agent) is listed.",
@@ -200,6 +206,12 @@ ABILITIES: dict[str, list[str]] = {
         "meeting_slots: free times to offer someone who asked to meet.",
         "hand_off: gives a reply and a drafted answer to its owner, or to the shared inbox; the owner sends.",
     ],
+    "signal_play": [
+        "business_search / contact_search (Data Axle, free): the signal's company and the buyer there, masked until enriched.",
+        "request_spend_approval, then business_enrichment / contact_enrichment (1 credit per match): the full records; asks the user first.",
+        "WebSearch: where a person who moved worked before, to find who replaced them.",
+        "save_artifact kind enriched_contacts, then kind campaign_plan: the buyer (and the refill) and a three-email sequence whose first line cites the signal; returns both artifact ids. The user approves the steps on the campaign page.",
+    ],
     "email_sender": [
         "GMAIL_SEND_EMAIL: takes the task in plain words (the recipient's email, the subject and the body) and sends one email from the user's Gmail; returns sent, or that Gmail needs connecting.",
     ],
@@ -212,7 +224,7 @@ NAMES = {"email_sender": "Email sender", "manual_verification": "User verificati
 # Agents that exist only once the user has signed in to their MCP server (Settings, Connections): until then no step
 # sees them; after, they and their server's functions reach the planner on the next task.
 NEEDS_MCP = {"ml_engineer": "newton", "campaign_strategizer": "marketwatch"}
-ORDER = list(CARDS)[:9]  # the pipeline, user_context to inbox_agent; email_sender and manual_verification have no place in it
+ORDER = list(CARDS)[:10]  # the pipeline, user_context to signal_play; email_sender and manual_verification have no place in it
 
 HEADER = """## Agents you can assign
 These cards, and the connected-app specialists listed after them, are the only agents that can be given tasks. For each part of the request, use the agent whose "Call when" matches it, and never one whose "Not when" matches. When an agent "Needs" something the chat does not have yet, plan the agent that produces it first. Use the fewest agents that cover the request, one task each, always in this order: $order. An agent of the user's own goes where its card says, otherwise right after the agents whose output it needs. When the user attached a file, the agent whose card names that kind of file and matches the request takes it; if several match, the user's own agent comes first."""

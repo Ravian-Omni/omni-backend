@@ -118,7 +118,6 @@ class DecisionCards:
         task_id: str | None = None,
         call_id: str | None = None,
         capability_id: str | None = None,
-        timeout: int = 900,
     ):
         self.ws = websocket_manager
         self.chat_id = chat_id
@@ -126,7 +125,6 @@ class DecisionCards:
         self.task_id = task_id
         self.call_id = call_id
         self.capability_id = capability_id
-        self.timeout = timeout
         self.history: list[dict[str, Any]] = []
         # Optional: async callable that writes a card record into chat history.
         self.persist = None
@@ -155,9 +153,8 @@ class DecisionCards:
                         "timestamp": dt.now_iso(),
                     },
                 },
-                timeout=self.timeout,
             )
-        except (asyncio.CancelledError, TimeoutError, ValueError):
+        except (asyncio.CancelledError, ValueError):
             await answer_decision(decision_id, {"action": "abandoned"})
             raise
         decision = parse_response(card, raw)

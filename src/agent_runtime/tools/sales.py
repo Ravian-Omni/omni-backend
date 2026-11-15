@@ -136,7 +136,8 @@ def build(ctx: ToolContext):
     @tool(
         "request_send_approval",
         "Ask the user to approve sending a batch of messages BEFORE sending. Shows the recipients, subject and body. "
-        "If approved, that many sends are allowed; declined means send nothing.",
+        "If approved, that many sends are allowed; declined means send nothing. For a campaign batch pass plan_id and "
+        "step (from render_campaign) and list the recipients in render order: the card shows the first one's exact email.",
         {
             "type": "object",
             "properties": {
@@ -146,6 +147,8 @@ def build(ctx: ToolContext):
                 "body_preview": {"type": "string", "description": "The exact body for the first recipient"},
                 "reason": {"type": "string", "description": "Which campaign step and segment this is"},
                 "draft_only": {"type": "boolean", "description": "True when creating drafts instead of sending"},
+                "plan_id": {"type": "string", "description": "For a campaign batch: the card then shows the first recipient's exact rendered email"},
+                "step": {"type": "integer", "description": "For a campaign batch: the step being sent"},
             },
             "required": ["channel", "recipients", "subject", "body_preview"],
         },
@@ -154,7 +157,25 @@ def build(ctx: ToolContext):
         recipients = [r for r in (args.get("recipients") or []) if isinstance(r, str) and r.strip()]
         if not recipients:
             return _error("No recipients given")
+        recips = frozenset(r.strip().lower() for r in recipients)
+        copy: Any = (args.get("subject", ""), args.get("body_preview", ""))
+        if args.get("plan_id"):
+            # The approver checks the card as the email itself: show the rendered one, not the agent's words about it
+            from src.agent_runtime.tools.campaign import render_plan
+
+            try:
+                ready = (await render_plan(ctx, args["plan_id"], args.get("step")))["ready"]
+            except FileNotFoundError:
+                ready = []
+            first = next((m for m in ready if m["to"].lower() == recipients[0].strip().lower()), None)
+            if first:
+                args = {**args, "subject": first["subject"], "body_preview": first["body"]}
+            copy = frozenset((m["to"].lower(), m["subject"], m["body"]) for m in ready if m["to"].lower() in recips) or copy
         tool_name = "gmail_create_draft" if args.get("draft_only") else "gmail_send_email"
+        batch = (tool_name, recips, copy)
+        if batch in ctx.send_approved:
+            # Asked again for the same batch (Outreach re-checked replies first): one card, and the approved count stays
+            return _text({"approved": True, "already_approved": True, "sends_left": ctx.send_allowance.get("*", 0), "tool": tool_name})
         decision = await ctx.decisions.confirm_send(
             tool=tool_name, server="composio", channel=args.get("channel", "email"), recipients=recipients,
             subject=args.get("subject", ""), body_preview=args.get("body_preview", ""), detail=args.get("reason", ""),
@@ -162,6 +183,7 @@ def build(ctx: ToolContext):
         if decision.approved:
             # Any send tool may deliver the approved batch (Outreach's Gmail tool or Gmail's own).
             ctx.send_allowance["*"] = ctx.send_allowance.get("*", 0) + len(recipients)
+            ctx.send_approved.add(batch)
             return _text({"approved": True, "sends_allowed": len(recipients), "tool": tool_name})
         if decision.suggestion:
             return _text({"approved": False, "user_said": decision.suggestion, "message": "The user answered with their own instruction instead of approving. Apply it and ask again; send nothing yet."})
@@ -269,6 +291,13 @@ def build(ctx: ToolContext):
 
     async def _send(slug: str, arguments: dict, args: dict, status: str) -> dict:
         """Run a send or draft; with plan_id, log it to the campaign's send log as it happens."""
+        if args.get("plan_id"):
+            from src.agent_runtime.tools.campaign import own_plan
+
+            try:
+                await own_plan(ctx, args["plan_id"])  # before anything goes out: the send log lives with the plan
+            except FileNotFoundError as e:
+                return _error(str(e))
         try:
             result = await gmail_call(ctx.user_id, slug, arguments)
         except RuntimeError as e:

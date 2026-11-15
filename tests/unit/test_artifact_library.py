@@ -1,5 +1,5 @@
 """A user's artifacts follow them: any of their chats reads one by id, another person's stay closed, and a change made
-away from the artifact's own chat is saved as a copy."""
+away from the artifact's own chat is saved as a copy. A campaign plan is sent only from its own chat."""
 
 import asyncio
 import json
@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.agent_runtime.tools import artifacts, sales
+from src.agent_runtime.tools import artifacts, campaign, sales
 from src.agent_runtime.tools.context import ToolContext
 from src.database import connection, get_artifact
 from src.routers import agents
@@ -79,6 +79,10 @@ def test_another_persons_artifact_stays_closed(chat):
     assert web.get(f"/agents/download/{leads}?format=json&user_id=bob").status_code == 404
     assert web.get(f"/agents/download/{leads}?format=json&user_id=ann").status_code == 200
     assert web.get(f"/agents/download/{leads}?format=json").status_code == 200  # no sign-in gate: a local, single-user run
+    # the composer's picker lists a person's own library only
+    mine = web.get("/agents/library?user_id=ann&search=dental").json()["artifacts"]
+    assert [(a["id"], a["chat_id"], a["from"]) for a in mine] == [(leads, "a1", "the task 'Alpha'")] and "path" not in mine[0]
+    assert web.get("/agents/library?user_id=ann&search=nothing").json() == web.get("/agents/library?user_id=bob").json() == {"artifacts": []}
 
 
 def test_a_change_from_another_chat_is_saved_as_a_copy(chat):
@@ -108,3 +112,35 @@ def test_a_campaign_keeps_its_audience_in_its_own_chat_and_a_review_saves_a_copy
     reviewed = call(beta, "review_with_user", {"artifact_id": leads}, sales)[1]
     assert reviewed["saved_as"] not in (leads, audience) and asyncio.run(get_artifact(reviewed["saved_as"]))["row_count"] == 1
     assert asyncio.run(get_artifact(leads))["row_count"] == 2
+    # a plan copied from another chat brings its audience along, and is this chat's own to send once its steps are approved again
+    theirs = save(alpha, kind="campaign_plan", title="Alpha plan", rows=[{"step": 1, "status": "approved"}], meta={"audience_artifact_id": leads})
+    copied = call(beta, "update_artifact", {"artifact_id": theirs["artifact_id"]})[1]["artifact_id"]
+    brought = call(beta, "read_artifact", {"artifact_id": copied})[1]["meta"]["audience_artifact_id"]
+    assert brought != leads and asyncio.run(get_artifact(brought))["chat_id"] == "a2"
+    assert call(beta, "render_campaign", {"plan_id": copied}, campaign)[1]["approved_steps"] == 0
+
+
+def test_a_campaign_plan_is_sent_only_from_its_own_chat(chat, monkeypatch):
+    sent = []
+
+    async def gmail_call(user_id, slug, arguments):
+        sent.append(arguments["recipient_email"])
+        return {"successful": True, "data": {"threadId": "t1"}}
+
+    monkeypatch.setattr(sales, "gmail_call", gmail_call)
+    # one folder for all three, as for runs started over MCP (they share the default folder) and two people's same-named tasks
+    home, other, bob = chat("ann", "a1", "Shared"), chat("ann", "a2", "Shared"), chat("bob", "b1", "Shared")
+    leads = save(home, rows=[{"company": "Acme", "email": "a@acme.com"}])["artifact_id"]
+    plan = save(home, kind="campaign_plan", title="Plan", rows=[{"step": 1, "status": "approved", "subject": "Hi", "body": "Hello"}],
+                meta={"audience_artifact_id": leads})["artifact_id"]
+    mail = {"to": "a@acme.com", "subject": "Hi", "body": "Hello", "plan_id": plan, "step": 1}
+    assert call(home, "render_campaign", {"plan_id": plan}, campaign)[1]["approved_steps"] == 1
+    for ctx, why in ((other, "belongs to the task 'Shared'"), (bob, "No artifact")):
+        for name, args, module in (("render_campaign", {"plan_id": plan}, campaign), ("check_replies", {"plan_id": plan}, campaign),
+                                   ("record_reply", {"plan_id": plan, "to": "a@acme.com", "intent": "interested"}, campaign),
+                                   ("gmail_send_email", mail, sales), ("gmail_create_draft", mail, sales)):
+            failed, said = call(ctx, name, args, module)
+            assert failed and why in said and "audience_artifact_id" not in said, (name, said)
+    assert sent == [] and asyncio.run(get_artifact(campaign.log_id(plan))) is None  # nothing went out and nothing was logged
+    assert not call(home, "gmail_send_email", mail, sales)[0] and sent == ["a@acme.com"]
+    assert asyncio.run(get_artifact(campaign.log_id(plan)))["chat_id"] == "a1"  # the send log stays with the plan

@@ -78,6 +78,15 @@ async def load_record(chat_id: str, artifact_id: str) -> tuple[dict[str, Any], d
         return record, json.load(f)
 
 
+async def load_owned(user_id: str, artifact_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """An artifact's record and payload by id, from any chat of the user."""
+    record = await db_get_artifact(artifact_id)
+    if not record or await chat_owner(record["chat_id"]) != user_id or not os.path.exists(record["path"]):
+        raise FileNotFoundError(f"No artifact '{artifact_id}' in your chats")
+    with open(record["path"]) as f:
+        return record, json.load(f)
+
+
 async def save_payload(record: dict[str, Any], payload: dict[str, Any]) -> None:
     """Rewrite an artifact in place (a user edit from the Console)."""
     payload["row_count"] = record["row_count"] = len(payload.get("rows", []))
@@ -149,13 +158,28 @@ async def rewrite(ctx: ToolContext, payload: dict[str, Any], origin: str, rows: 
     meta = payload.get("meta") or {}
     if origin:
         meta = {**meta, "copied_from": payload["id"], "rev": 0}
-        ctx.data_sources.update(meta.get("data_sources", []))  # the copy still credits where its rows came from
         if payload["kind"] == "campaign_plan":  # an approval does not travel: the user approves the copy's steps again
             rows = [{**r, "status": "draft"} if r.get("status") == "approved" else r for r in rows]
+            meta, _ = await _audience_here(ctx, meta)
+        ctx.data_sources.update(meta.get("data_sources", []))  # the copy still credits where its rows came from
     return await write(
         ctx, payload["kind"], title or payload["title"], rows, payload.get("columns"), payload.get("source", ""),
         artifact_id=None if origin else payload["id"], meta=meta,
     )
+
+
+async def _audience_here(ctx: ToolContext, meta: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """A campaign plan's meta with its audience in this chat, and where that audience was copied from ("" when nothing was copied).
+
+    The campaign page reads the audience from the plan's own chat."""
+    try:
+        audience, origin = await find(ctx, meta.get("audience_artifact_id") or "")
+    except FileNotFoundError:
+        return meta, ""  # render_campaign reports a missing audience, as before
+    if not origin or audience["kind"] == "campaign_plan":  # a plan named as an audience is not followed: plans could name each other
+        return meta, ""
+    copy = await rewrite(ctx, audience, origin, audience["rows"])
+    return {**meta, "audience_artifact_id": copy["id"]}, origin
 
 
 def _text(payload: Any) -> dict:
@@ -195,15 +219,10 @@ def build(ctx: ToolContext):
         meta, copied = args.get("meta"), {}
         audience_id = (meta or {}).get("audience_artifact_id") if args["kind"] == "campaign_plan" else None
         if audience_id:
-            try:
-                audience, origin = await find(ctx, audience_id)
-            except FileNotFoundError:
-                origin = ""  # render_campaign reports a missing audience, as before
+            meta, origin = await _audience_here(ctx, meta)
             if origin:
-                # The campaign page and the send tools read the audience from the plan's own chat
-                copy = await rewrite(ctx, audience, origin, audience["rows"])
-                meta = {**meta, "audience_artifact_id": copy["id"]}
-                copied = {"audience_artifact_id": copy["id"], "note": f"The audience `{audience_id}` is from {origin}: it was copied into this chat as `{copy['id']}` and the plan points at the copy."}
+                copy_id = meta["audience_artifact_id"]
+                copied = {"audience_artifact_id": copy_id, "note": f"The audience `{audience_id}` is from {origin}: it was copied into this chat as `{copy_id}` and the plan points at the copy."}
         record = await write(ctx, args["kind"], args["title"], rows, args.get("columns"), args.get("source", ""), meta=meta)
         return _text({"artifact_id": record["id"], "row_count": record["row_count"], "path": record["path"], **copied})
 

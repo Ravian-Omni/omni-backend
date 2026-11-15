@@ -213,4 +213,5 @@ class ChatRepository:
             "feedback": json.loads(row[9]),
             "created_at": row[10],
             "updated_at": row[11],
+            "title": row["title"],
         }
