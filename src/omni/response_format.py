@@ -84,6 +84,8 @@ class Capability(str, Enum):
     INBOX_AGENT = "inbox_agent"
     ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
     SIGNAL_PLAY = "signal_play"
+    MEETING_PREP = "meeting_prep"
+    RECOVERY_NOTE = "recovery_note"
     EMAIL_SENDER = "email_sender"
     MANUAL_VERIFICATION = "manual_verification"
 
@@ -295,6 +297,8 @@ class Capability(str, Enum):
     INBOX_AGENT = "inbox_agent"
     ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
     SIGNAL_PLAY = "signal_play"
+    MEETING_PREP = "meeting_prep"
+    RECOVERY_NOTE = "recovery_note"
     EMAIL_SENDER = "email_sender"
 
 

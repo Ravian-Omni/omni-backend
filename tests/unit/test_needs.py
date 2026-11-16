@@ -36,6 +36,7 @@ def thread(chat_id="chat-1", agenda_id="agd_1"):
     t = object.__new__(hm.HandsThread)
     t.chat_id, t.queue, t.ask_text, t.plan = chat_id, asyncio.Queue(), "", []
     t.agenda_id, t.polling, t.last_poll = agenda_id, 0, time.monotonic()
+    t.lead_target, t.rounds, t.seen, t.started_at = 0, 0, 0, "2000-01-01T00:00:00+00:00"
     t.pending, t.ready, t.notes, t.say, t.task = False, False, {}, AsyncMock(), SimpleNamespace(done=lambda: False)
     return t
 
@@ -84,7 +85,7 @@ def test_start_run_stores_the_agenda_on_the_chat_and_a_continued_chat_keeps_it(t
         return SimpleNamespace(get_chat=AsyncMock(return_value={"chat_id": "old"}))
 
     async def manager():
-        return SimpleNamespace(is_running=lambda _chat: False)
+        return SimpleNamespace(is_running=lambda _chat: False, running_chats=lambda: [])
 
     monkeypatch.setattr(hm, "_threads", {})
     monkeypatch.setattr(hm, "HandsThread", Thread)

@@ -79,3 +79,26 @@ def test_user_thresholds_change_the_route():
     read = {"intent": "question", "intents": {"question": 0.9}, "intent_confidence": 0.9, "needs_human": 0.6}
     assert jev.route(read, RULES) == "answer"
     assert jev.route(read, {**RULES, "handoff": 0.5}) == "handoff"
+
+
+def test_an_openrouter_key_reads_the_reply_through_openrouter_with_the_same_reading(monkeypatch):
+    monkeypatch.setattr(jev.settings, "JEV_API_KEY", "sk-or-v1-test", raising=False)
+    said = {"intent": {"choice": "objection", "probabilities": {"objection": 0.8, "question": 0.15, "other": 0.05}},
+            "needs_human": 0.3, "urgency": 1, "buying_signal": 2, "competitor": 0.9, "meeting_ok": 0.05}
+    urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append((str(request.url), json.loads(request.content)["model"]))
+        return httpx.Response(200, json={"model": "typesafe/jev-router", "choices": [{"message": {"content": "```json\n" + json.dumps(said) + "\n```"}}]})
+
+    read = asyncio.run(jev.read_reply("we use other services, why should we go with you?", client=httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+    assert urls == [("https://openrouter.ai/api/v1/chat/completions", "typesafe/jev-router")]
+    assert (read["intent"], read["intent_confidence"], read["competitor"], read["urgency"], read["buying_signal"]) == ("objection", 0.8, 0.9, 0.333, 0.667)
+    assert jev.route(read, RULES) == "answer"
+
+
+def test_an_openrouter_answer_without_json_is_an_error_not_a_guess(monkeypatch):
+    monkeypatch.setattr(jev.settings, "JEV_API_KEY", "sk-or-v1-test", raising=False)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"choices": []})))
+    with pytest.raises(jev.JevError):
+        asyncio.run(jev.ask({"reply": "hi"}, jev.QUESTIONS, client=client))

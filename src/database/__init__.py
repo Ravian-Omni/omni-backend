@@ -435,6 +435,198 @@ async def answer_decision(decision_id: int, response: Any) -> None:
     await db.commit()
 
 
+async def save_link(link: dict) -> None:
+    db = await get_db()
+    await db.execute("INSERT INTO tracked_links (token, url, recipient, plan_id, step, subject, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (link["token"], link["url"], link["recipient"], link.get("plan_id") or "", link.get("step"), link.get("subject") or "", dt.now_iso()))
+    await db.commit()
+
+
+async def get_link(token: str) -> dict | None:
+    cursor = await (await get_db()).execute("SELECT token, url, recipient, plan_id, step, subject FROM tracked_links WHERE token = ?", (token,))
+    row = await cursor.fetchone()
+    return dict(zip(("token", "url", "recipient", "plan_id", "step", "subject"), row)) if row else None
+
+
+async def record_click(token: str) -> int:
+    """One click on a tracked link; returns its number."""
+    db = await get_db()
+    cursor = await db.execute("INSERT INTO link_clicks (token, clicked_at) VALUES (?, ?)", (token, dt.now_iso()))
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def mark_run(chat_id: str, task: str, files: list | None) -> None:
+    """A run began on this chat in this process. A run that resumes keeps the request it began with."""
+    db = await get_db()
+    await db.execute("INSERT INTO active_runs (chat_id, owner_pid, task, files, started_at) VALUES (?, ?, ?, ?, ?) "
+                     "ON CONFLICT (chat_id) DO UPDATE SET owner_pid = excluded.owner_pid",
+                     (chat_id, os.getpid(), task, json.dumps(files or []), dt.now_iso()))
+    await db.commit()
+
+
+async def unmark_run(chat_id: str) -> None:
+    """The run ended (finished, failed or was stopped by someone): nothing to resume."""
+    db = await get_db()
+    await db.execute("DELETE FROM active_runs WHERE chat_id = ?", (chat_id,))
+    await db.commit()
+
+
+async def list_marked_runs() -> list[dict]:
+    cursor = await (await get_db()).execute("SELECT chat_id, owner_pid, task, files, resumes FROM active_runs ORDER BY started_at")
+    return [{"chat_id": r[0], "owner_pid": r[1], "task": r[2], "files": json.loads(r[3]), "resumes": r[4]} for r in await cursor.fetchall()]
+
+
+async def count_resume(chat_id: str) -> None:
+    db = await get_db()
+    await db.execute("UPDATE active_runs SET resumes = resumes + 1 WHERE chat_id = ?", (chat_id,))
+    await db.commit()
+
+
+async def chat_of_agenda(user_id: str, agenda_id: str) -> str | None:
+    """The chat a goal (agenda) already has, newest if several: a goal has one chat."""
+    cursor = await (await get_db()).execute(
+        "SELECT substr(key, 8) FROM user_prefs WHERE user_id = ? AND key LIKE 'agenda:%' AND value = ? "
+        "AND substr(key, 8) IN (SELECT chat_id FROM chats WHERE collection = 'omni') ORDER BY updated_at DESC LIMIT 1",
+        (user_id, json.dumps(agenda_id)))
+    row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+_RUN_COLUMNS = ("id", "chat_id", "key", "task", "files", "lead_target", "credit_budget")
+
+
+async def enqueue_run(run: dict) -> int:
+    """Queue a run behind the ones before it; returns its place (1 = next to start)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "INSERT INTO run_queue (chat_id, run_key, task, files, lead_target, credit_budget, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (run["chat_id"], run["key"], run["task"], json.dumps(run["files"]), run["lead_target"], run["credit_budget"], dt.now_iso()))
+    await db.commit()
+    return (await (await db.execute("SELECT count(*) FROM run_queue WHERE id <= ?", (cursor.lastrowid,))).fetchone())[0]
+
+
+async def list_queued_runs() -> list[dict]:
+    """The queued runs, oldest first."""
+    cursor = await (await get_db()).execute("SELECT id, chat_id, run_key, task, files, lead_target, credit_budget FROM run_queue ORDER BY id")
+    return [{**dict(zip(_RUN_COLUMNS, r)), "files": json.loads(r[4])} for r in await cursor.fetchall()]
+
+
+async def pop_queued_run(run_id: int) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM run_queue WHERE id = ?", (run_id,))
+    await db.commit()
+
+
+async def queued_run(key: str) -> dict | None:
+    """A queued run by its key, with its place in the queue (1 = next)."""
+    for place, run in enumerate(await list_queued_runs(), 1):
+        if run["key"] == key:
+            return {**run, "position": place}
+    return None
+
+
+async def chat_agenda(chat_id: str) -> str:
+    """The goal (agenda) a chat belongs to, or ""."""
+    cursor = await (await get_db()).execute("SELECT value FROM user_prefs WHERE key = ? LIMIT 1", (f"agenda:{chat_id}",))
+    row = await cursor.fetchone()
+    return (json.loads(row[0]) if row else "") or ""
+
+
+async def budget_scope(chat_id: str) -> str:
+    """What a chat's spend budget is kept under: its agenda, else the chat itself."""
+    return await chat_agenda(chat_id) or chat_id
+
+
+async def set_budget(chat_id: str, credits: float) -> None:
+    """Set what the chat's goal may spend without asking (the caller's figure for what is left)."""
+    db = await get_db()
+    await db.execute("INSERT INTO budgets (scope, credits_left, updated_at) VALUES (?, ?, ?) "
+                     "ON CONFLICT (scope) DO UPDATE SET credits_left = excluded.credits_left, updated_at = excluded.updated_at",
+                     (await budget_scope(chat_id), credits, dt.now_iso()))
+    await db.commit()
+
+
+async def budget_left(chat_id: str) -> float | None:
+    """Credits the chat's goal may still spend without asking; None when it has no budget."""
+    cursor = await (await get_db()).execute("SELECT credits_left FROM budgets WHERE scope = ?", (await budget_scope(chat_id),))
+    row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def spend_budget(chat_id: str, credits: float) -> float | None:
+    """Take credits from the goal's budget if that much is left; returns what is left after, None when nothing was taken."""
+    db = await get_db()
+    taken = await db.execute("UPDATE budgets SET credits_left = credits_left - ?, updated_at = ? WHERE scope = ? AND credits_left >= ?",
+                             (credits, dt.now_iso(), await budget_scope(chat_id), credits))  # one statement: two spends cannot both fit
+    await db.commit()
+    return await budget_left(chat_id) if taken.rowcount else None
+
+
+async def run_started(chat_id: str) -> str:
+    """When the chat's run in progress began ("" when none is marked)."""
+    cursor = await (await get_db()).execute("SELECT started_at FROM active_runs WHERE chat_id = ?", (chat_id,))
+    row = await cursor.fetchone()
+    return row[0] if row else ""
+
+
+async def record_data_spend(chat_id: str, endpoint: str, usd: float, call_id: str = "", email: str = "", email_status: str = "") -> None:
+    """One paid call to an outside data source, with the email it checked and the word it gave for it."""
+    db = await get_db()
+    await db.execute("INSERT INTO data_spend (chat_id, at, endpoint, usd, call_id, email, email_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (chat_id, dt.now_iso(), endpoint, usd, call_id, email.strip().lower(), email_status))
+    await db.commit()
+
+
+async def data_spent(chat_id: str, since: str) -> float:
+    """Dollars paid to outside data sources by the chat since `since` (an ISO time)."""
+    cursor = await (await get_db()).execute("SELECT COALESCE(SUM(usd), 0) FROM data_spend WHERE chat_id = ? AND at >= ?", (chat_id, since))
+    return (await cursor.fetchone())[0]
+
+
+async def checked_emails(chat_id: str) -> dict[str, str]:
+    """What an outside source said of each email it checked for the chat (the latest word per address)."""
+    cursor = await (await get_db()).execute("SELECT email, email_status FROM data_spend WHERE chat_id = ? AND email != '' ORDER BY id", (chat_id,))
+    return dict(await cursor.fetchall())
+
+
+async def note_source_emails(chat_id: str, server: str, emails: set[str]) -> None:
+    db = await get_db()
+    await db.executemany("INSERT OR IGNORE INTO source_emails (chat_id, email, server, seen_at) VALUES (?, ?, ?, ?)",
+                         [(chat_id, e.lower(), server, dt.now_iso()) for e in emails])
+    await db.commit()
+
+
+async def source_emails(chat_id: str) -> set[str]:
+    """The addresses a data source's own answers held in this chat."""
+    cursor = await (await get_db()).execute("SELECT email FROM source_emails WHERE chat_id = ?", (chat_id,))
+    return {r[0] for r in await cursor.fetchall()}
+
+
+async def was_pushed(notice_id: str) -> bool:
+    cursor = await (await get_db()).execute("SELECT 1 FROM pushed_notices WHERE id = ?", (notice_id,))
+    return await cursor.fetchone() is not None
+
+
+async def mark_pushed(notice_id: str) -> None:
+    db = await get_db()
+    await db.execute("INSERT OR IGNORE INTO pushed_notices (id, pushed_at) VALUES (?, ?)", (notice_id, dt.now_iso()))
+    await db.commit()
+
+
+async def suppress_email(user_id: str, email: str, reason: str) -> None:
+    """No campaign of this user writes to this address again."""
+    db = await get_db()
+    await db.execute("INSERT OR IGNORE INTO suppressions (user_id, email, reason, created_at) VALUES (?, ?, ?, ?)",
+                     (user_id, email.strip().lower(), reason, dt.now_iso()))
+    await db.commit()
+
+
+async def list_suppressed(user_id: str) -> set[str]:
+    cursor = await (await get_db()).execute("SELECT email FROM suppressions WHERE user_id = ?", (user_id,))
+    return {r[0] for r in await cursor.fetchall()}
+
+
 async def list_open_decisions() -> list[dict]:
     """The cards shown and not answered yet, oldest first, with the process that shows each (None: made before that was recorded)."""
     cursor = await (await get_db()).execute(
@@ -647,24 +839,41 @@ async def get_chat_title(chat_id: str) -> str | None:
     return row[0] if row else None
 
 
-async def set_chat_title(chat_id: str, title: str) -> bool:
-    """Name the chat unless it already has a title; True when this call wrote it."""
+async def get_title_state(chat_id: str) -> tuple[str | None, str | None, str | None]:
+    """(title, who set it, what it was made from) of a chat; who is "user" for a name a person gave, else a generated one."""
+    cursor = await (await get_db()).execute("SELECT title, title_by, title_basis FROM chats WHERE chat_id = ? AND collection IN ('omni', 'chats')", (chat_id,))
+    row = await cursor.fetchone()
+    return (row[0], row[1], row[2]) if row else (None, None, None)
+
+
+async def set_chat_title(chat_id: str, title: str, by: str = "auto", basis: str | None = None) -> bool:
+    """Name the chat; True when written. A generated name (by "auto") never replaces one a person gave ("user")."""
     db = await get_db()
-    cursor = await db.execute("UPDATE chats SET title = ? WHERE chat_id = ? AND collection IN ('omni', 'chats') AND title IS NULL", (title, chat_id))
+    cursor = await db.execute(
+        "UPDATE chats SET title = ?, title_by = ?, title_basis = ? WHERE chat_id = ? AND collection IN ('omni', 'chats') "
+        "AND (? = 'user' OR COALESCE(title_by, '') != 'user')", (title, by, basis, chat_id, by))
     await db.commit()
     return cursor.rowcount > 0
+
+
+async def list_untitled_chats() -> list[str]:
+    """Task chats with something in them and no title, newest first."""
+    cursor = await (await get_db()).execute(
+        "SELECT chat_id FROM chats WHERE collection = 'omni' AND title IS NULL AND length(raw_messages) > 2 "
+        "AND chat_id NOT IN (SELECT chat_id FROM hidden_chats) ORDER BY updated_at DESC")
+    return [r[0] for r in await cursor.fetchall()]
 
 
 async def list_conversations(user_id: str) -> list[dict]:
     """Every task and chat-mode conversation with something in it, newest first (the sidebar's source of truth)."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT chat_id, collection, chat_dir, created_at, updated_at, title FROM chats "
+        "SELECT chat_id, collection, chat_dir, created_at, updated_at, title, title_by FROM chats "
         "WHERE user_id = ? AND collection IN ('omni', 'chats') AND length(raw_messages) > 2 "
         "AND chat_id NOT IN (SELECT chat_id FROM hidden_chats)",
         (user_id,),
     )
-    rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at", "title"), r)) for r in await cursor.fetchall()]
+    rows = [dict(zip(("chat_id", "collection", "chat_dir", "created_at", "updated_at", "title", "title_by"), r)) for r in await cursor.fetchall()]
     # tasks an AI started over the MCP (hands_mcp.start_run saves who)
     cursor = await db.execute("SELECT key, value FROM user_prefs WHERE user_id = ? AND key LIKE 'run_by:%'", (user_id,))
     run_by = {key.removeprefix("run_by:"): json.loads(value) for key, value in await cursor.fetchall()}
@@ -937,7 +1146,10 @@ __all__ = [
     "reset_chat_repository",
     "update_chat_history",
     "get_chat_title",
+    "get_title_state",
     "set_chat_title",
+    "list_untitled_chats",
+    "chat_agenda",
     "update_chat_history_by_context",
     "create_capability_chat",
     "ChatRepository",
@@ -957,6 +1169,32 @@ __all__ = [
     "answer_decision",
     "list_decisions",
     "list_open_decisions",
+    "run_started",
+    "record_data_spend",
+    "data_spent",
+    "checked_emails",
+    "note_source_emails",
+    "source_emails",
+    "was_pushed",
+    "mark_pushed",
+    "suppress_email",
+    "budget_scope",
+    "chat_of_agenda",
+    "save_link",
+    "get_link",
+    "record_click",
+    "mark_run",
+    "unmark_run",
+    "list_marked_runs",
+    "count_resume",
+    "enqueue_run",
+    "list_queued_runs",
+    "pop_queued_run",
+    "queued_run",
+    "set_budget",
+    "budget_left",
+    "spend_budget",
+    "list_suppressed",
     "save_artifact",
     "list_artifacts",
     "get_artifact",

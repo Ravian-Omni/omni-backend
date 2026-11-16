@@ -20,7 +20,8 @@
           "lead_finder",
           "buyer_finder",
           "contact_enricher",
-          "signal_play"
+          "signal_play",
+          "meeting_prep"
         ]
       }
     },
@@ -56,6 +57,29 @@
           "chat"
         ],
         "planner_note": "Reached through the persona user_context, never called directly in a plan step. Add a user_context task first when the request depends on who the user is, their past work, people, decisions or notes (\"what did I decide about...\", \"based on my notes\", \"like last time\"), or when the user asks to remember or forget something. The chat assistant reaches it directly.\n"
+      }
+    },
+    "treg": {
+      "url": "https://treg.to/mcp/",
+      "daxagent": {
+        "display_name": "treg",
+        "description": "Outside data, paid per call and capped per run: people at a company by title, and a work email found and checked in one call. Needs TREG_TOKEN in the environment.",
+        "auth": "bearer",
+        "token_env": "TREG_TOKEN",
+        "guarded": true,
+        "personas": [
+          "signal_play",
+          "contact_enricher"
+        ],
+        "specialist": false,
+        "modes": [
+          "task"
+        ],
+        "max_call_usd": 0.05,
+        "endpoints": {
+          "people_search": "treg.people.search",
+          "email_find": "treg.people.email.find"
+        }
       }
     }
   }

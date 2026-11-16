@@ -106,11 +106,13 @@ def test_the_send_card_shows_the_first_recipients_email_signed_once(env):
     brief = {"sender_name": "Lokesh Kumar", "postal_address": "Senapati Bapat Rd, Pune 411016", "opt_out": "Reply stop to opt out."}
     signed = "Hi there,\n\nShort note.\n\nLokesh Kumar\nSenapati Bapat Rd,  Pune 411016\nReply stop to opt out."
     rows = [{"segment": "Pereira", "step": 1, "channel": "email", "status": "approved", "subject": "A competitor read", "body": signed,
-             "recipient_email": "newbiz@pereiraodell.com"},
+             "recipient_email": "ana@pereiraodell.com"},
             {"segment": "Liquid", "step": 1, "channel": "email", "status": "approved", "subject": "For Liquid", "body": "Hi,\n\nNote.",
-             "recipient_email": "hello@liquidagency.com"}]
+             "recipient_email": "bo@liquidagency.com"}]
     (env / "campaign_plan-p1.json").write_text(json.dumps({"rows": rows, "meta": {"audience_artifact_id": "buyer_map-a1", "segment_field": "company", "brief": brief}}))
-    (env / "buyer_map-a1.json").write_text(json.dumps({"rows": [{"company": "Pereira"}, {"company": "Liquid"}]}))
+    (env / "buyer_map-a1.json").write_text(json.dumps({"rows": [  # leads: a named person, their own verified business email
+        {"company": "Pereira", "first_name": "Ana", "last_name": "Pereira", "email": "ana@pereiraodell.com", "email_status": "verified"},
+        {"company": "Liquid", "first_name": "Bo", "last_name": "Liquid", "email": "bo@liquidagency.com", "email_verified": True}]}))
     cards = []
 
     class Cards:
@@ -121,15 +123,15 @@ def test_the_send_card_shows_the_first_recipients_email_signed_once(env):
     ctx = SimpleNamespace(chat_id="chat-1", artifacts_dir=str(env), decisions=Cards(), send_allowance={}, send_approved=set(),
                           user_id="u", persona="outreach", task_id=None, emit=None)
     ready = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p1", 1))["ready"]
-    assert next(m for m in ready if m["to"] == "newbiz@pereiraodell.com")["body"] == signed  # its own sign-off, no second footer
-    liquid = next(m for m in ready if m["to"] == "hello@liquidagency.com")["body"]
+    assert next(m for m in ready if m["to"] == "ana@pereiraodell.com")["body"] == signed  # its own sign-off, no second footer
+    liquid = next(m for m in ready if m["to"] == "bo@liquidagency.com")["body"]
     assert liquid.startswith("Hi,\n\nNote.\n\nLokesh Kumar") and liquid.count("Reply stop to opt out.") == 1
     ask = next(t for t in sales.build(ctx) if t.name == "request_send_approval").handler
-    asyncio.run(ask({"channel": "email", "recipients": ["hello@liquidagency.com", "newbiz@pereiraodell.com"], "subject": "Step 1: subjects vary",
+    asyncio.run(ask({"channel": "email", "recipients": ["bo@liquidagency.com", "ana@pereiraodell.com"], "subject": "Step 1: subjects vary",
                      "body_preview": "Exact rendered bodies are recipient-specific", "plan_id": "campaign_plan-p1", "step": 1}))
     assert (cards[0]["subject"], cards[0]["body_preview"]) == ("For Liquid", liquid) and ctx.send_allowance["*"] == 2
     # Outreach asked again for the same batch (chat e6579adb): no second card, and still 2 sends, not 4
-    again = json.loads(asyncio.run(ask({"channel": "Gmail", "recipients": ["newbiz@pereiraodell.com", "hello@liquidagency.com"], "subject": "x",
+    again = json.loads(asyncio.run(ask({"channel": "Gmail", "recipients": ["ana@pereiraodell.com", "bo@liquidagency.com"], "subject": "x",
                                         "body_preview": "x", "plan_id": "campaign_plan-p1", "step": 1}))["content"][0]["text"])
     assert again["already_approved"] and len(cards) == 1 and ctx.send_allowance["*"] == 2
     asyncio.run(ask({"channel": "email", "recipients": ["a@x.com"], "subject": "Hi", "body_preview": "Hello"}))

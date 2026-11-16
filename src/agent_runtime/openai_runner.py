@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from src.agent_runtime import prefs
+from src.agent_runtime import leads, prefs
 from src.agent_runtime.tools import all_tools, build_server, files, full_name
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
@@ -132,7 +132,9 @@ class OpenAIRunner:
 
                 async def _call(args: dict, _server=server, _tool=t["name"]) -> str:
                     s.tool_context.data_sources.add(_server)
-                    return await call_tool(_server, _tool, args)
+                    text = await call_tool(_server, _tool, args)
+                    await leads.note_source(s.tool_context.chat_id, _server, text)  # Data Axle's own emails get the in-house check
+                    return text
 
                 self.tools[name] = ToolDef(name, fname, t.get("description") or "", t.get("input_schema") or {}, _call)
         return notes

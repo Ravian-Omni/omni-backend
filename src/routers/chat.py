@@ -11,6 +11,7 @@ import os
 import re
 
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile, status
+from pydantic import BaseModel, Field
 
 from src.configs.settings import settings
 from src.schemas.chat import (
@@ -128,16 +129,39 @@ async def create_capability_chat(
         )
 
 
+GENERIC_FOLDERS = ("daxagent", "daxagent-chats")  # the folders every plain chat shares: no one chose them as a name
+
+
+def _names(c: dict) -> dict:
+    """What the sidebar calls a conversation: a name a person gave it, else its task folder's name, else a generated title (which
+    also replaces a shared folder's name). auto_name: the name is generated, so it may change as the work does."""
+    folder = os.path.basename(str(c["chat_dir"] or "").rstrip("/")) if c["collection"] == "omni" else ""
+    titled = bool(c["title"]) and (c["title_by"] == "user" or folder in ("", *GENERIC_FOLDERS))
+    return {"name": c["title"] if titled else folder or c["title"] or "", "auto_name": titled and c["title_by"] != "user"}
+
+
+class ChatTitle(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+@router.put("/{chat_id}/title")
+async def rename_chat(chat_id: str, body: ChatTitle) -> dict:
+    """A person names the chat: it keeps that name, whatever the work does after."""
+    from src.database import set_chat_title
+
+    if not body.title.strip() or not await set_chat_title(chat_id, body.title.strip(), "user"):
+        raise HTTPException(status_code=404, detail="No such chat")
+    return {"chat_id": chat_id, "title": body.title.strip()}
+
+
 @router.get("/conversations")
 async def conversations(user_id: str = "local_user") -> dict:
     """Every stored task and chat, newest first: what the sidebar can restore when the browser lost its list."""
-    import os
-
     from src.database import list_conversations
 
     return {"conversations": [
         {"chat_id": c["chat_id"], "type": "task" if c["collection"] == "omni" else "chat",
-         "name": (os.path.basename(str(c["chat_dir"] or "").rstrip("/")) if c["collection"] == "omni" else "") or c["title"] or "",
+         **_names(c),
          "folder": c["chat_dir"] or "", "created_at": str(c["created_at"]).replace(" ", "T"), "updated_at": str(c["updated_at"]).replace(" ", "T"),
          "run_by": c["run_by"]}
         for c in await list_conversations(user_id)

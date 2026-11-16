@@ -31,6 +31,8 @@ from src.agent_runtime.prompts import (
     ML_ENGINEER_DESCRIPTION,
     OUTREACH_DESCRIPTION,
     SIGNAL_PLAY_DESCRIPTION,
+    MEETING_PREP_DESCRIPTION,
+    RECOVERY_NOTE_DESCRIPTION,
     USER_CONTEXT_DESCRIPTION,
 )
 from src.omni.capabilities_descriptions import (
@@ -204,6 +206,11 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         for name, content in (("chat_manager", message), ("conversation_agent", reason)):
             await self._process_message_async({"role": "user", "name": name, "content": content, "raw_message": content,
                                                "usage": {}, "task_id": self.task_id})
+
+    async def conclude(self, answer: str) -> None:
+        """End a run that did its work with this answer, shown and stored as its summary."""
+        await self._process_message_async({"role": "user", "name": "conversation_agent", "content": answer, "raw_message": answer,
+                                           "usage": {}, "task_id": self.task_id})
 
     def _print_received_message(
         self, message: dict[str, Any], sender: "autogen.Agent"
@@ -967,6 +974,8 @@ class Omni:
             "outreach": OUTREACH_DESCRIPTION,
             "inbox_agent": INBOX_AGENT_DESCRIPTION,
             "signal_play": SIGNAL_PLAY_DESCRIPTION,
+            "meeting_prep": MEETING_PREP_DESCRIPTION,
+            "recovery_note": RECOVERY_NOTE_DESCRIPTION,
         }
 
         def _make_persona_wrapper(persona_name: str):
@@ -1306,8 +1315,8 @@ class Omni:
             except Exception as e:
                 logger.error(f"Error parsing planner_agent message: {e}")
 
-            if last_speaker.name == "chat_manager" and signal_play.is_signal(self._request_text(messages[-1].get("content"))):
-                return groupchat.agent_by_name("planner_agent")  # a signal play arrives complete: nothing to judge or ask
+            if last_speaker.name == "chat_manager" and signal_play.is_goal(self._request_text(messages[-1].get("content"))):
+                return groupchat.agent_by_name("planner_agent")  # a goal from Brain_Hands arrives complete: nothing to judge or ask
             if len(messages) == 1:
                 # judge a question and understand if the question is a task or  general conversation
                 return groupchat.agent_by_name("judge_question")

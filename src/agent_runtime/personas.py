@@ -192,6 +192,27 @@ _register(Persona(
 ))
 
 _register(Persona(
+    name="meeting_prep",
+    display_name="Meeting Prep",
+    tagline="Gets you ready for a booked meeting: the person, the company and the thread so far",
+    description=prompts.MEETING_PREP_DESCRIPTION,
+    system_prompt=prompts.MEETING_PREP,
+    builtin_tools=["Read"],
+    daxagent_tools=["calendar_events", "gmail_search_emails", "request_spend_approval", *COMMON_TOOLS],  # no send tools
+    remote_mcp=True,  # Data Axle (its server config names this persona)
+))
+
+_register(Persona(
+    name="recovery_note",
+    display_name="Recovery Note",
+    tagline="Drafts one short note to restart a conversation that went quiet",
+    description=prompts.RECOVERY_NOTE_DESCRIPTION,
+    system_prompt=prompts.RECOVERY_NOTE,
+    builtin_tools=["Read"],
+    daxagent_tools=["gmail_search_emails", *COMMON_TOOLS],  # the note is saved as an artifact; nothing is sent or drafted in Gmail
+))
+
+_register(Persona(
     name="assistant",
     display_name="DAXAGENT",
     tagline="Chat mode: answers and acts with every connected tool",
@@ -207,7 +228,7 @@ _register(Persona(
     max_turns=30,
 ))
 
-SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach", "inbox_agent", "signal_play"]
+SALES_PERSONAS = ["lead_finder", "buyer_finder", "contact_enricher", "campaign_strategizer", "campaign_builder", "outreach", "inbox_agent", "signal_play", "meeting_prep", "recovery_note"]
 
 
 # The values a persona prompt is filled with when its session starts (PersonaSession._system_prompt).

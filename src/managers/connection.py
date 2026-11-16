@@ -22,6 +22,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from src.configs.datetime_utils import dt
 from src.configs.llm_configs_manager import LLMConfigManager
 from src.managers.cancellation_token import CancellationToken
+from src.database import mark_run, run_started, unmark_run
 from src.omni import signal_play
 from src.utilities.async_errors import (
     AsyncErrorCode,
@@ -105,7 +106,8 @@ class WebSocketManager:
                     self._watchers.setdefault(session_id, []).append(old)
                 self._connections[session_id] = websocket
                 self._closed_connections.discard(session_id)
-                self._input_responses[session_id] = asyncio.Queue()
+                if not self.is_running(session_id) or session_id not in self._input_responses:
+                    self._input_responses[session_id] = asyncio.Queue()  # a page returning to a run keeps the queue its question waits on
 
             async with self._flags_lock:
                 self._stop_flags[session_id] = False
@@ -199,7 +201,7 @@ class WebSocketManager:
             chat._set_cancellation_token(
                 self._cancellation_tokens.get(session_id, None)
             )
-            asyncio.create_task(self._name_chat(session_id, initial_message.get("task")))
+            asyncio.create_task(self._retitle(session_id, "request", initial_message.get("task")))
             task = asyncio.create_task(
                 chat.manager.a_initiate_chat(
                     chat.manager,
@@ -275,11 +277,11 @@ class WebSocketManager:
             async with self._flags_lock:
                 self._stop_flags.pop(session_id, None)
 
-    async def _name_chat(self, session_id: str, request: str) -> None:
-        """Title a chat from its first message and tell the page (the sidebar shows it)."""
+    async def _retitle(self, session_id: str, moment: str, text: str = "") -> None:
+        """Rename the chat to follow its work at one of its moments (a run starts, its plan is approved, it completes) and tell the page."""
         from src.services import chat_title
 
-        if title := await chat_title.name_chat(session_id, request or ""):
+        if title := await chat_title.retitle(session_id, moment, text or ""):
             await self._send_message(session_id, {"type": "chat_title", "title": title, "timestamp": dt.now_iso()})
 
     async def start_chat_stream(
@@ -348,10 +350,12 @@ class WebSocketManager:
             omni.set_task_id(str(uuid.uuid4()))
             await omni.refresh_user_context()
             request, reason = initial_message.get("task"), ""
-            if signal_play.is_signal(request) and hasattr(omni.manager, "refuse"):  # only the orchestrator takes signal plays
+            if signal_play.is_goal(request) and hasattr(omni.manager, "refuse"):  # only the orchestrator takes Brain_Hands' goals
                 request, reason = signal_play.prepare(request)
             message = str({"task": request, "files": initial_message.get("files")})
-            asyncio.create_task(self._name_chat(session_id, request))
+            await mark_run(session_id, str(request), initial_message.get("files"))
+            started = await run_started(session_id)
+            asyncio.create_task(self._retitle(session_id, "request", request))
             task = asyncio.create_task(
                 omni.manager.refuse(message, reason)
                 if reason
@@ -363,6 +367,7 @@ class WebSocketManager:
 
             # Wait for completion or cancellation
             await task
+            await unmark_run(session_id)  # it ended; a cut-short run (the process died) never gets here
 
             # Thread-safe status check
             async with self._flags_lock:
@@ -372,6 +377,9 @@ class WebSocketManager:
                 is_closed = session_id in self._closed_connections
 
             if not is_stopped and not is_closed:
+                if not reason and signal_play.is_signal(request) and (rejected := await signal_play.unmet(session_id, started)):
+                    await omni.manager.conclude(rejected)  # people were found and none can be written to: the play ends there
+                asyncio.create_task(self._retitle(session_id, "done"))
                 await self._send_message(
                     session_id,
                     {
@@ -410,6 +418,7 @@ class WebSocketManager:
                 },
             )
         except Exception as e:
+            await unmark_run(session_id)  # a run that failed is not resumed
             error = create_error(
                 AsyncErrorCode.TASK_EXECUTION_FAILED,
                 "start_chat_stream",
@@ -429,6 +438,15 @@ class WebSocketManager:
                 self._active_tasks.pop(session_id, None)
             async with self._flags_lock:
                 self._stop_flags.pop(session_id, None)
+            if session_id not in self._connections:  # the page left while it ran: nothing waits on an answer now
+                self._input_responses.pop(session_id, None)
+
+    @staticmethod
+    def _approves_plan(prompt: str, response: Any) -> bool:
+        """The answer to Omni's plan approval question is a yes."""
+        from src.omni.manager import Omni
+
+        return '"get_user_acceptance"' in prompt and Omni._is_approval(response)
 
     @staticmethod
     async def _request_id(session_id: str, prompt: str, input_type: str, source: str) -> tuple[str, bool]:
@@ -524,6 +542,8 @@ class WebSocketManager:
                             from src.database import answer_decision
 
                             await answer_decision(int(request["request_id"]), response)
+                        if self._approves_plan(prompt, response):
+                            asyncio.create_task(self._retitle(session_id, "plan"))
                         return response
 
                     except TimeoutError:
@@ -671,6 +691,9 @@ class WebSocketManager:
         if session_id in self._pending_requests:
             await websocket.send_json(self._pending_requests[session_id])
 
+    def running_chats(self) -> list[str]:
+        return [chat_id for chat_id, task in self._active_tasks.items() if not task.done()]
+
     def is_running(self, session_id: str) -> bool:
         task = self._active_tasks.get(session_id)
         return bool(task and not task.done())
@@ -708,6 +731,7 @@ class WebSocketManager:
             reason: Reason for stopping. Defaults to "Session stopped".
         """
         LLMConfigManager.clear_cache()
+        await unmark_run(session_id)  # stopped on purpose: it is not resumed
 
         # Check if session has cancellation token
         async with self._tasks_lock:
@@ -944,6 +968,10 @@ class WebSocketManager:
             async with self._connections_lock:
                 self._connections[session_id] = watchers.pop()
             logger.info(f"Page left session {session_id}; the thread driving the run keeps it")
+            return
+        if self.is_running(session_id):  # the last page left but a run is going: it carries on, and its question waits for the next page
+            self._connections.pop(session_id, None)
+            logger.info(f"Page left session {session_id}; its run carries on")
             return
         LLMConfigManager.clear_cache()
         logger.info(f"Disconnecting session {session_id}")

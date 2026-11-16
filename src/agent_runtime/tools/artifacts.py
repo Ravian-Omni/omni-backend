@@ -13,6 +13,7 @@ import os
 import uuid
 from typing import Any
 
+from src.agent_runtime import leads
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
 from src.database import chat_owner
@@ -23,7 +24,7 @@ from src.database import save_artifact as db_save_artifact
 
 KINDS = (
     "lead_list", "buyer_map", "enriched_contacts", "campaign_plan", "send_log",
-    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "snippets", "strategy", "other",
+    "scored_leads", "segments", "analysis", "dataset", "chart", "map", "snippets", "strategy", "meeting_brief", "recovery_note", "other",
 )
 
 # Visual kinds ship their data with the chat event so the UI can draw them at once.
@@ -119,7 +120,11 @@ async def write(
     """Create or replace an artifact and (unless announce is False) show it in the chat."""
     artifact_id = artifact_id or f"{kind}-{uuid.uuid4().hex[:8]}"
     os.makedirs(ctx.artifacts_dir, exist_ok=True)
+    if kind == "enriched_contacts":
+        await leads.mark(ctx.user_id, ctx.chat_id, rows)  # the gate is decided here, whatever the agent wrote
     columns = _columns(rows, columns)
+    if kind == "enriched_contacts":
+        columns += [c for c in ("gate", "gate_reason") if c not in columns]
     for i, r in enumerate(rows):
         r.setdefault("_id", i + 1)
     record = {

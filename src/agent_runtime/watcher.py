@@ -1,6 +1,7 @@
 """The reply watcher (Settings, Team & Inbox, Watch replies): no task needed.
 
-Every few minutes in working hours it checks each sent campaign thread in Gmail. Jev reads every new
+Every few minutes in working hours it checks each sent campaign thread in Gmail, then tells Brain_Hands of partner referrals
+and booked meetings (agent_runtime/inbound.py). Jev reads every new
 reply and the user's rules route it: unsubscribe, out of office and not now are recorded at once;
 the rest become a handoff with a drafted answer for the contact's owner, who is told on Slack and by
 email and sends from the handoff card. Nothing is ever sent to a contact from here.
@@ -14,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import inbox, llm, prefs
+from src.agent_runtime import inbound, inbox, llm, prefs
 from src.agent_runtime.tools import artifacts, campaign
 from src.configs.datetime_utils import dt
 from src.database import chat_collection, list_artifacts_of_kind, update_chat_history
@@ -118,6 +119,13 @@ async def sweep(user_id: str = "local_user") -> dict:
                                                      draft=await _draft(ctx, plan_id, route, r["text"], read))
                         summary["handoffs"].append({"id": h["id"], "contact": h["contact"], "owner": h["owner"] or "shared inbox",
                                                     "notified": h["notified"]})
+        if not rules["dry_run"]:  # what else Brain_Hands is told: partner referrals and booked meetings (off without BRAIN_HANDS_URL)
+            for key, check in (("referrals", lambda: inbound.referrals(user_id, rules["partners"], state["last_sweep"])),
+                               ("meetings", lambda: inbound.meetings(user_id))):
+                try:
+                    summary[key] = await check()
+                except Exception as e:  # one failing never stops the other, or the replies already recorded
+                    summary["errors"].append(f"{key}: {e}")
         return summary
     finally:
         summary["routes"] = dict(summary["routes"])

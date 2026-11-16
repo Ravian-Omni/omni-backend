@@ -77,6 +77,38 @@ async def free_slots(user_id: str, days: int = 5, minutes: int = 30) -> list[str
     return [t.isoformat(timespec="minutes") for t in pick_slots(busy, now, days, minutes)]
 
 
+async def upcoming(user_id: str, start: datetime, end: datetime) -> list[dict]:
+    """The user's Google Calendar events between start and end: id, status, title, start, end, attendees (email and name),
+    description and link. Raises RuntimeError when Calendar is not connected or answers with an error."""
+    from src.agent_runtime.tools.sales import composio_call
+
+    result = await composio_call(user_id, "googlecalendar", "GOOGLECALENDAR_EVENTS_LIST", {
+        "calendarId": "primary", "timeMin": start.isoformat(timespec="seconds"), "timeMax": end.isoformat(timespec="seconds"),
+        "singleEvents": True, "orderBy": "startTime", "maxResults": 50,
+    }, "Google Calendar")
+    if not (result or {}).get("successful", True):
+        raise RuntimeError(f"Google Calendar: {(result or {}).get('error')}")
+    data = (result or {}).get("data") or {}
+    items = data.get("items") or (data.get("response_data") or {}).get("items") or []
+    when_of = lambda t: (t or {}).get("dateTime") or (t or {}).get("date") or ""  # noqa: E731
+    return [{"id": e.get("id") or "", "status": e.get("status") or "", "summary": e.get("summary") or "",
+             "start": when_of(e.get("start")), "end": when_of(e.get("end")),
+             "attendees": [{"email": a["email"], "name": a.get("displayName") or ""} for a in e.get("attendees") or [] if a.get("email")],
+             "description": str(e.get("description") or "")[:1500], "link": e.get("htmlLink") or ""} for e in items]
+
+
+async def events_with(user_id: str, email: str, when: str = "") -> list[dict]:
+    """The user's Google Calendar events that `email` is invited to: within a day of `when`, else over the next 14 days."""
+    now = datetime.now().astimezone()
+    try:
+        at = datetime.fromisoformat(when).astimezone() if when else None
+    except ValueError:
+        at = None
+    start, end = (at - timedelta(days=1), at + timedelta(days=1)) if at else (now - timedelta(days=1), now + timedelta(days=14))
+    return [{**e, "attendees": [a["email"] for a in e["attendees"]]} for e in await upcoming(user_id, start, end)
+            if any(a["email"].lower() == email.lower() for a in e["attendees"])]
+
+
 async def notify(user_id: str, handoff: dict, owner: dict | None, team: dict) -> list[str]:
     """Tell the owner (or the shared inbox) about a handoff on Slack and by email; returns what was sent or why not."""
     from src.agent_runtime.tools.sales import composio_call, gmail_call

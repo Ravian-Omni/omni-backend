@@ -131,6 +131,18 @@ CARDS: dict[str, dict[str, str]] = {
         "not_when": "The request does not start with SIGNAL PLAY:.",
         "needs": "Data Axle connected, for the company and the buyer.",
     },
+    "meeting_prep": {
+        "does": "Gets the user ready for one booked meeting: reads the calendar event and the email thread with the person, looks the person and company up in Data Axle, and saves a one-page meeting_brief. Sends nothing.",
+        "call_when": "The request starts with MEETING PREP: followed by a JSON object. Plan this agent alone, as one step, and give it the request word for word.",
+        "not_when": "The request does not start with MEETING PREP:.",
+        "needs": "Gmail and Google Calendar connected; Data Axle for the company.",
+    },
+    "recovery_note": {
+        "does": "Reads the email thread with a contact who went quiet and saves one short note to them as a draft (a recovery_note artifact). Sends nothing.",
+        "call_when": "The request starts with RECOVERY NOTE: followed by a JSON object. Plan this agent alone, as one step, and give it the request word for word.",
+        "not_when": "The request does not start with RECOVERY NOTE:.",
+        "needs": "Gmail connected.",
+    },
     "email_sender": {
         "does": "Sends one email from the user's connected Gmail; the recipient, subject and body come from the task. It cannot read, search or reply to email.",
         "call_when": "A one-off email to send to someone while no Gmail specialist (an mcp_*gmail agent) is listed.",
@@ -211,6 +223,16 @@ ABILITIES: dict[str, list[str]] = {
         "request_spend_approval, then business_enrichment / contact_enrichment (1 credit per match): the full records; asks the user first.",
         "WebSearch: where a person who moved worked before, to find who replaced them.",
         "save_artifact kind enriched_contacts, then kind campaign_plan: the buyer (and the refill) and a three-email sequence whose first line cites the signal; returns both artifact ids. The user approves the steps on the campaign page.",
+    ],
+    "meeting_prep": [
+        "calendar_events (free): takes the person's email and the meeting time; returns the events they are invited to.",
+        "gmail_search_emails (free): the email thread with the person.",
+        "Data Axle business search (free), and enrichment only after request_spend_approval: the company's size, industry and place.",
+        "save_artifact kind meeting_brief: the one-page brief; returns its id.",
+    ],
+    "recovery_note": [
+        "gmail_search_emails (free): the email thread with the person.",
+        "save_artifact kind recovery_note: the drafted note (to, subject, body, thread_id); returns its id. Nothing is sent.",
     ],
     "email_sender": [
         "GMAIL_SEND_EMAIL: takes the task in plain words (the recipient's email, the subject and the body) and sends one email from the user's Gmail; returns sent, or that Gmail needs connecting.",
@@ -305,11 +327,12 @@ async def add_abilities(cards: list[dict]) -> list[dict]:
     """Give each built-in agent its MCP servers (the ones hooked to it in Settings, Connections) and their functions as
     its abilities, read live, so a server's new functions reach the planner without a code change. An agent with no
     server, or whose servers are all offline, keeps its hand-written abilities."""
+    from src.agent_runtime import treg
     from src.agent_runtime.session import offered
     from src.mcp_client import options
     from src.mcp_client.config import enabled_servers, in_mode
 
-    servers = [s for s in enabled_servers() if in_mode(s, "task")]
+    servers = [s for s in enabled_servers() if in_mode(s, "task") and not options(s).get("guarded")]  # a guarded server's own tools are in ABILITIES
     listed = dict(zip(servers, await asyncio.gather(*(_tools(s) for s in servers))))
     for c in cards:
         if c["kind"] != "built_in":
@@ -319,6 +342,8 @@ async def add_abilities(cards: list[dict]) -> list[dict]:
         c["mcp"] = [{"server": options(s).get("display_name", s), "online": listed[s] is not None} for s in hooked]
         live = [_ability(t, options(s).get("display_name", s)) for s in hooked for t in listed[s] or []]
         c["abilities"] = live or _own(c["name"])
+        if treg.offered(c["name"]):  # only while treg is connected: an agent is never told of a tool it does not have
+            c["abilities"] = [*c["abilities"], treg.ABILITY]
     return cards
 
 
@@ -392,7 +417,7 @@ async def mcp_context() -> str:
 
     sections = []
     for server in enabled_servers():
-        if not in_mode(server, "task") or not await is_connected(server):
+        if not in_mode(server, "task") or options(server).get("guarded") or not await is_connected(server):
             continue
         try:
             tools = await list_tools(server)  # also reads the server's instructions

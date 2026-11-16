@@ -12,6 +12,7 @@ TOKEN = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 LINK = re.compile(r"https?://\S+")
 LEGAL_SUFFIX = re.compile(r"[,\s]+(llc|l\.l\.c\.|inc\.?|incorporated|corp\.?|corporation|co\.?|ltd\.?|pllc|pc|p\.c\.)$", re.I)
 MAX_WORDS = 150
+FIRST_MAX_WORDS = 85  # the opener (step 1): short, and no link at all
 
 # Token -> audience columns to try, in order (Data Axle and hand-made lists use different names).
 ALIASES: dict[str, tuple[str, ...]] = {
@@ -24,7 +25,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "state": ("state",),
     "industry": ("industry", "sic_description", "primary_sic_description"),
     "employees": ("employees", "employee_count", "location_employee_count"),
-    "email": ("email", "email_address", "work_email"),
+    "email": ("email", "email_address", "work_email", "business_email", "contact_email"),
     "phone": ("phone", "phone_number"),
 }
 SENDER_TOKENS = ("sender_name", "sender_title", "sender_company")
@@ -95,6 +96,11 @@ def message(step: dict[str, Any], row: dict[str, Any], brief: dict[str, Any], as
     channel = step.get("channel") or "email"
     # a step written for one recipient names them (Campaign Builder puts a public route there when the list has no email)
     to = str(step.get("recipient_email") or "").strip() or field(row, "email")
+    if channel == "email" and int(step.get("step") or 1) == 1:  # the copy as written, before the footer (its opt-out may be a link)
+        if len(body.split()) > FIRST_MAX_WORDS:
+            issues.append(f"first email over {FIRST_MAX_WORDS} words")
+        if LINK.search(body):
+            issues.append("a link in the first email")
     if channel == "email":
         legal = [" ".join(str(brief[k]).split()) for k in ("postal_address", "opt_out") if brief.get(k)]
         if not (legal and all(v in " ".join(body.split()) for v in legal)):  # copy that signs off itself keeps its own

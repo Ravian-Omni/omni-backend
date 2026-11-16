@@ -3,6 +3,7 @@
 import json
 
 from src.routers.hands_mcp import simplify
+from tests.unit.test_leads import temp_db  # noqa: F401 - a temp database for the queue
 from src.services.task_status import question_of, status_of
 
 
@@ -207,7 +208,7 @@ def test_an_outside_agent_reads_the_files_a_task_saved(tmp_path, monkeypatch):
     assert [r["status"] for r in saved["rows"]] == ["approved"] * 3 and saved["meta"]["rev"] == 4
 
 
-def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch):
+def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch, temp_db):
     import asyncio
     from types import SimpleNamespace
 
@@ -229,7 +230,7 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch)
         return SimpleNamespace(get_chat=get_chat)
 
     async def manager():
-        return SimpleNamespace(is_running=lambda chat_id: chat_id == "busy", pending_request=lambda _: None)
+        return SimpleNamespace(is_running=lambda chat_id: chat_id == "busy", running_chats=lambda: ["busy"], pending_request=lambda _: None)
 
     async def create_omni_chat(_user):
         return {"chat_id": "new"}
@@ -248,6 +249,7 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch)
         assert (await hm.start_run("outreach", ctx, key="k1", chat_id="old"))["chat_id"] == "old"
         first = hm._threads["k1"]
         first.queue.put_nowait({"type": "completion", "status": "complete"})  # left over from the run that just ended
+        hm._active.clear()  # that run has ended: its chat takes the next task
         await hm.start_run("follow up", ctx, key="k2", chat_id="old")
         assert hm._threads["k2"] is first and first.queue.empty()  # the open thread takes the next task
         assert [json.loads(first.inbox.get_nowait())["task"] for _ in range(2)] == ["outreach", "follow up"]
@@ -257,11 +259,12 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch)
         await hm.start_run("c", ctx, key="mine", chat_id="old")
         assert hm._find("old") is hm._threads["mine"]
         assert (await hm.next_event("old", timeout=1))["chat_id"] == "old"
-        for gone in ("missing", "busy"):
-            try:
-                await hm.start_run("x", ctx, key="k3", chat_id=gone)
-                raise AssertionError(gone)
-            except ValueError:
-                pass
+        try:
+            await hm.start_run("x", ctx, key="k3", chat_id="missing")
+            raise AssertionError("missing")
+        except ValueError:
+            pass
+        queued = await hm.start_run("x", ctx, key="k4", chat_id="busy")  # a running chat queues the task instead of refusing it
+        assert (queued["queued"], queued["position"]) == (True, 1)
 
     asyncio.run(go())

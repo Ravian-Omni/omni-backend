@@ -123,6 +123,14 @@ class InboxRules(BaseModel):
     work_end: int = Field(19, ge=1, le=24)
     weekends: bool = False
     dry_run: bool = False  # read and route, but record nothing, open no handoffs and tell no one
+    # The user's partners (addresses or domains): their new mail is read for referrals on each round; empty = nothing read
+    partners: list[str] = Field(default_factory=list, max_length=100)
+
+
+class Sending(BaseModel):
+    """The mailbox campaigns send from, when not the connected Gmail account itself (a send-as address on the user's own domain)."""
+
+    mailbox: str = Field(default="", pattern=r"^([^@\s]+@[^@\s]+\.[^@\s]+)?$")
 
 
 SCHEMAS: dict[str, TypeAdapter] = {
@@ -132,8 +140,9 @@ SCHEMAS: dict[str, TypeAdapter] = {
     "inbox": TypeAdapter(InboxRules),
     "custom_agents": TypeAdapter(Annotated[list[CustomAgent], Field(max_length=30), AfterValidator(_unique)]),
     "orchestrator": TypeAdapter(Orchestrator),
+    "sending": TypeAdapter(Sending),
 }
-DEFAULTS: dict[str, Any] = {"memory": {}, "agents": {}, "team": {}, "inbox": {}, "custom_agents": [], "orchestrator": {}}
+DEFAULTS: dict[str, Any] = {"memory": {}, "agents": {}, "team": {}, "inbox": {}, "custom_agents": [], "orchestrator": {}, "sending": {}}
 _version = 0  # bumped on every save, so open sessions know to pick the change up
 
 

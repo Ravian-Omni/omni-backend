@@ -10,11 +10,11 @@ from typing import Any
 from loguru import logger
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from src.agent_runtime import PERSONAS, prefs
 from src.agent_runtime.tools.artifacts import _origin, load_record, save_payload
-from src.database import chat_owner, find_artifacts, get_artifact, list_artifacts, list_decisions
+from src.database import budget_left, chat_owner, find_artifacts, get_artifact, list_artifacts, list_decisions, set_budget
 
 router = APIRouter()
 
@@ -209,6 +209,23 @@ async def edit_artifact(chat_id: str, artifact_id: str, body: ArtifactEdit):
     meta["rev"] = rev + 1
     await save_payload(record, payload)
     return {"rev": meta["rev"], "row_count": record["row_count"]}
+
+
+class Budget(BaseModel):
+    credits: float = Field(ge=0)
+
+
+@router.get("/budget/{chat_id}")
+async def get_budget(chat_id: str):
+    """What the task may still spend without a credit card each time; null when it has no budget."""
+    return {"chat_id": chat_id, "credits_left": await budget_left(chat_id)}
+
+
+@router.put("/budget/{chat_id}")
+async def put_budget(chat_id: str, body: Budget):
+    """Let the task spend this many credits without asking (the setting a user gives in the web app; the MCP's credit_budget)."""
+    await set_budget(chat_id, body.credits)
+    return {"chat_id": chat_id, "credits_left": body.credits}
 
 
 @router.get("/decisions/{chat_id}")

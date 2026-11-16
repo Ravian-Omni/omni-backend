@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 from email.utils import parseaddr
 from typing import Any
 
-from src.agent_runtime import creatives, jev, prefs
+from src.agent_runtime import creatives, jev, leads, prefs
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
-from src.database import list_artifacts, list_creatives
+from src.database import list_artifacts, list_creatives, suppress_email
 
 # Replies DAX settles itself, with no handoff: Brain_Hands is told of them from record_reply
 SETTLED_ROUTES = ("suppress", "snooze", "auto_reply")
@@ -108,6 +108,7 @@ async def settle_bounces(ctx, plan_id: str, bounces: list[dict[str, Any]]) -> li
     opened = []
     for b in bounces:
         await record(ctx, plan_id, {"to": b["to"], "status": "bounced", "message_id": b["message_id"], "summary": b["subject"]})
+        await suppress_email(ctx.user_id, b["to"], "bounce")  # not this campaign only: every later run
         opened.append(await inbox.open_handoff(ctx, contact=b["from"], route="bounce", reply=b["text"], read={"intent": "bounce", "address": b["to"]},
                                                plan_id=plan_id, thread_id=b["thread_id"], subject=b["subject"]))
     return opened
@@ -123,10 +124,12 @@ async def record_reply(ctx, plan_id: str, to: str, intent: str, route: str = "",
     if intent == "not_now" or route == "snooze":
         row["snooze_until"] = (dt.now() + timedelta(days=(await prefs.get(ctx.user_id, "inbox"))["snooze_days"])).date().isoformat()
     await record(ctx, plan_id, row)
+    if route == "suppress" or intent == "unsubscribe":
+        await suppress_email(ctx.user_id, to, "unsubscribe")  # every later run, not only this campaign
     if route in SETTLED_ROUTES and message_id:
         from src.services import brain_hands
 
-        brain_hands.push_in_background(f"reply:{message_id}", subject, text or summary, email=to.lower(), thread_id=thread_id,
+        brain_hands.push_in_background("reply", f"reply:{message_id}", subject, text or summary, email=to.lower(), thread_id=thread_id,
                                        intent=intent, route=route, campaign_id=plan_id)
     return row
 
@@ -151,7 +154,14 @@ async def render_plan(ctx: ToolContext, plan_id: str, only_step: int | None = No
     assets = {c["id"]: c for c in await list_creatives(ctx.chat_id, plan_id)}
     history = await _history(ctx, plan_id)
     ready, skipped, seen = [], Counter(), set()
+    suppressed, written = await leads.sets(ctx.user_id, ctx.chat_id)
+    worked = await leads.proven(ctx.chat_id)
+    await leads.settle(ctx.chat_id, audience)  # the statuses code decides, also on an audience that never went through save
     for row in audience:
+        verdict, why = leads.gate(row, suppressed, written, worked)
+        if verdict != "pass":
+            skipped.update([f"not a lead: {why}"])  # once per contact, whatever the step says
+            continue
         steps = creatives.steps_for(plan, row)
         emails = sorted({int(s.get("step") or 1) for s in steps if s.get("channel", "email") == "email"})
         for step in steps:

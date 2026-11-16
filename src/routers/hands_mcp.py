@@ -18,11 +18,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from loguru import logger
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from src.agent_runtime import leads, treg
+from src.configs.datetime_utils import dt
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
-from src.database import find_artifacts, get_chat_repository, list_conversations, list_handoffs, save_pref
+from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
+                          count_resume, list_marked_runs, list_queued_runs, load_pref, pop_queued_run, queued_run, save_pref, set_budget,
+                          unmark_run)
 from src.database import list_artifacts as db_list_artifacts
 from src.dependencies import get_websocket_manager
 from src.services import chat_bridge, needs, task_status as status
@@ -51,7 +56,10 @@ INSTRUCTIONS = (
 mcp = FastMCP("daxagent", instructions=INSTRUCTIONS, streamable_http_path="/mcp",
               host="0.0.0.0")  # no localhost-only Host check: it is mounted behind the bearer gate and may be reached by domain
 _threads: dict[str, "HandsThread"] = {}
-_watching: set[asyncio.Task] = set()  # needs waiting to be pushed
+_watching: set[asyncio.Task] = set()  # needs waiting to be pushed, queue dispatches
+_active: set[str] = set()  # chats with a run begun here and not ended
+_lock = asyncio.Lock()  # one decision at a time on who starts and who waits
+MAX_PARALLEL = int(os.getenv("DAXAGENT_MAX_PARALLEL_RUNS", "3"))  # chats whose runs go at the same time
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 READ = ToolAnnotations(readOnlyHint=True)
 
@@ -96,6 +104,8 @@ class HandsThread(Thread):
         self.ask_text = ""  # Omni's last verification text, or the message a stopped plan waits on
         self.plan: list[dict[str, Any]] = []  # the latest plan's steps
         self.agenda_id = ""  # Brain_Hands' agenda this run serves, echoed in every event
+        self.started_at = dt.now_iso()  # when the run began: its credits are the ones approved since
+        self.lead_target, self.rounds, self.seen = 0, 0, 0  # leads wanted, sourcing rounds since the first, contacts seen when the round began
         self.polling = 0  # next_event calls waiting right now
         self.last_poll = time.monotonic()  # when the last one ended
 
@@ -116,9 +126,35 @@ class HandsThread(Thread):
             if simple["type"] == "input_request":
                 simple["chat_id"] = self.chat_id  # the conversation to answer in, and to continue later
                 await self._announce(simple, event)
+            if simple["type"] == "completion" and await self._close_round(simple):
+                return  # another sourcing round is starting: this is not the run's end
             if self.agenda_id:
                 simple["agenda_id"] = self.agenda_id
+            if title := await get_chat_title(self.chat_id):
+                simple["task_title"] = title  # the name the chat has now: it follows the work
             self.queue.put_nowait(simple)
+            if simple["type"] == "completion":
+                _run_ended(self.chat_id)
+
+    async def _close_round(self, done: dict[str, Any]) -> bool:
+        """Put the lead counts on a completion. True when the lead target is not met and sourcing goes on instead: the next
+        round is queued as a note, which the manager starts as the next task, and this completion is not shown."""
+        tally = await leads.tally(self.chat_id)
+        done["credits_spent"] = await needs.credits_approved(self.chat_id, self.started_at)  # across every sourcing round of the run
+        done["data_spend_usd"] = await treg.spent(self.chat_id, self.started_at)  # dollars at treg, apart from credits
+        done["leads"] = {"target": self.lead_target or None, "passed": tally["passed"], "failed": tally["failed"]}
+        data_out = await treg.out(self.chat_id, self.started_at)  # the run's dollar cap is reached
+        if not self.lead_target:
+            if data_out:
+                done["leads"]["stopped_because"] = "budget_used_up"
+            return False
+        why = "stopped" if done.get("status") != "complete" else leads.stop_reason(self.lead_target, tally, self.seen, await budget_left(self.chat_id), self.rounds, data_out)
+        if why:
+            done["leads"]["stopped_because"] = why
+            return False
+        self.rounds, self.seen = self.rounds + 1, tally["seen"]
+        (await get_websocket_manager()).add_note(self.chat_id, leads.next_round(self.lead_target, tally))
+        return True
 
     async def _announce(self, simple: dict[str, Any], event: dict[str, Any]) -> None:
         """Give the question the fields of a need (contract [7]) and push it if nobody polls for it."""
@@ -138,6 +174,7 @@ class HandsThread(Thread):
             if not open_ or open_.get("request_id") != need["id"] or open_.get("answered") or self.task.done():
                 return
             if not self.polling and time.monotonic() - max(opened, self.last_poll) >= needs.UNATTENDED_S:
+                need["data"]["task_title"] = await get_chat_title(self.chat_id) or need["data"].get("task_title", "")  # renamed since it was asked
                 await needs.push(need)
                 return
 
@@ -169,31 +206,120 @@ async def _source(ctx: Context) -> str:
 
 @mcp.tool(annotations=WRITE)
 async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | None = None, chat_id: str = "",
-                    agenda_id: str = "") -> dict[str, Any]:
+                    agenda_id: str = "", lead_target: int = 0, credit_budget: float | None = None) -> dict[str, Any]:
     """Start a task run (a lead search, a campaign, outreach, a reply) and return its chat_id; drive it with next_event and answer.
-    chat_id: the conversation to continue, so its agents see what was done there before; empty starts a new one.
+    chat_id: the conversation to continue, so its agents see what was done there before; empty starts a new one, or with an
+    agenda_id continues that agenda's chat (a goal has one chat).
+    A run on a chat that is running, or beyond the parallel limit, is queued: {queued: true, position}; a chat's runs go in order.
     key: optionally your own id for the run (defaults to the chat_id). files: paths on this machine to attach (a deck, a list).
-    agenda_id: the agenda this run serves; kept on the chat and echoed in every event."""
-    if key and (t := _threads.get(key)) and not t.task.done():
-        raise ValueError(f"run {key} is still going")
+    agenda_id: the agenda this run serves; kept on the chat and echoed in every event.
+    lead_target: how many leads that pass the lead gate the run must produce; it keeps sourcing until they are found, the
+    source runs dry or a round limit is hit, and its completion says which in `leads` (target, passed, failed, stopped_because).
+    credit_budget: the credits this goal may still spend without asking (what is left of its cap). A credit spend that fits is
+    approved by DAXAGENT itself and logged; one above it raises a card as before. Kept per agenda (per chat without one)."""
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
         raise ValueError(f"no task {chat_id}")
-    if chat_id and (await get_websocket_manager()).is_running(chat_id):
-        raise ValueError(f"task {chat_id} is still running")
-    chat_id = chat_id or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
+    chat_id = chat_id or (agenda_id and await chat_of_agenda(USER_ID, agenda_id)) or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
     key = key or chat_id
     await save_pref(USER_ID, f"run_by:{chat_id}", await _source(ctx))  # the web app marks the task as run by it
     if agenda_id:
         await save_pref(USER_ID, f"agenda:{chat_id}", agenda_id)
-    # a chat whose thread is still open takes the next task on it; a closed one reopens from its history
+    place = await _admit({"key": key, "chat_id": chat_id, "task": task, "files": files or [], "lead_target": lead_target, "credit_budget": credit_budget})
+    agenda = await needs.agenda_of(chat_id)
+    return {"key": key, "chat_id": chat_id, **({"queued": True, "position": place} if place else {}), **({"agenda_id": agenda} if agenda else {})}
+
+
+async def _busy() -> set[str]:
+    """Chats with a run going: begun here and not ended, or running from the web app."""
+    _active.intersection_update(t.chat_id for t in _threads.values() if not t.task.done())
+    return _active | set((await get_websocket_manager()).running_chats())
+
+
+async def _begin(run: dict[str, Any]) -> None:
+    """Start a run on its chat: its open thread takes the task, else a new one opens from the chat's history."""
+    chat_id, key = run["chat_id"], run["key"]
+    if run["credit_budget"] is not None:
+        await set_budget(chat_id, max(0.0, float(run["credit_budget"])))
     t = next((o for o in _threads.values() if o.chat_id == chat_id and not o.task.done()), None) or HandsThread(key, chat_id)
     while not t.queue.empty():
         t.queue.get_nowait()  # the last run's leftovers are not this run's events
     t.ask_text, t.plan = "", []
     t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
+    t.lead_target, t.rounds, t.started_at = max(0, int(run["lead_target"])), 0, dt.now_iso()
+    treg.begin_run(chat_id, t.started_at)  # the run's dollar cap counts from here, across its sourcing rounds
+    t.seen = (await leads.tally(chat_id))["seen"] if t.lead_target else 0
     _threads[key] = t
-    t.inbox.put_nowait(json.dumps({"type": "start", "task": task, "files": files or []}))
-    return {"key": key, "chat_id": chat_id, **({"agenda_id": t.agenda_id} if t.agenda_id else {})}
+    _active.add(chat_id)
+    await save_pref(USER_ID, f"run_params:{chat_id}", {"key": key, "lead_target": t.lead_target})  # what a resume after a restart needs
+    t.inbox.put_nowait(json.dumps({"type": "start", "task": run["task"], "files": run["files"]}))
+
+
+async def _admit(run: dict[str, Any]) -> int | None:
+    """Start the run, or queue it (returns its place) when its chat is running or MAX_PARALLEL chats already are."""
+    async with _lock:
+        busy = await _busy()
+        if run["chat_id"] in busy or len(busy) >= MAX_PARALLEL:
+            return await enqueue_run(run)
+        await _begin(run)
+    return None
+
+
+async def _dispatch() -> None:
+    """Start queued runs, oldest first: a chat's runs go one at a time, and at most MAX_PARALLEL chats run together."""
+    async with _lock:
+        busy = await _busy()
+        for run in await list_queued_runs():
+            if len(busy) >= MAX_PARALLEL:
+                break
+            if run["chat_id"] not in busy:
+                await pop_queued_run(run["id"])
+                await _begin(run)
+                busy.add(run["chat_id"])
+
+
+MAX_RESUMES = 2  # a run that keeps killing the process is given up on
+
+
+async def resume_runs() -> set[str]:
+    """At startup: each run its process left unfinished continues on its chat. An approved plan goes on from its first
+    unfinished step (Omni's "continue"); a run cut short before its plan was approved starts again from its request.
+    A step that was going starts over, and asks its question again. Returns the chats resumed."""
+    from src.omni.manager import Omni
+
+    resumed: set[str] = set()
+    for row in await list_marked_runs():
+        if needs.alive(row["owner_pid"]):
+            continue  # another backend's run on the same database
+        chat = await (await get_chat_repository()).get_chat(USER_ID, row["chat_id"], "omni")
+        if not chat or row["resumes"] >= MAX_RESUMES:
+            await unmark_run(row["chat_id"])
+            continue
+        params = await load_pref(USER_ID, f"run_params:{row['chat_id']}") or {}
+        resuming = Omni._has_pending_plan(chat.get("messages") or [])
+        try:
+            await count_resume(row["chat_id"])
+            await _begin({"key": params.get("key") or row["chat_id"], "chat_id": row["chat_id"], "task": "continue" if resuming else row["task"],
+                          "files": [] if resuming else row["files"], "lead_target": params.get("lead_target", 0), "credit_budget": None})
+            resumed.add(row["chat_id"])
+        except Exception as e:  # one run that cannot be resumed must not hold up the rest
+            logger.warning(f"[resume] {row['chat_id']} could not be resumed: {e}")
+    return resumed
+
+
+async def recover() -> None:
+    """Start-up: resume the runs that were cut short, close the questions nobody can answer now, start what was queued."""
+    resumed = await resume_runs()
+    await needs.close_lost(resumed)
+    await _dispatch()
+
+
+def _run_ended(chat_id: str) -> None:
+    """A run's last completion went out: its chat is free, so the next queued run may start."""
+    _active.discard(chat_id)
+    treg.end_run(chat_id)
+    task = asyncio.create_task(_dispatch())
+    _watching.add(task)
+    task.add_done_callback(_watching.discard)
 
 
 @mcp.tool(annotations=READ)
@@ -201,6 +327,8 @@ async def next_event(key: str, timeout: int = 25) -> dict[str, Any]:
     """The run's events since the last call: input_request (answer it with answer), plan, summary, completion (with
     campaigns: each campaign plan's counts and next step), error. key: the run's chat_id (or your key). Waits up to timeout seconds (at most 60) for the first one. closed is true when
     the run is over and drained."""
+    if not _find(key) and (waiting := await queued_run(key)):  # behind another run: nothing yet
+        return {"chat_id": waiting["chat_id"], "events": [], "closed": False, "pending": False, "queued": True, "position": waiting["position"]}
     t = _thread(key)
     events: list[dict[str, Any]] = []
     t.polling += 1
@@ -260,6 +388,17 @@ async def task_status(key: str = "", chat_id: str = "") -> dict[str, Any]:
     if not chat_id:
         raise ValueError("give the key of a run started here or a task's chat_id")
     return await status.task_status(USER_ID, chat_id)
+
+
+@mcp.tool(annotations=READ)
+async def company_facts(website: str, name: str = "") -> dict[str, Any] | None:
+    """A company's facts from one free Data Axle search (no agent, no credits): name, website, industry, employees (Data
+    Axle's size range, e.g. "50-99"), city and state, leaving out what its free sample does not give; null when no single
+    headquarters matches. Data Axle cannot search by domain, so the company is matched by `name` when you pass it, else
+    by the domain's first label, and `website` is echoed back, not confirmed."""
+    from src.services import company_facts as cf
+
+    return await cf.facts(website, name)
 
 
 @mcp.tool(annotations=READ)

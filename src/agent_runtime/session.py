@@ -19,7 +19,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import prefs
+from src.agent_runtime import leads, prefs
 from src.agent_runtime.decisions import DecisionCards
 from src.agent_runtime.personas import Persona, fill, get_persona
 from src.agent_runtime.tools import ToolContext, build_server, full_name
@@ -105,7 +105,9 @@ def _routed(server: str, tool: str, ctx: ToolContext):
     async def handler(args: dict[str, Any]) -> dict[str, Any]:
         ctx.data_sources.add(server)
         try:
-            return {"content": [{"type": "text", "text": await call_tool(server, tool, args)}]}
+            text = await call_tool(server, tool, args)
+            await leads.note_source(ctx.chat_id, server, text)  # Data Axle's own emails get the in-house check
+            return {"content": [{"type": "text", "text": text}]}
         except Exception as e:
             return {"content": [{"type": "text", "text": f"{tool} failed: {e}"}], "is_error": True}
 
@@ -216,7 +218,8 @@ class PersonaSession:
 
         mode = "chat" if self.persona.name == "assistant" else "task"  # chat mode runs only the assistant
         self._remote_tools = {}
-        wanted = [name for name in server_names() if is_enabled(name) and in_mode(name, mode) and offered(self.persona, name)]
+        wanted = [name for name in server_names() if is_enabled(name) and in_mode(name, mode) and offered(self.persona, name)
+                  and not options(name).get("guarded")]  # a guarded server's tools are DAXAGENT's own (tools/treg.py), never listed raw
 
         async def probe(name: str):
             if not await is_connected(name):
@@ -363,6 +366,7 @@ class PersonaSession:
             recipients=recipients or ["(see details)"], subject=str(input_data.get("subject", "")),
             body_preview=str(input_data.get("body") or input_data.get("message") or input_data.get("text") or "")[:2000],
             detail=json.dumps({k: v for k, v in input_data.items() if k not in ("body", "message", "text")})[:300],
+            plan_id=str(input_data.get("plan_id") or ""), step=input_data.get("step"),
         )
         if decision.approved:
             return PermissionResultAllow(updated_input=input_data)

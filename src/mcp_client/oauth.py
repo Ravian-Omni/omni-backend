@@ -16,7 +16,7 @@ import httpx
 from loguru import logger
 
 from src.database import delete_api_key, load_all_api_keys, save_api_key
-from src.mcp_client.config import oauth_endpoints
+from src.mcp_client.config import oauth_endpoints, options
 
 # Endpoints come from configs/mcp_servers.json, per server: each provider has
 # its own, discovered from /.well-known/oauth-authorization-server.
@@ -123,7 +123,10 @@ async def exchange_code(server: str, code: str, state: str, redirect_uri: str) -
 
 
 async def get_access_token(server: str) -> str | None:
-    """Return a valid access token, refreshing it when it has expired."""
+    """Return a valid access token, refreshing it when it has expired. A server may keep its token in the environment
+    (`token_env` in its config block) instead of the database."""
+    if token := os.getenv(options(server).get("token_env", "")):
+        return token
     tokens = await _load(server)
     if not tokens:
         return None

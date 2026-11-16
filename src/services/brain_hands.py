@@ -38,7 +38,7 @@ async def push_reply(*args, **data) -> bool:
 
 
 def push_in_background(*args, **data) -> None:
-    """push_reply for a caller that must never wait on Brain_Hands."""
-    task = asyncio.create_task(push_reply(*args, **data))
+    """push for a caller that must never wait on Brain_Hands."""
+    task = asyncio.create_task(push(*args, **data))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)

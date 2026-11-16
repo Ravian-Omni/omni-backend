@@ -118,6 +118,88 @@ CREATE TABLE IF NOT EXISTS decision_log (
 
 CREATE INDEX IF NOT EXISTS idx_decision_log_chat_id ON decision_log(chat_id);
 
+-- Links in sent emails, each with the recipient it was made for, and the clicks on them.
+CREATE TABLE IF NOT EXISTS tracked_links (
+    token TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    plan_id TEXT,
+    step INTEGER,
+    subject TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS link_clicks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL,
+    clicked_at TEXT NOT NULL
+);
+
+-- Runs that began and have not ended. One still here after its process is gone was cut short and resumes at the next start.
+CREATE TABLE IF NOT EXISTS active_runs (
+    chat_id TEXT PRIMARY KEY,
+    owner_pid INTEGER NOT NULL,
+    task TEXT NOT NULL,
+    files TEXT NOT NULL DEFAULT '[]',
+    resumes INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL
+);
+
+-- Runs waiting behind the one on their chat, or for a free slot, oldest first.
+CREATE TABLE IF NOT EXISTS run_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    run_key TEXT NOT NULL,
+    task TEXT NOT NULL,
+    files TEXT NOT NULL DEFAULT '[]',
+    lead_target INTEGER NOT NULL DEFAULT 0,
+    credit_budget REAL,
+    created_at TEXT NOT NULL
+);
+
+-- Credits a goal may still spend without asking, per agenda (per chat when it has none).
+CREATE TABLE IF NOT EXISTS budgets (
+    scope TEXT PRIMARY KEY,
+    credits_left REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Addresses no campaign may write to again (an unsubscribe, a bounce), for every later run.
+CREATE TABLE IF NOT EXISTS suppressions (
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, email)
+);
+
+-- Dollars paid to an outside data source (treg) per call, and the word it gave for an email it checked.
+CREATE TABLE IF NOT EXISTS data_spend (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    usd REAL NOT NULL,
+    call_id TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    email_status TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_data_spend_chat ON data_spend(chat_id, at);
+
+-- Email addresses a data source's own answer held in a chat (Data Axle): only these get DAXAGENT's in-house email check.
+CREATE TABLE IF NOT EXISTS source_emails (
+    chat_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    server TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (chat_id, email)
+);
+
+-- Notices pushed to Brain_Hands from the reply-check round (a referral email, a booked meeting): each once.
+CREATE TABLE IF NOT EXISTS pushed_notices (
+    id TEXT PRIMARY KEY,
+    pushed_at TEXT NOT NULL
+);
+
 -- Typed outputs a persona produced (lead list, buyer map, campaign plan, ...).
 CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,
@@ -334,6 +416,11 @@ async def init_db() -> None:
         await _db.execute("ALTER TABLE decision_log ADD COLUMN owner_pid INTEGER")
     except aiosqlite.OperationalError:
         pass  # already there
+    for column in ("title_by", "title_basis"):  # databases made before titles followed the work: who set it ("user" or "auto"), what it was made from
+        try:
+            await _db.execute(f"ALTER TABLE chats ADD COLUMN {column} TEXT")
+        except aiosqlite.OperationalError:
+            pass  # already there
     try:  # databases made before chats had a title
         await _db.execute("ALTER TABLE chats ADD COLUMN title TEXT")
     except aiosqlite.OperationalError:

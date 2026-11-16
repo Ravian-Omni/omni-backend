@@ -27,7 +27,7 @@ from typing import Any
 from loguru import logger
 
 from src.configs.datetime_utils import dt
-from src.database import answer_decision, log_decision
+from src.database import answer_decision, log_decision, spend_budget
 
 _YES = {"yes", "y", "approve", "approved", "ok", "okay", "proceed", "confirm", "send", "go", "go ahead", "sure"}
 _NO = {"no", "n", "reject", "rejected", "cancel", "stop", "deny", "denied", "terminate", "skip"}
@@ -133,30 +133,34 @@ class DecisionCards:
         payload = {"card": card, "title": title, "message": message, **fields}
         decision_id = await log_decision(self.chat_id, self.task_id, self.persona, card, payload)
         payload["id"] = decision_id
-        if self.ws is None:
+        raw = None
+        if card == "confirm_spend" and (left := await spend_budget(self.chat_id, payload["credits"])) is not None:
+            raw = {"action": "approve", "auto": "budget", "left": left}  # it fits what the goal may spend: no card
+        elif self.ws is None:
             logger.warning(f"No websocket for decision card '{card}' in chat {self.chat_id}; rejecting")
             return Decision(card, approved=False)
-        try:
-            raw = await self.ws.request_input(
-                self.chat_id,
-                {
-                    "input_type": "decision_card",
-                    "prompt": message,
-                    "data": {
-                        "source": self.persona,
-                        "content": {
-                            **payload,
-                            "task_id": self.task_id,
-                            "call_id": self.call_id,
-                            "capability_id": self.capability_id,
+        if raw is None:
+            try:
+                raw = await self.ws.request_input(
+                    self.chat_id,
+                    {
+                        "input_type": "decision_card",
+                        "prompt": message,
+                        "data": {
+                            "source": self.persona,
+                            "content": {
+                                **payload,
+                                "task_id": self.task_id,
+                                "call_id": self.call_id,
+                                "capability_id": self.capability_id,
+                            },
+                            "timestamp": dt.now_iso(),
                         },
-                        "timestamp": dt.now_iso(),
                     },
-                },
-            )
-        except (asyncio.CancelledError, ValueError):
-            await answer_decision(decision_id, {"action": "abandoned"})
-            raise
+                )
+            except (asyncio.CancelledError, ValueError):
+                await answer_decision(decision_id, {"action": "abandoned"})
+                raise
         decision = parse_response(card, raw)
         await answer_decision(decision_id, decision.raw if decision.raw is not None else raw)
         self.history.append({"card": card, "title": title, "answer": decision.summary()})
@@ -206,14 +210,20 @@ class DecisionCards:
         body_preview: str = "",
         detail: str = "",
         recipient_count: int | None = None,
+        plan_id: str = "",
+        step: int | None = None,
+        warnings: list[str] | None = None,
     ) -> Decision:
-        """Ask before anything leaves the system."""
+        """Ask before anything leaves the system. plan_id, step: the campaign plan step the emails belong to, so whoever
+        answers can hold the send while that plan has a fault."""
         n = recipient_count if recipient_count is not None else len(recipients)
         message = f"Send this {channel} to {n} recipient{'s' if n != 1 else ''}?"
         return await self._ask(
             "confirm_send", f"Confirm {channel}", message,
             tool=tool, server=server, channel=channel, recipients=recipients[:50],
             recipient_count=n, subject=subject, body_preview=body_preview[:2000], detail=detail,
+            **({"plan_id": plan_id, "step": step} if plan_id else {}),
+            **({"warnings": warnings} if warnings else {}),  # about the sender's domain: shown, never a reason to refuse
         )
 
     async def choose(

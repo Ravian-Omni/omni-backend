@@ -55,4 +55,18 @@ def build(ctx: ToolContext):
             return _error(str(e))
         return _text({"slots": slots, "note": "Times are in the user's timezone; name the timezone in the draft."})
 
-    return [hand_off, meeting_slots]
+    @tool(
+        "calendar_events",
+        "The user's Google Calendar events a person is invited to: within a day of `when`, else over the next 14 days. "
+        "Returns each event's title, start, end, attendees, description and link. Reads only.",
+        {"type": "object", "properties": {"email": {"type": "string", "description": "The person's email"},
+                                          "when": {"type": "string", "description": "The meeting's date and time if known, e.g. 2026-11-20 15:00"}},
+         "required": ["email"]},
+    )
+    async def calendar_events(args: dict) -> dict:
+        try:
+            return _text({"events": await inbox.events_with(ctx.user_id, str(args["email"]), str(args.get("when") or ""))})
+        except RuntimeError as e:
+            return _error(str(e))
+
+    return [hand_off, meeting_slots, calendar_events]

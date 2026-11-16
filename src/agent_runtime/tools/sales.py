@@ -8,10 +8,11 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import sic
+from src.agent_runtime import clicks, leads, prefs, sender, sic
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.agent_runtime.tools.context import server_of as _server_of
+from src.database import list_suppressed
 
 
 def _text(payload: Any) -> dict:
@@ -173,18 +174,20 @@ def build(ctx: ToolContext):
             copy = frozenset((m["to"].lower(), m["subject"], m["body"]) for m in ready if m["to"].lower() in recips) or copy
         tool_name = "gmail_create_draft" if args.get("draft_only") else "gmail_send_email"
         batch = (tool_name, recips, copy)
+        warnings = await sender.warnings(ctx.user_id)
         if batch in ctx.send_approved:
             # Asked again for the same batch (Outreach re-checked replies first): one card, and the approved count stays
             return _text({"approved": True, "already_approved": True, "sends_left": ctx.send_allowance.get("*", 0), "tool": tool_name})
         decision = await ctx.decisions.confirm_send(
             tool=tool_name, server="composio", channel=args.get("channel", "email"), recipients=recipients,
             subject=args.get("subject", ""), body_preview=args.get("body_preview", ""), detail=args.get("reason", ""),
+            plan_id=args.get("plan_id", ""), step=args.get("step"), warnings=warnings,
         )
         if decision.approved:
             # Any send tool may deliver the approved batch (Outreach's Gmail tool or Gmail's own).
             ctx.send_allowance["*"] = ctx.send_allowance.get("*", 0) + len(recipients)
             ctx.send_approved.add(batch)
-            return _text({"approved": True, "sends_allowed": len(recipients), "tool": tool_name})
+            return _text({"approved": True, "sends_allowed": len(recipients), "tool": tool_name, **({"warnings": warnings} if warnings else {})})
         if decision.suggestion:
             return _text({"approved": False, "user_said": decision.suggestion, "message": "The user answered with their own instruction instead of approving. Apply it and ask again; send nothing yet."})
         return _text({"approved": False, "message": "The user declined this batch. Send nothing; report and ask what to change."})
@@ -298,6 +301,17 @@ def build(ctx: ToolContext):
                 await own_plan(ctx, args["plan_id"])  # before anything goes out: the send log lives with the plan
             except FileNotFoundError as e:
                 return _error(str(e))
+        if status == "sent" and (problems := leads.send_problems(
+                [args["to"], *(args.get("cc") or []), *(args.get("bcc") or [])], args.get("subject", ""), args["body"], await list_suppressed(ctx.user_id))):
+            reason = "; ".join(problems)
+            if args.get("plan_id"):
+                from src.agent_runtime.tools.campaign import record
+
+                await record(ctx, args["plan_id"], {"to": args["to"].lower(), "step": args.get("step"), "status": "blocked", "reason": reason})
+            return _error(f"Not sent: {reason}. No approval overrides this: fix the plan or leave the recipient out.")
+        if status == "sent":
+            key = "message_body" if "message_body" in arguments else "body"
+            arguments[key] = await clicks.rewrite(arguments[key], bool(arguments.get("is_html")), args["to"], args.get("plan_id", ""), args.get("step"), args.get("subject", ""))
         try:
             result = await gmail_call(ctx.user_id, slug, arguments)
         except RuntimeError as e:
@@ -372,6 +386,8 @@ def build(ctx: ToolContext):
                 "recipient_email": args["to"], "subject": args["subject"], "body": args["body"], "user_id": "me",
                 "is_html": bool(args.get("is_html")),
             }
+            if mailbox := (await prefs.get(ctx.user_id, "sending")).get("mailbox"):
+                arguments["from_email"] = mailbox  # a send-as address on the user's own domain
             if args.get("cc"):
                 arguments["cc"] = args["cc"]
             if args.get("bcc"):
