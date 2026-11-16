@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from email.utils import parseaddr
 from typing import Any
 
-from src.agent_runtime import creatives, jev, leads, prefs
+from src.agent_runtime import creatives, crm, jev, leads, prefs
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
@@ -109,6 +109,7 @@ async def settle_bounces(ctx, plan_id: str, bounces: list[dict[str, Any]]) -> li
     for b in bounces:
         await record(ctx, plan_id, {"to": b["to"], "status": "bounced", "message_id": b["message_id"], "summary": b["subject"]})
         await suppress_email(ctx.user_id, b["to"], "bounce")  # not this campaign only: every later run
+        crm.later(lambda to=b["to"]: crm.suppress(to, "bounce"))
         opened.append(await inbox.open_handoff(ctx, contact=b["from"], route="bounce", reply=b["text"], read={"intent": "bounce", "address": b["to"]},
                                                plan_id=plan_id, thread_id=b["thread_id"], subject=b["subject"]))
     return opened
@@ -126,6 +127,9 @@ async def record_reply(ctx, plan_id: str, to: str, intent: str, route: str = "",
     await record(ctx, plan_id, row)
     if route == "suppress" or intent == "unsubscribe":
         await suppress_email(ctx.user_id, to, "unsubscribe")  # every later run, not only this campaign
+        crm.later(lambda: crm.suppress(to, "unsubscribe"))
+    if message_id:  # the reply on the person's CRM record, keyed on the Gmail message
+        crm.later(lambda: crm.activity(to, "reply", text or summary or intent, message_id))
     if route in SETTLED_ROUTES and message_id:
         from src.services import brain_hands
 

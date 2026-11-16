@@ -81,6 +81,25 @@
           "email_find": "treg.people.email.find"
         }
       }
+    },
+    "crm": {
+      "url": "",
+      "daxagent": {
+        "display_name": "CRM",
+        "description": "Atomic CRM, the system of record: DAX records its leads, emails, replies and do-not-contact entries there, and Meeting Prep and Recovery Note read what it knows about a person. Needs CRM_MCP_URL and CRM_API_KEY in the environment.",
+        "auth": "bearer",
+        "url_env": "CRM_MCP_URL",
+        "token_env": "CRM_API_KEY",
+        "guarded": true,
+        "personas": [
+          "meeting_prep",
+          "recovery_note"
+        ],
+        "specialist": false,
+        "modes": [
+          "task"
+        ]
+      }
     }
   }
 }

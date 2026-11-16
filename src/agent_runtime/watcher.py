@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import inbound, inbox, llm, prefs
+from src.agent_runtime import crm, inbound, inbox, llm, prefs
 from src.agent_runtime.tools import artifacts, campaign
 from src.configs.datetime_utils import dt
 from src.database import chat_collection, list_artifacts_of_kind, update_chat_history
@@ -121,7 +121,8 @@ async def sweep(user_id: str = "local_user") -> dict:
                                                     "notified": h["notified"]})
         if not rules["dry_run"]:  # what else Brain_Hands is told: partner referrals and booked meetings (off without BRAIN_HANDS_URL)
             for key, check in (("referrals", lambda: inbound.referrals(user_id, rules["partners"], state["last_sweep"])),
-                               ("meetings", lambda: inbound.meetings(user_id))):
+                               ("meetings", lambda: inbound.meetings(user_id)),
+                               ("crm_suppressed", lambda: crm.pull_suppressed(user_id))):  # the CRM's do-not-contact list into ours
                 try:
                     summary[key] = await check()
                 except Exception as e:  # one failing never stops the other, or the replies already recorded

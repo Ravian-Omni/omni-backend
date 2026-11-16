@@ -210,6 +210,7 @@ _register(Persona(
     system_prompt=prompts.RECOVERY_NOTE,
     builtin_tools=["Read"],
     daxagent_tools=["gmail_search_emails", *COMMON_TOOLS],  # the note is saved as an artifact; nothing is sent or drafted in Gmail
+    remote_mcp=True,  # the CRM, read only (its server config names this persona)
 ))
 
 _register(Persona(

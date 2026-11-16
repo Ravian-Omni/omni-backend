@@ -11,7 +11,7 @@ import re
 from collections import Counter
 from typing import Any
 
-from src.agent_runtime import creatives
+from src.agent_runtime import creatives, crm
 from src.database import checked_emails, find_artifacts, list_artifacts, list_suppressed, note_source_emails, source_emails
 
 # the local part of a shared or role inbox: it reaches a team, not the person
@@ -62,7 +62,7 @@ def gate(row: dict[str, Any], suppressed: set[str], contacted: set[str], proven:
         (is_shared(email), "shared or role inbox"),
         (email.split("@")[-1] in FREE_MAIL, "free-mail address, not a business email"),
         (not _checked(row) and email not in proven, f"email not verified: {_status(row)}" if _status(row) else "email not checked by the source"),
-        (email in suppressed, "suppressed"),
+        (email in suppressed or email.split("@")[-1] in suppressed, "suppressed"),  # an address, or its whole domain
         (email in contacted, "already written to"),
     ):
         if fails:
@@ -164,10 +164,16 @@ async def settle(chat_id: str, rows: list[dict[str, Any]]) -> None:
 
 async def mark(user_id: str, chat_id: str, rows: list[dict[str, Any]]) -> None:
     """Stamp each row with its gate and the reason, on the email statuses settle() decides."""
+    from src.services import needs  # not at the top: services imports the agent runtime
+
     suppressed, written = await sets(user_id, chat_id)
     await settle(chat_id, rows)
+    agenda = None
     for row in rows:
         row["gate"], row["gate_reason"] = gate(row, suppressed, written)
+        if row["gate"] == "pass" and crm.configured():  # the CRM gets every lead, in the background
+            agenda = agenda if agenda is not None else await needs.agenda_of(chat_id)
+            crm.later(lambda row=row: crm.lead(row, chat_id, agenda))
 
 
 async def tally(chat_id: str, since: str = "") -> dict[str, Any]:
@@ -216,6 +222,6 @@ def send_problems(recipients: list[str], subject: str, body: str, suppressed: se
     for to in recipients:
         if is_shared(to.strip().lower()):
             problems.append(f"{to} is a shared or role inbox")
-        if to.strip().lower() in suppressed:
+        if to.strip().lower() in suppressed or to.strip().lower().split("@")[-1] in suppressed:
             problems.append(f"{to} is suppressed")
     return problems

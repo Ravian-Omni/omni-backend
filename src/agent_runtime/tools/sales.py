@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.agent_runtime import clicks, leads, prefs, sender, sic
+from src.agent_runtime import clicks, crm, leads, prefs, sender, sic
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.agent_runtime.tools.context import server_of as _server_of
@@ -322,6 +322,9 @@ def build(ctx: ToolContext):
             data = result.get("data") or {}
             thread = (data.get("response_data") or data).get("threadId") or args.get("thread_id")
             await record(ctx, args["plan_id"], {"to": args["to"].lower(), "step": args.get("step"), "status": status, "thread_id": thread})
+            if status == "sent":  # the CRM's record of it, keyed on the Gmail message so a repeat adds nothing
+                key = (data.get("response_data") or data).get("id") or f"{args['plan_id']}:{args.get('step')}:{args['to'].lower()}"
+                crm.later(lambda: crm.activity(args["to"], "email_sent", f"{args.get('subject', '')}\n\n{arguments.get('body') or arguments.get('message_body') or ''}", str(key)))
         return _text(result if isinstance(result, dict | list | str) else str(result))
 
     CAMPAIGN_FIELDS = {

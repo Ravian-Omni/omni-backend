@@ -91,8 +91,9 @@ def server_names() -> list[str]:
 
 
 def server_url(server: str) -> str:
-    """The server's endpoint URL; MCP_URL_<NAME> overrides it per deployment (e.g. the hosted app's User's Context)."""
-    return os.getenv(f"MCP_URL_{server.upper().replace('-', '_')}") or _config()[server]["url"]
+    """The server's endpoint URL; MCP_URL_<NAME> overrides it per deployment (e.g. the hosted app's User's Context), and a
+    server may name its own variable (`url_env` in its config block)."""
+    return (os.getenv(f"MCP_URL_{server.upper().replace('-', '_')}") or os.getenv(options(server).get("url_env", "")) or "").strip() or _config()[server]["url"]
 
 
 def options(server: str) -> dict[str, Any]:
