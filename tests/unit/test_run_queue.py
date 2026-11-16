@@ -2,6 +2,7 @@
 parallel up to a limit."""
 
 import asyncio
+import time
 import itertools
 import json
 from types import SimpleNamespace
@@ -105,6 +106,8 @@ def test_a_completion_event_frees_the_chat_for_its_next_queued_run(env, monkeypa
         t = object.__new__(REAL_THREAD)  # the real send_json, on a thread running chat-a
         t.chat_id, t.queue, t.inbox, t.ask_text, t.plan = "chat-a", asyncio.Queue(), asyncio.Queue(), "", []
         t.agenda_id, t.lead_target, t.rounds, t.seen, t.started_at, t.polling, t.last_poll = "", 0, 0, 0, "2000-01-01T00:00:00+00:00", 0, 0.0
+        t.key, t.request = "k1", ""
+        t.stop_reason, t.asked_at, t.last_event = "", None, time.monotonic()  # working: it just showed it is alive
         t.pending, t.ready, t.notes, t.say, t.task = False, False, {}, AsyncMock(), SimpleNamespace(done=lambda: False)
         hm._threads["k1"] = t
         hm._active.add("chat-a")

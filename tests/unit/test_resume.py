@@ -118,7 +118,7 @@ def started(temp_db, monkeypatch):
     monkeypatch.setattr(hm, "_watching", set())
     monkeypatch.setattr(hm, "_lock", asyncio.Lock())
     monkeypatch.setattr(hm, "HandsThread", Thread)
-    monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(running_chats=lambda: [])))
+    monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(running_chats=lambda: [], is_running=lambda chat: False)))
 
     def told():
         return {t.chat_id: [json.loads(m) for m in t.inbox._queue] for t in {id(t): t for t in hm._threads.values()}.values()}

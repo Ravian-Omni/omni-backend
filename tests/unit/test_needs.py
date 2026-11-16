@@ -37,6 +37,8 @@ def thread(chat_id="chat-1", agenda_id="agd_1"):
     t.chat_id, t.queue, t.ask_text, t.plan = chat_id, asyncio.Queue(), "", []
     t.agenda_id, t.polling, t.last_poll = agenda_id, 0, time.monotonic()
     t.lead_target, t.rounds, t.seen, t.started_at = 0, 0, 0, "2000-01-01T00:00:00+00:00"
+    t.key, t.request = "key-1", ""
+    t.stop_reason, t.asked_at, t.last_event = "", None, 0.0
     t.pending, t.ready, t.notes, t.say, t.task = False, False, {}, AsyncMock(), SimpleNamespace(done=lambda: False)
     return t
 

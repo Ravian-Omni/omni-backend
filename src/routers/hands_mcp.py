@@ -25,14 +25,16 @@ from mcp.types import ToolAnnotations
 from src.agent_runtime import leads, treg
 from src.configs.datetime_utils import dt
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
+from src.database import answer_decision
 from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
                           count_resume, list_marked_runs, list_queued_runs, load_pref, pop_queued_run, queued_run, save_pref, set_budget,
                           unmark_run)
 from src.database import list_artifacts as db_list_artifacts
 from src.dependencies import get_websocket_manager
-from src.services import chat_bridge, needs, task_status as status
+from src.services import brain_hands, chat_bridge, needs, run_result, task_status as status
 from src.services.chat_bridge import USER_ID, Thread
 from src.services.chat_service import ChatService
+from src.utilities.async_errors import AsyncErrorCode
 
 INSTRUCTIONS = (
     "DAXAGENT runs multi-step tasks for the user with a team of agents: find leads and buyers, enrich contacts, research "
@@ -57,8 +59,14 @@ mcp = FastMCP("daxagent", instructions=INSTRUCTIONS, streamable_http_path="/mcp"
               host="0.0.0.0")  # no localhost-only Host check: it is mounted behind the bearer gate and may be reached by domain
 _threads: dict[str, "HandsThread"] = {}
 _watching: set[asyncio.Task] = set()  # needs waiting to be pushed, queue dispatches
+_tender: asyncio.Task | None = None  # the loop that expires unanswered questions and starts queued runs (recover starts it)
 _active: set[str] = set()  # chats with a run begun here and not ended
 _lock = asyncio.Lock()  # one decision at a time on who starts and who waits
+FAILED_RUN = AsyncErrorCode.TASK_EXECUTION_FAILED.value  # the error that ends a run
+RESULT_S = 20  # the most a run's result may take to build (task status, learnings); past it the result goes out without learnings
+QUIET_S = 30  # a run that sent nothing for this long and that the manager no longer runs has ended
+TEND_S = 30  # how often questions nobody answers are given up on and queued runs are started
+QUESTION_WAIT_S = 60 * float(os.getenv("DAXAGENT_QUESTION_WAIT_MIN", "30"))  # an unanswered question of a run driven from here
 MAX_PARALLEL = int(os.getenv("DAXAGENT_MAX_PARALLEL_RUNS", "3"))  # chats whose runs go at the same time
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 READ = ToolAnnotations(readOnlyHint=True)
@@ -106,6 +114,10 @@ class HandsThread(Thread):
         self.agenda_id = ""  # Brain_Hands' agenda this run serves, echoed in every event
         self.started_at = dt.now_iso()  # when the run began: its credits are the ones approved since
         self.lead_target, self.rounds, self.seen = 0, 0, 0  # leads wanted, sourcing rounds since the first, contacts seen when the round began
+        self.request = ""  # what start_run asked, for the result's `task` and `about`
+        self.last_event = time.monotonic()  # when the run last showed it is alive: a run quiet past QUIET_S may have ended
+        self.asked_at: float | None = None  # when the open question was asked, for QUESTION_WAIT_S
+        self.stop_reason = ""  # why this side stopped the run, when it did
         self.polling = 0  # next_event calls waiting right now
         self.last_poll = time.monotonic()  # when the last one ended
 
@@ -120,21 +132,80 @@ class HandsThread(Thread):
         if isinstance(content, dict) and content.get("name") in ("clarifier", "manual_verification", "conversation_agent"):
             form = status.loads(content.get("content"))
             self.ask_text = str(form.get("intro") or "") if isinstance(form, dict) else str(form or "")
-        if simple := simplify(event, self.ask_text, self.plan):
+        self.last_event = time.monotonic()
+        if not (simple := simplify(event, self.ask_text, self.plan)):
+            return
+        ended = simple["type"] == "completion" or (simple["type"] == "error" and event.get("error_code") == FAILED_RUN)
+        going_on = False  # a lead round handed on: not the run's end
+        try:
             if simple["type"] == "plan":
+                self._progress(simple["steps"])
                 self.plan = simple["steps"]
             if simple["type"] == "input_request":
                 simple["chat_id"] = self.chat_id  # the conversation to answer in, and to continue later
+                self.asked_at = time.monotonic()
                 await self._announce(simple, event)
             if simple["type"] == "completion" and await self._close_round(simple):
-                return  # another sourcing round is starting: this is not the run's end
+                going_on = True  # another sourcing round is starting: this is not the run's end
+                return
             if self.agenda_id:
                 simple["agenda_id"] = self.agenda_id
             if title := await get_chat_title(self.chat_id):
                 simple["task_title"] = title  # the name the chat has now: it follows the work
-            self.queue.put_nowait(simple)
-            if simple["type"] == "completion":
-                _run_ended(self.chat_id)
+            if ended:
+                simple["result"] = await self._safe_result(simple)
+        except Exception as e:  # the event still goes out, and an ended run still frees its chat
+            logger.warning(f"[hands] {self.chat_id}: {simple['type']} sent without its extras: {e}")
+        finally:
+            if not going_on:
+                self.queue.put_nowait(simple)  # before the chat is freed: its next run clears this queue when it begins
+                if ended:
+                    _run_ended(self.chat_id)
+
+    async def _safe_result(self, end: dict[str, Any]) -> dict[str, Any]:
+        """The result within RESULT_S; past it, or when building it fails, the result from what the run itself knows."""
+        try:
+            return await asyncio.wait_for(self._result(end), RESULT_S)
+        except Exception as e:  # TimeoutError included
+            logger.warning(f"[hands] {self.chat_id}: result built without task status or learnings: {e}")
+            return run_result.envelope({"chat_id": self.chat_id, "request": self.request}, key=self.key, agenda_id=self.agenda_id,
+                                       error=end.get("message", "") if end["type"] == "error" else "", cancelled=end.get("status") == "cancelled",
+                                       stop_reason=self.stop_reason, started_at=self.started_at, ended_at=dt.now_iso())
+
+    def lost(self, why: str) -> None:
+        """The run ended without saying so: its poller gets a stopped, retryable result, and its chat is freed."""
+        result = run_result.envelope({"chat_id": self.chat_id, "request": self.request, "stage": "stopped"}, key=self.key, agenda_id=self.agenda_id,
+                                     started_at=self.started_at, ended_at=dt.now_iso(), stop_reason=why)
+        self.queue.put_nowait({"type": "completion", "status": "lost", "chat_id": self.chat_id,
+                               **({"agenda_id": self.agenda_id} if self.agenda_id else {}), "result": result})
+        _active.discard(self.chat_id)
+        treg.end_run(self.chat_id)
+
+    def _base(self) -> dict[str, Any]:
+        return run_result.envelope({"chat_id": self.chat_id, "request": self.request}, key=self.key, agenda_id=self.agenda_id)
+
+    def _progress(self, steps: list[dict[str, Any]]) -> None:
+        """A progress update (contract [15]) for each plan step that has just ended."""
+        before = {s["step"]: s["status"] for s in self.plan}
+        for s in steps:
+            if s["status"] in ("completed", "failed") and before.get(s["step"]) != s["status"]:
+                self.queue.put_nowait({"type": "progress", "chat_id": self.chat_id, **({"agenda_id": self.agenda_id} if self.agenda_id else {}),
+                                       "result": run_result.progress(self._base(), s)})
+
+    async def _result(self, end: dict[str, Any]) -> dict[str, Any]:
+        """The run's result (contract [15]): its state as task_status reads it, the numbers on its completion, and learnings."""
+        try:
+            ts = await status.task_status(USER_ID, self.chat_id)
+        except Exception as e:  # the result never holds up the end of a run: it goes out with what the run itself knows
+            logger.warning(f"[hands] no task status for {self.chat_id}'s result: {e}")
+            ts = {"chat_id": self.chat_id, "request": self.request}
+        ts["request"] = ts.get("request") or self.request
+        learned = await run_result.learnings(ts) if ts.get("summary") else []
+        if learned:
+            await save_pref(USER_ID, f"learnings:{self.chat_id}", learned)  # task_status shows them too
+        return run_result.envelope(ts, key=self.key, agenda_id=self.agenda_id, error=end.get("message", "") if end["type"] == "error" else "",
+                                   cancelled=end.get("status") == "cancelled", stop_reason=self.stop_reason, learnings=learned, started_at=self.started_at, ended_at=dt.now_iso(),
+                                   numbers={k: end[k] for k in ("leads", "credits_spent", "data_spend_usd") if k in end})
 
     async def _close_round(self, done: dict[str, Any]) -> bool:
         """Put the lead counts on a completion. True when the lead target is not met and sourcing goes on instead: the next
@@ -230,9 +301,18 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
 
 
 async def _busy() -> set[str]:
-    """Chats with a run going: begun here and not ended, or running from the web app."""
-    _active.intersection_update(t.chat_id for t in _threads.values() if not t.task.done())
-    return _active | set((await get_websocket_manager()).running_chats())
+    """Chats with a run going: begun here and not ended, or running from the web app. A run begun here that the manager no
+    longer runs and that has been quiet past QUIET_S ended without a word (it closed, failed in an
+    unexpected way, or never started): it is reported as lost and its chat is freed."""
+    manager = await get_websocket_manager()
+    live = {t.chat_id: t for t in _threads.values() if not t.task.done()}
+    _active.intersection_update(live)
+    for chat in list(_active):
+        t = live[chat]
+        if not manager.is_running(chat) and time.monotonic() - t.last_event > QUIET_S:  # a run waiting on an answer is still running
+            logger.warning(f"[hands] {chat}: the run ended without finishing; freeing its chat")
+            t.lost("the run ended without finishing")
+    return _active | set(manager.running_chats())
 
 
 async def _begin(run: dict[str, Any]) -> None:
@@ -243,7 +323,7 @@ async def _begin(run: dict[str, Any]) -> None:
     t = next((o for o in _threads.values() if o.chat_id == chat_id and not o.task.done()), None) or HandsThread(key, chat_id)
     while not t.queue.empty():
         t.queue.get_nowait()  # the last run's leftovers are not this run's events
-    t.ask_text, t.plan = "", []
+    t.ask_text, t.plan, t.stop_reason, t.asked_at, t.last_event = "", [], "", None, time.monotonic()
     t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
     t.lead_target, t.rounds, t.started_at = max(0, int(run["lead_target"])), 0, dt.now_iso()
     treg.begin_run(chat_id, t.started_at)  # the run's dollar cap counts from here, across its sourcing rounds
@@ -251,6 +331,7 @@ async def _begin(run: dict[str, Any]) -> None:
     _threads[key] = t
     _active.add(chat_id)
     await save_pref(USER_ID, f"run_params:{chat_id}", {"key": key, "lead_target": t.lead_target})  # what a resume after a restart needs
+    t.request = run["task"]
     t.inbox.put_nowait(json.dumps({"type": "start", "task": run["task"], "files": run["files"]}))
 
 
@@ -258,23 +339,53 @@ async def _admit(run: dict[str, Any]) -> int | None:
     """Start the run, or queue it (returns its place) when its chat is running or MAX_PARALLEL chats already are."""
     async with _lock:
         busy = await _busy()
-        if run["chat_id"] in busy or len(busy) >= MAX_PARALLEL:
+        behind = any(q["chat_id"] == run["chat_id"] for q in await list_queued_runs())  # a chat's runs keep their order
+        if behind or run["chat_id"] in busy or len(busy) >= MAX_PARALLEL:
             return await enqueue_run(run)
         await _begin(run)
     return None
 
 
+BEGIN_TRIES = 3  # a queued run that fails to start this many times is dropped with a failed result
+_begin_failures: dict[int, int] = {}  # queued run id -> failed starts so far
+_dropped: dict[str, dict[str, Any]] = {}  # run key -> the failed completion its poller gets next
+
+
 async def _dispatch() -> None:
-    """Start queued runs, oldest first: a chat's runs go one at a time, and at most MAX_PARALLEL chats run together."""
+    """Start queued runs, oldest first: a chat's runs go one at a time, and at most MAX_PARALLEL chats run together.
+    A run leaves the queue only once it has begun; one that fails to start is tried again on later passes without
+    holding up the runs behind it, and after BEGIN_TRIES failures it is dropped and reported (_drop)."""
     async with _lock:
         busy = await _busy()
         for run in await list_queued_runs():
             if len(busy) >= MAX_PARALLEL:
                 break
-            if run["chat_id"] not in busy:
-                await pop_queued_run(run["id"])
+            if run["chat_id"] in busy:
+                continue
+            busy.add(run["chat_id"])  # its chat's later runs wait, whether it starts or not
+            try:
                 await _begin(run)
-                busy.add(run["chat_id"])
+            except Exception as e:
+                tries = _begin_failures[run["id"]] = _begin_failures.get(run["id"], 0) + 1
+                logger.warning(f"[hands] queued run {run['key']} on {run['chat_id']} did not start ({tries}/{BEGIN_TRIES}): {e}")
+                if tries >= BEGIN_TRIES:
+                    await pop_queued_run(run["id"])
+                    _begin_failures.pop(run["id"], None)
+                    await _drop(run, e)
+                continue
+            await pop_queued_run(run["id"])
+            _begin_failures.pop(run["id"], None)
+
+
+async def _drop(run: dict[str, Any], error: Exception) -> None:
+    """A queued run that could not start: its poller gets a failed completion, and Brain_Hands a notice saying why and
+    whether to send it again."""
+    agenda = await needs.agenda_of(run["chat_id"])
+    result = run_result.envelope({"chat_id": run["chat_id"], "request": run["task"]}, key=run["key"], agenda_id=agenda,
+                                 error=f"the run could not start after {BEGIN_TRIES} tries: {error}", ended_at=dt.now_iso())
+    _dropped[run["key"]] = {"type": "completion", "status": "failed", "chat_id": run["chat_id"], **({"agenda_id": agenda} if agenda else {}), "result": result}
+    await brain_hands.push("dax.run_failed", f"{run['key']}:not_started", "A queued DAX run could not start", result["reason"],
+                           chat_id=run["chat_id"], key=run["key"], agenda_id=agenda, reason=result["reason"], retryable=result["retryable"])
 
 
 MAX_RESUMES = 2  # a run that keeps killing the process is given up on
@@ -311,6 +422,40 @@ async def recover() -> None:
     resumed = await resume_runs()
     await needs.close_lost(resumed)
     await _dispatch()
+    global _tender
+    if _tender is None or _tender.done():  # its own handle: _watching is awaited to drain, and this never ends
+        _tender = asyncio.create_task(_tend())
+
+
+async def _tend() -> None:
+    """For as long as the app runs: give up on questions nobody answers, and start queued runs (which frees lost ones)."""
+    while True:
+        await asyncio.sleep(TEND_S)
+        try:
+            await _expire_questions()
+            await _dispatch()
+        except Exception as e:  # the next turn tries again
+            logger.warning(f"[hands] tend: {e}")
+
+
+async def _expire_questions() -> None:
+    """A run driven from here whose question has waited past QUESTION_WAIT_S is stopped: the question closes as no_answer
+    (pushed as "<request_id>:no_answer"), and the run ends stopped with "no answer to: <question>". Runs started in the web
+    app are not here: they wait for the person."""
+    manager = await get_websocket_manager()
+    for t in {id(t): t for t in _threads.values()}.values():
+        open_ = manager.pending_request(t.chat_id)
+        if (t.chat_id not in _active or t.task.done() or not open_ or open_.get("answered") or t.asked_at is None
+                or time.monotonic() - t.asked_at < QUESTION_WAIT_S):
+            continue
+        card, asked_by = status.card_of(open_)
+        question = status.question_of(card, asked_by, t.ask_text, t.plan)
+        t.stop_reason = f"no answer to: {question.get('title') or question.get('message') or 'a question'}"[:300]
+        if (rid := str(open_.get("request_id") or "")).isdigit():
+            await answer_decision(int(rid), {"closed": "no_answer"})
+            need = await needs.build(t.chat_id, rid, question, card, str(open_.get("timestamp") or ""))
+            await needs.push({**need, "id": f"{rid}:no_answer"}, reason="no_answer")
+        await manager.stop_session(t.chat_id, t.stop_reason)
 
 
 def _run_ended(chat_id: str) -> None:
@@ -327,6 +472,11 @@ async def next_event(key: str, timeout: int = 25) -> dict[str, Any]:
     """The run's events since the last call: input_request (answer it with answer), plan, summary, completion (with
     campaigns: each campaign plan's counts and next step), error. key: the run's chat_id (or your key). Waits up to timeout seconds (at most 60) for the first one. closed is true when
     the run is over and drained."""
+    if key in _dropped:  # it never started: its poller is told once, and the run is over
+        end = _dropped.pop(key)
+        return {"chat_id": end["chat_id"], "events": [end], "closed": True, "pending": False}
+    if not _find(key) and await queued_run(key):
+        await _dispatch()  # its turn may have come without another run ending here
     if not _find(key) and (waiting := await queued_run(key)):  # behind another run: nothing yet
         return {"chat_id": waiting["chat_id"], "events": [], "closed": False, "pending": False, "queued": True, "position": waiting["position"]}
     t = _thread(key)

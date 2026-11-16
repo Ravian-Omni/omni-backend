@@ -90,7 +90,8 @@ def plan_step(i: int, s: dict) -> dict:
     """One step of the planner's breakdown, the same everywhere the MCP shows a plan."""
     agent = str(s.get("capability") or "")
     return {"step": i, "agent": agent, "agent_name": agent_name(agent),
-            "task": re.sub(r"^\s*\[[ xX]\]\s*", "", str(s.get("task") or "")), "status": str(s.get("status") or "pending")}
+            "task": re.sub(r"^\s*\[[ xX]\]\s*", "", str(s.get("task") or "")), "status": str(s.get("status") or "pending"),
+            **({"details": str(s["details"])} if s.get("details") else {})}  # why the step is in the plan: a result's to_achieve
 
 
 def _seconds(start: str | None, end: str | None) -> int | None:
@@ -248,5 +249,12 @@ async def task_status(user_id: str, chat_id: str) -> dict:
     if not doc:
         raise ValueError(f"no task {chat_id}")
     manager = await get_websocket_manager()
-    return {"chat_id": chat_id, **status_of(doc.get("raw_messages") or [], manager.is_running(chat_id),
-                                            manager.pending_request(chat_id), dt.now_iso()), "campaigns": await campaigns(chat_id)}
+    ts = {"chat_id": chat_id, **status_of(doc.get("raw_messages") or [], manager.is_running(chat_id),
+                                          manager.pending_request(chat_id), dt.now_iso()), "campaigns": await campaigns(chat_id)}
+    if ts["stage"] in ("done", "stopped"):  # an ended run's result (contract [15]); the learnings are the ones its end found
+        from src.database import load_pref
+        from src.services import needs, run_result
+
+        ts["result"] = run_result.envelope(ts, agenda_id=await needs.agenda_of(chat_id), learnings=await load_pref(user_id, f"learnings:{chat_id}") or [],
+                                           numbers={"credits_spent": ts["credits"]["approved"]})
+    return ts
