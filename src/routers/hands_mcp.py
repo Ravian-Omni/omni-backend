@@ -24,6 +24,7 @@ from mcp.types import ToolAnnotations
 
 from src.agent_runtime import leads, site
 from src.configs.datetime_utils import dt
+from src.agent_runtime.tools import campaign
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
 from src.database import answer_decision
 from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
@@ -603,7 +604,8 @@ async def approve_plan_steps(chat_id: str, plan_id: str, steps: list[int] | None
     if record["kind"] != "campaign_plan":
         raise ValueError(f"{plan_id} is a {record['kind']}, not a campaign plan")
     rows = payload.get("rows", [])
-    newly = [r for r in rows if r.get("status") != "approved" and (not steps or int(r.get("step") or 1) in steps)]
+    # a touch Brain_Hands wrote (add_touch, a row with `to`) is approved by the user on the campaign page, never from here
+    newly = [r for r in rows if r.get("status") != "approved" and not r.get("to") and (not steps or int(r.get("step") or 1) in steps)]
     for r in newly:
         r["status"] = "approved"
     if newly:
@@ -612,6 +614,23 @@ async def approve_plan_steps(chat_id: str, plan_id: str, steps: list[int] | None
         await save_payload(record, payload)
     return {"chat_id": chat_id, "plan_id": plan_id, "approved_now": len(newly),
             "approved_steps": sum(1 for r in rows if r.get("status") == "approved"), "steps": len(rows)}
+
+
+@mcp.tool(annotations=WRITE)
+async def add_touch(chat_id: str, to: str, subject: str, body: str, send_after_days: int = 0, plan_id: str | None = None) -> dict[str, Any]:
+    """Store one email for one person in that task's campaign plan as a draft, its copy exactly as you give it: no DAX agent
+    rewrites it. Returns {plan_id, step, status} or {refused: why}. The person must have passed the lead gate in that task
+    (a contact it saved). The step is the person's highest step plus one; with no plan_id it starts a plan (the first touch).
+    body: plain text; it may use {{first_name}}, {{company}}, {{title}} and {{sender_name}}-style tokens, filled per
+    recipient; the sign-off (sender, postal address, opt-out) is added when sending. Step 1: at most 85 words and no link;
+    a later step: at most one link. A later step goes in the first email's thread, after the step before it was sent and
+    send_after_days after the first email. Nothing is sent: the user approves the step on the campaign page, then a send
+    asks send_approval as usual. Refusals: empty subject or body; not a contact saved in this chat; did not pass the lead
+    gate: <why>; replied; bounced; not a campaign plan of this chat; not in the plan's contacts list; already in plan <id>;
+    no sign-off; first email over 85 words; a link in the first email; more than one link; masked, empty or unknown tokens."""
+    if not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
+        raise ValueError(f"no task {chat_id}")
+    return await campaign.add_touch(USER_ID, chat_id, to, subject, body, send_after_days, plan_id or "")
 
 
 @mcp.tool(annotations=READ)

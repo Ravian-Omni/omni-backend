@@ -126,12 +126,14 @@ def steps_for(plan: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]
 
     Without meta.segment_field a single named segment applies to everyone; with several,
     only the 'all' rows do (sending every segment's copy to everyone would duplicate steps).
+    A row with `to` (add_touch) is that one recipient's own step and no one else's.
     """
     rows = plan.get("rows", [])
     seg_field = (plan.get("meta") or {}).get("segment_field")
-    named = {str(s.get("segment") or "all") for s in rows} - {"all"}
+    named = {str(s.get("segment") or "all") for s in rows if not s.get("to")} - {"all"}
     mine = str(row.get(seg_field, "")) if seg_field else (named.pop() if len(named) == 1 else "all")
-    return [s for s in rows if str(s.get("segment") or "all") in ("all", mine)]
+    email = field(row, "email").lower()
+    return [s for s in rows if (str(s["to"]).lower() == email if s.get("to") else str(s.get("segment") or "all") in ("all", mine))]
 
 
 def blocking(issues: list[str]) -> list[str]:

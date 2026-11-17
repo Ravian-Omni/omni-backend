@@ -1,16 +1,20 @@
 """The tools Outreach sends from: rendered approved steps, the send log, and the replies that stop follow-ups."""
 
+import asyncio
+import json
+import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
 from email.utils import parseaddr
+from types import SimpleNamespace
 from typing import Any
 
 from src.agent_runtime import creatives, crm, jev, leads, prefs
 from src.agent_runtime.tools import artifacts
 from src.agent_runtime.tools.context import ToolContext
 from src.configs.datetime_utils import dt
-from src.database import list_artifacts, list_creatives, suppress_email
+from src.database import find_artifacts, list_artifacts, list_creatives, suppress_email
 
 # Replies DAX settles itself, with no handoff: Brain_Hands is told of them from record_reply
 SETTLED_ROUTES = ("suppress", "snooze", "auto_reply")
@@ -197,6 +201,85 @@ async def render_plan(ctx: ToolContext, plan_id: str, only_step: int | None = No
             ready.append({**{k: m[k] for k in ("to", "subject", "body", "segment", "attachments", "inline_image")}, "plan_id": plan_id,
                           "step": n, "thread_id": h["thread_id"] if prev is not None else None})
     return {"ready": ready, "skipped": dict(skipped), "approved_steps": sum(1 for s in plan.get("rows", []) if s.get("status") == "approved")}
+
+
+_touching = asyncio.Lock()  # two touches added at once must not both rewrite the same plan file
+
+
+async def add_touch(user_id: str, chat_id: str, to: str, subject: str, body: str, send_after_days: int = 0, plan_id: str = "") -> dict[str, Any]:
+    """One email for one person, its copy stored exactly as given, as a draft step of the chat's plan (contract [21] item 4):
+    {plan_id, step, status} or {refused: why}. The person must pass the lead gate in this chat now, from its saved contacts.
+    The step is the person's highest step plus one; with no plan_id a plan is started, on the contacts list that holds them
+    and with the sign-off of the newest campaign brief that has one. The user approves it on the campaign page."""
+    to = to.strip().lower()
+    refused = lambda why: {"refused": why}  # noqa: E731
+    if not subject.strip() or not body.strip():
+        return refused("empty subject or body")
+    saved = await list_artifacts(chat_id)  # newest first: a later save of a contact is the one that counts
+    found = next(((rec, r) for rec in saved if rec["kind"] == "enriched_contacts" for r in leads._rows(rec["path"]) if leads.email_of(r) == to), None)
+    if not found:
+        return refused("not a contact saved in this chat")
+    audience, row = found
+    suppressed, written = await leads.sets(user_id, chat_id)
+    await leads.settle(chat_id, [row])
+    verdict, why = leads.gate(row, suppressed, written, await leads.proven(chat_id))
+    if verdict != "pass":
+        return refused(f"did not pass the lead gate: {why}")
+    for rec in saved:
+        if rec["kind"] == "send_log" and (hit := next((r["status"] for r in leads._rows(rec["path"]) if str(r.get("to") or "").lower() == to
+                                                       and r.get("status") in ("replied", "bounced")), None)):
+            return refused(hit)
+    async with _touching:
+        if plan_id:
+            try:
+                record, plan = await artifacts.load_record(chat_id, plan_id)
+            except FileNotFoundError:
+                return refused("not a campaign plan of this chat")
+            if record["kind"] != "campaign_plan":
+                return refused("not a campaign plan of this chat")
+            try:
+                people = (await artifacts.load_record(chat_id, (plan.get("meta") or {}).get("audience_artifact_id") or ""))[1].get("rows", [])
+            except FileNotFoundError:
+                people = []
+            if not any(leads.email_of(r) == to for r in people):
+                return refused("not in the plan's contacts list: add_touch with no plan_id starts a plan for them")
+            brief = (plan.get("meta") or {}).get("brief") or {}
+        else:
+            if mine := next((rec["id"] for rec in saved if rec["kind"] == "campaign_plan"
+                             and any(str(s.get("to") or "").lower() == to for s in leads._rows(rec["path"]))), None):
+                return refused(f"already in plan {mine}: pass its plan_id")
+            plans = await find_artifacts(user_id, "", "campaign_plan", 200)  # the user's, newest first
+            brief = next((b for rec in plans if (b := _brief(rec["path"])).get("postal_address") and b.get("opt_out")), None)
+            if not brief:
+                return refused("no sign-off: no campaign brief has a postal_address and opt_out to copy")
+            record, plan = None, {"rows": []}
+        n = max((int(s.get("step") or 1) for s in plan["rows"] if str(s.get("to") or "").lower() == to), default=0) + 1
+        links = len(creatives.LINK.findall(body))
+        _, issues = creatives.render(f"{subject}\n{body}", row, brief)
+        for fails, why in ((n == 1 and len(body.split()) > creatives.FIRST_MAX_WORDS, f"first email over {creatives.FIRST_MAX_WORDS} words"),
+                           (n == 1 and links, "a link in the first email"), (links > 1, "more than one link"),
+                           (bool(creatives.blocking(issues)), "; ".join(creatives.blocking(issues)))):
+            if fails:
+                return refused(why)
+        step = {"segment": to, "to": to, "step": n, "role": "opener" if n == 1 else "follow_up", "send_after_days": 0 if n == 1 else max(0, int(send_after_days)),
+                "channel": "email", "subject": subject, "body": body, "status": "draft"}
+        if record:
+            plan["rows"].append({**step, "_id": max((int(s.get("_id") or 0) for s in plan["rows"]), default=0) + 1})
+            plan.setdefault("meta", {})["rev"] = int(plan["meta"].get("rev") or 0) + 1  # the page holding the old rev reloads before it edits
+            await artifacts.save_payload(record, plan)
+        else:
+            ctx = SimpleNamespace(chat_id=chat_id, user_id=user_id, task_id=None, persona="brain_hands", artifacts_dir=os.path.dirname(audience["path"]), data_sources=set())
+            record = await artifacts.write(ctx, "campaign_plan", f"Touches for {creatives.field(row, 'company') or to}", [step], source="add_touch: copy from Brain_Hands",
+                                           meta={"audience_artifact_id": audience["id"], "brief": brief}, announce=False)
+    return {"plan_id": record["id"], "step": n, "status": "draft"}
+
+
+def _brief(path: str) -> dict[str, Any]:
+    try:
+        with open(path) as f:
+            return (json.load(f).get("meta") or {}).get("brief") or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def build(ctx: ToolContext):
