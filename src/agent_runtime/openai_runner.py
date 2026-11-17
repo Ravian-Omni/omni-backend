@@ -1,4 +1,4 @@
-"""Run a persona on an OpenAI chat-completions model (gpt-5.6-luna).
+"""Run a persona on an OpenAI chat-completions model (gpt-6-luna).
 
 Same personas, tools, gates, WebSocket events and history as the Claude
 Agent SDK path in ``session.py``; only the model loop differs. Tools come
@@ -81,7 +81,7 @@ class OpenAIRunner:
         """Model name, key and request extras for the persona runtime."""
         cfg = LLMConfigManager.get_config("default")
         entry = (cfg.get("config_list") or [{}])[0] if isinstance(cfg, dict) else {}
-        model = getattr(settings, "AGENT_MODEL", None) or entry.get("model") or "gpt-5.6-luna"
+        model = getattr(settings, "AGENT_MODEL", None) or entry.get("model") or "gpt-6-luna"
         return {
             "model": model,
             "api_key": entry.get("api_key") or settings.OPENAI_API_KEY or "",

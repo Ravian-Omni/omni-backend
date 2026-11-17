@@ -51,6 +51,13 @@ def test_app():
 # ============================================================
 
 
+@pytest.fixture(autouse=True)
+def _no_live_services(monkeypatch):
+    """The real .env's CRM and treg settings never reach a test: those calls write to live records or spend money."""
+    for key in ("CRM_MCP_URL", "CRM_API_KEY", "TREG_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture
 def client(test_app) -> Generator[TestClient, None, None]:
     """Create a test client for the FastAPI app."""
