@@ -327,7 +327,6 @@ async def add_abilities(cards: list[dict]) -> list[dict]:
     """Give each built-in agent its MCP servers (the ones hooked to it in Settings, Connections) and their functions as
     its abilities, read live, so a server's new functions reach the planner without a code change. An agent with no
     server, or whose servers are all offline, keeps its hand-written abilities."""
-    from src.agent_runtime import treg
     from src.agent_runtime.session import offered
     from src.mcp_client import options
     from src.mcp_client.config import enabled_servers, in_mode
@@ -342,8 +341,6 @@ async def add_abilities(cards: list[dict]) -> list[dict]:
         c["mcp"] = [{"server": options(s).get("display_name", s), "online": listed[s] is not None} for s in hooked]
         live = [_ability(t, options(s).get("display_name", s)) for s in hooked for t in listed[s] or []]
         c["abilities"] = live or _own(c["name"])
-        if treg.offered(c["name"]):  # only while treg is connected: an agent is never told of a tool it does not have
-            c["abilities"] = [*c["abilities"], treg.ABILITY]
     return cards
 
 

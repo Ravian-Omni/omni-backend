@@ -24,7 +24,7 @@ def ts(**kw):
 
 
 def test_a_finished_play_is_completed_and_says_the_user_approves_the_plan_next():
-    r = run_result.envelope(ts(), key="run-7", agenda_id="agd_1", numbers={"credits_spent": 3, "data_spend_usd": 0.0, "leads": {"passed": 1}})
+    r = run_result.envelope(ts(), key="run-7", agenda_id="agd_1", numbers={"credits_spent": 3, "leads": {"passed": 1}})
     assert {k: r[k] for k in ("v", "in_reply_to", "type", "app", "agent", "task_id", "agenda_id", "status", "retryable")} == {
         "v": 1, "in_reply_to": "run-7", "type": "result", "app": "daxagent", "agent": "Signal Play", "task_id": "chat-1",
         "agenda_id": "agd_1", "status": "completed", "retryable": False}
@@ -33,7 +33,7 @@ def test_a_finished_play_is_completed_and_says_the_user_approves_the_plan_next()
     assert r["steps"] == [{"n": 1, "agent": "Signal Play", "did": "Find the buyer at Osaic and draft the opener",
                            "to_achieve": "a first email that cites the signal", "status": "completed"}]
     assert r["outputs"] == [{"kind": "campaign_plan", "id": "campaign_plan-1", "title": "Osaic opener"}]
-    assert r["numbers"] == {"leads": {"passed": 1}, "credits_spent": 3, "data_spend_usd": 0.0}
+    assert r["numbers"] == {"leads": {"passed": 1}, "credits_spent": 3}
     assert r["next"] == {"who": "user", "action": "approve the steps of the campaign plan", "ref": "campaign_plan-1"}
     assert (r["started_at"], r["ended_at"]) == ("2026-11-16T10:00:00+00:00", "2026-11-16T10:05:00+00:00")
 

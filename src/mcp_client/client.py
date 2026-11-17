@@ -66,6 +66,11 @@ async def refresh_tools(server: str) -> list[dict[str, Any]]:
     return await _refresh_tools(server)
 
 
+def listed_tool_names(server: str) -> set[str]:
+    """The server's tool names as last listed (at start-up, then on use); empty before any listing. Never waits."""
+    return {t["name"] for t in (_tools_cache.get(server) or (0, []))[1]}
+
+
 async def list_tools(server: str) -> list[dict[str, Any]]:
     """Return the server's tools as {name, description, input_schema, annotations} dicts.
 

@@ -219,7 +219,7 @@ class PersonaSession:
         mode = "chat" if self.persona.name == "assistant" else "task"  # chat mode runs only the assistant
         self._remote_tools = {}
         wanted = [name for name in server_names() if is_enabled(name) and in_mode(name, mode) and offered(self.persona, name)
-                  and not options(name).get("guarded")]  # a guarded server's tools are DAXAGENT's own (tools/treg.py), never listed raw
+                  and not options(name).get("guarded")]  # a guarded server's tools are DAXAGENT's own (tools/crm.py), never listed raw
 
         async def probe(name: str):
             if not await is_connected(name):

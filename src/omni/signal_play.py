@@ -42,11 +42,11 @@ def _value(v):
 
 
 async def unmet(chat_id: str, since: str) -> str:
-    """The play's rejection when treg found people for it and none passed the lead gate, else "". A play that saved no
-    contact says why itself, and without treg connected the play ends as it always has."""
-    from src.agent_runtime import leads, treg  # not at the top: agent_runtime imports the connection manager, which imports this
+    """The play's rejection when people were found for it and none passed the lead gate, else "". A play that saved no
+    contact says why itself, and without the site reader (site.py) the play ends as it always has."""
+    from src.agent_runtime import leads, site  # not at the top: agent_runtime imports the connection manager, which imports this
 
-    if not treg.configured():
+    if not site.configured():
         return ""
     tally = await leads.tally(chat_id, since)
     if not tally["seen"] or tally["passed"]:

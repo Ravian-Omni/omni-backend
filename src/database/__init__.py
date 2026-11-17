@@ -570,26 +570,6 @@ async def run_started(chat_id: str) -> str:
     return row[0] if row else ""
 
 
-async def record_data_spend(chat_id: str, endpoint: str, usd: float, call_id: str = "", email: str = "", email_status: str = "") -> None:
-    """One paid call to an outside data source, with the email it checked and the word it gave for it."""
-    db = await get_db()
-    await db.execute("INSERT INTO data_spend (chat_id, at, endpoint, usd, call_id, email, email_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (chat_id, dt.now_iso(), endpoint, usd, call_id, email.strip().lower(), email_status))
-    await db.commit()
-
-
-async def data_spent(chat_id: str, since: str) -> float:
-    """Dollars paid to outside data sources by the chat since `since` (an ISO time)."""
-    cursor = await (await get_db()).execute("SELECT COALESCE(SUM(usd), 0) FROM data_spend WHERE chat_id = ? AND at >= ?", (chat_id, since))
-    return (await cursor.fetchone())[0]
-
-
-async def checked_emails(chat_id: str) -> dict[str, str]:
-    """What an outside source said of each email it checked for the chat (the latest word per address)."""
-    cursor = await (await get_db()).execute("SELECT email, email_status FROM data_spend WHERE chat_id = ? AND email != '' ORDER BY id", (chat_id,))
-    return dict(await cursor.fetchall())
-
-
 async def note_source_emails(chat_id: str, server: str, emails: set[str]) -> None:
     db = await get_db()
     await db.executemany("INSERT OR IGNORE INTO source_emails (chat_id, email, server, seen_at) VALUES (?, ?, ?, ?)",
@@ -1170,9 +1150,6 @@ __all__ = [
     "list_decisions",
     "list_open_decisions",
     "run_started",
-    "record_data_spend",
-    "data_spent",
-    "checked_emails",
     "note_source_emails",
     "source_emails",
     "was_pushed",

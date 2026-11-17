@@ -106,7 +106,7 @@ def envelope(ts: dict, *, key: str = "", agenda_id: str = "", numbers: dict | No
            "task": str(ts.get("request") or "")[:300], "about": _about(str(ts.get("request") or "")),
            "status": status, "reason": reason, "retryable": retryable, "summary": _summary(ts.get("summary")),
            "steps": [step_of(s) for s in ts.get("plan") or []], "outputs": outputs,
-           "numbers": {k: numbers[k] for k in ("leads", "credits_spent", "data_spend_usd") if k in numbers},
+           "numbers": {k: numbers[k] for k in ("leads", "credits_spent") if k in numbers},
            "learnings": learnings or [], "next": next_of(status, retryable, outputs, ts.get("campaigns") or []),
            "started_at": _utc(started_at or ts.get("started_at")), "ended_at": _utc(ended_at or ts.get("updated_at"))}
     return {k: v for k, v in out.items() if v not in ("", None, {}) or k in ("learnings", "steps", "outputs", "retryable")}

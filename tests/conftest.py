@@ -53,8 +53,8 @@ def test_app():
 
 @pytest.fixture(autouse=True)
 def _no_live_services(monkeypatch):
-    """The real .env's CRM and treg settings never reach a test: those calls write to live records or spend money."""
-    for key in ("CRM_MCP_URL", "CRM_API_KEY", "TREG_TOKEN"):
+    """The real .env's CRM settings never reach a test: those calls write to live records."""
+    for key in ("CRM_MCP_URL", "CRM_API_KEY"):
         monkeypatch.delenv(key, raising=False)
 
 

@@ -131,6 +131,15 @@ class Sending(BaseModel):
     """The mailbox campaigns send from, when not the connected Gmail account itself (a send-as address on the user's own domain)."""
 
     mailbox: str = Field(default="", pattern=r"^([^@\s]+@[^@\s]+\.[^@\s]+)?$")
+    # Domains of the user's own that an email may link to or name an address at, besides the sender's and the recipient's
+    # (a booking page, the product's site); any other is refused at the send
+    domains: list[str] = Field(default_factory=list, max_length=50)
+    # The bounce stop: a new first email is refused while more than bounce_pct of the last bounce_window sends bounced, and
+    # at least bounce_min did; the user clears it by setting bounces_cleared_at (sends before it stop counting)
+    bounce_pct: float = Field(5, ge=0, le=100)
+    bounce_min: int = Field(3, ge=1)
+    bounce_window: int = Field(100, ge=1, le=1000)
+    bounces_cleared_at: str = ""
 
 
 SCHEMAS: dict[str, TypeAdapter] = {

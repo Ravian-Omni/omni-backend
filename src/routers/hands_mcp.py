@@ -22,7 +22,7 @@ from loguru import logger
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from src.agent_runtime import leads, treg
+from src.agent_runtime import leads, site
 from src.configs.datetime_utils import dt
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
 from src.database import answer_decision
@@ -179,7 +179,7 @@ class HandsThread(Thread):
         self.queue.put_nowait({"type": "completion", "status": "lost", "chat_id": self.chat_id,
                                **({"agenda_id": self.agenda_id} if self.agenda_id else {}), "result": result})
         _active.discard(self.chat_id)
-        treg.end_run(self.chat_id)
+        site.end_run(self.chat_id)
 
     def _base(self) -> dict[str, Any]:
         return run_result.envelope({"chat_id": self.chat_id, "request": self.request}, key=self.key, agenda_id=self.agenda_id)
@@ -205,21 +205,17 @@ class HandsThread(Thread):
             await save_pref(USER_ID, f"learnings:{self.chat_id}", learned)  # task_status shows them too
         return run_result.envelope(ts, key=self.key, agenda_id=self.agenda_id, error=end.get("message", "") if end["type"] == "error" else "",
                                    cancelled=end.get("status") == "cancelled", stop_reason=self.stop_reason, learnings=learned, started_at=self.started_at, ended_at=dt.now_iso(),
-                                   numbers={k: end[k] for k in ("leads", "credits_spent", "data_spend_usd") if k in end})
+                                   numbers={k: end[k] for k in ("leads", "credits_spent") if k in end})
 
     async def _close_round(self, done: dict[str, Any]) -> bool:
         """Put the lead counts on a completion. True when the lead target is not met and sourcing goes on instead: the next
         round is queued as a note, which the manager starts as the next task, and this completion is not shown."""
         tally = await leads.tally(self.chat_id)
         done["credits_spent"] = await needs.credits_approved(self.chat_id, self.started_at)  # across every sourcing round of the run
-        done["data_spend_usd"] = await treg.spent(self.chat_id, self.started_at)  # dollars at treg, apart from credits
         done["leads"] = {"target": self.lead_target or None, "passed": tally["passed"], "failed": tally["failed"]}
-        data_out = await treg.out(self.chat_id, self.started_at)  # the run's dollar cap is reached
         if not self.lead_target:
-            if data_out:
-                done["leads"]["stopped_because"] = "budget_used_up"
             return False
-        why = "stopped" if done.get("status") != "complete" else leads.stop_reason(self.lead_target, tally, self.seen, await budget_left(self.chat_id), self.rounds, data_out)
+        why = "stopped" if done.get("status") != "complete" else leads.stop_reason(self.lead_target, tally, self.seen, await budget_left(self.chat_id), self.rounds)
         if why:
             done["leads"]["stopped_because"] = why
             return False
@@ -326,7 +322,7 @@ async def _begin(run: dict[str, Any]) -> None:
     t.ask_text, t.plan, t.stop_reason, t.asked_at, t.last_event = "", [], "", None, time.monotonic()
     t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
     t.lead_target, t.rounds, t.started_at = max(0, int(run["lead_target"])), 0, dt.now_iso()
-    treg.begin_run(chat_id, t.started_at)  # the run's dollar cap counts from here, across its sourcing rounds
+    site.begin_run(chat_id, t.started_at)  # the run's cap on site reads counts from here, across its sourcing rounds
     t.seen = (await leads.tally(chat_id))["seen"] if t.lead_target else 0
     _threads[key] = t
     _active.add(chat_id)
@@ -461,7 +457,7 @@ async def _expire_questions() -> None:
 def _run_ended(chat_id: str) -> None:
     """A run's last completion went out: its chat is free, so the next queued run may start."""
     _active.discard(chat_id)
-    treg.end_run(chat_id)
+    site.end_run(chat_id)
     task = asyncio.create_task(_dispatch())
     _watching.add(task)
     task.add_done_callback(_watching.discard)

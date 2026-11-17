@@ -9,7 +9,7 @@ import time
 import httpx
 
 from src.agent_runtime import prefs
-from src.agent_runtime.leads import FREE_MAIL
+from src.agent_runtime.leads import FREE_MAIL, bounce_stop
 
 DKIM_SELECTORS = ("google", "selector1", "selector2", "default", "k1", "s1", "mail", "dkim")  # DKIM has no way to list a domain's selectors
 CACHE_S = 3600
@@ -88,12 +88,19 @@ async def mailbox(user_id: str) -> str:
     return address
 
 
+async def own_domains(user_id: str) -> set[str]:
+    """The domains an email may link to as the user's own: the sending mailbox's and the ones listed in prefs "sending"."""
+    listed = {d.strip().lower().removeprefix("www.") for d in (await prefs.get(user_id, "sending"))["domains"]}
+    return {(await mailbox(user_id)).rsplit("@", 1)[-1].lower(), *listed} - {""}
+
+
 async def warnings(user_id: str) -> list[str]:
     """What to tell the user about the address a send goes out from, before it does; empty when nothing is wrong."""
+    stop = [line] if (line := await bounce_stop(user_id)) else []
     address = await mailbox(user_id)
     domain = address.rsplit("@", 1)[-1].lower()
     if not address:
-        return []
+        return stop
     if domain in FREE_MAIL:
-        return [f"{address} is a free-mail address: cold email from it is likely to be filtered. Send from a mailbox on your own domain (prefs \"sending\")."]
-    return await domain_warnings(domain)
+        return [*stop, f"{address} is a free-mail address: cold email from it is likely to be filtered. Send from a mailbox on your own domain (prefs \"sending\")."]
+    return [*stop, *await domain_warnings(domain)]

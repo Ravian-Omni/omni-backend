@@ -9,7 +9,7 @@ import pytest
 
 from src.agent_runtime import creatives, inbox, leads, sender
 from src.agent_runtime.personas import PERSONAS
-from src.database import note_source_emails, record_data_spend
+from src.database import note_source_emails
 from src.omni import orchestrator, signal_play
 from src.services import company_facts as cf
 from tests.unit.test_creatives import BRIEF
@@ -58,11 +58,8 @@ def test_an_address_data_axle_never_returned_gets_no_in_house_check_and_an_agent
     assert guessed[1]["verification_status"] == "" and dns == []  # dropped from whichever column it was written in
 
 
-def test_a_finders_own_word_stays_and_treg_s_word_wins(temp_db, dns):
-    asyncio.run(record_data_spend("chat-1", "treg.people.email.find", 0.02, "c", "bo@acme.com", "catch_all"))
-    rows = [{**ANA, "email_status": "invalid"}, {**ANA, "first_name": "Bo", "email": "bo@acme.com"}]
-    assert mark(rows, {"ana@acme.com", "bo@acme.com"}) == [("fail", "email not verified: invalid", "invalid"),
-                                                           ("fail", "email not verified: catch_all", "catch_all")]
+def test_a_finders_own_word_stays(temp_db, dns):
+    assert mark([{**ANA, "email_status": "invalid"}], {"ana@acme.com"}) == [("fail", "email not verified: invalid", "invalid")]
 
 
 def test_only_a_reserved_servers_answer_is_noted_as_a_source(temp_db):

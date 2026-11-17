@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS suppressions (
     PRIMARY KEY (user_id, email)
 );
 
--- Dollars paid to an outside data source (treg) per call, and the word it gave for an email it checked.
+-- Dollars paid to an outside data source (treg, since removed) per call, and the word it gave for an email it checked: kept as history.
 CREATE TABLE IF NOT EXISTS data_spend (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT NOT NULL,

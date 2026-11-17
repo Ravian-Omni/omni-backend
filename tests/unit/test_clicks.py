@@ -89,6 +89,7 @@ def test_the_send_tool_tracks_a_sent_email_but_not_a_blocked_one_or_a_draft(temp
     monkeypatch.setenv("DAXAGENT_PUBLIC_URL", BASE)
     gmail = AsyncMock(return_value={"successful": True, "data": {}})
     monkeypatch.setattr(sales, "gmail_call", gmail)
+    monkeypatch.setattr(sales.sender, "mailbox", AsyncMock(return_value="me@mine.com"))  # not a Gmail call
     ctx = SimpleNamespace(chat_id="chat-1", user_id="u", persona="outreach", task_id=None, artifacts_dir=str(tmp_path), data_sources=set(), emit=AsyncMock(),
                           decisions=None, send_allowance={"*": 9}, send_approved=set())
     tools = {t.name: t.handler for t in sales.build(ctx)}

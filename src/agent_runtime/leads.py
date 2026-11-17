@@ -12,7 +12,7 @@ from collections import Counter
 from typing import Any
 
 from src.agent_runtime import creatives, crm
-from src.database import checked_emails, find_artifacts, list_artifacts, list_suppressed, note_source_emails, source_emails
+from src.database import find_artifacts, list_artifacts, list_suppressed, note_source_emails, source_emails
 
 # the local part of a shared or role inbox: it reaches a team, not the person
 ROLE_INBOXES = {
@@ -117,6 +117,28 @@ async def written_chats(user_id: str) -> dict[str, str]:
     return out
 
 
+async def bounce_stop(user_id: str) -> str:
+    """Why new first emails are stopped, or "": more than bounce_pct of the user's last bounce_window sends since
+    bounces_cleared_at bounced, and at least bounce_min did (prefs "sending")."""
+    from src.agent_runtime import prefs
+
+    s = await prefs.get(user_id, "sending")
+    sends, bounced = [], set()
+    for record in await find_artifacts(user_id, "", "send_log", 2000):
+        for r in _rows(record["path"]):
+            key = (r.get("plan_id"), str(r.get("to") or "").lower())
+            if r.get("status") == "sent" and str(r.get("at") or "") >= s["bounces_cleared_at"]:
+                sends.append((str(r.get("at") or ""), key))
+            elif r.get("status") == "bounced":
+                bounced.add(key)
+    last = [key for _, key in sorted(sends)[-s["bounce_window"]:]]
+    n = sum(key in bounced for key in last)
+    if n >= s["bounce_min"] and n * 100 > s["bounce_pct"] * len(last):
+        return (f"{n} of your last {len(last)} sends bounced ({n * 100 / len(last):.0f}%, over the {s['bounce_pct']:g}% limit): new first "
+                "emails are stopped until you clear it (prefs \"sending\", bounces_cleared_at). Follow-ups and replies still go.")
+    return ""
+
+
 async def sets(user_id: str, exclude_chat: str | None = None) -> tuple[set[str], set[str]]:
     """(suppressed addresses, addresses already written to) for gate()."""
     return await list_suppressed(user_id), await contacted(user_id, exclude_chat)
@@ -143,15 +165,13 @@ async def _in_house(emails: set[str]) -> dict[str, str]:
 
 
 async def settle(chat_id: str, rows: list[dict[str, Any]]) -> None:
-    """Put on each row the email status code decides, whatever an agent wrote: treg's word for an address it checked; for an
-    address Data Axle returned in this chat with no finder's word on it, the in-house check. A word only the in-house check
-    gives is dropped from any other row."""
-    treg_words, sourced, todo = await checked_emails(chat_id), await source_emails(chat_id), []
+    """Put on each row the email status code decides, whatever an agent wrote: for an address a source returned in this
+    chat (Data Axle, or the company's own site) with no finder's word on it, the in-house check. A word only the in-house
+    check gives is dropped from any other row."""
+    sourced, todo = await source_emails(chat_id), []
     for row in rows:
         email = email_of(row)
-        if (word := treg_words.get(email)) is not None:
-            row["email_status"], row["email_verified"] = word, word in VERIFIED
-        elif email in sourced and _status(row) in ("unchecked", *IN_HOUSE, ""):
+        if email in sourced and _status(row) in ("unchecked", *IN_HOUSE, ""):
             todo.append(row)
         else:
             for k in STATUS_KEYS:
@@ -189,12 +209,12 @@ async def tally(chat_id: str, since: str = "") -> dict[str, Any]:
     return {"seen": len(by_contact), "passed": sum(r.get("gate") == "pass" for r in by_contact.values()), "failed": dict(failed)}
 
 
-def stop_reason(target: int, tally: dict[str, Any], seen_before: int, left: float | None, rounds: int, data_out: bool = False) -> str | None:
-    """Why sourcing ends after a round, or None to go on: the target is met, the budget is used up (credits, or the run's
-    dollars at an outside data source), the round found no new contact (the source is dry), or the safety stop."""
+def stop_reason(target: int, tally: dict[str, Any], seen_before: int, left: float | None, rounds: int) -> str | None:
+    """Why sourcing ends after a round, or None to go on: the target is met, the credit budget is used up, the round found
+    no new contact (the source is dry), or the safety stop."""
     if tally["passed"] >= target:
         return "target_met"
-    if data_out or (left is not None and left < 1):  # not enough for one more credit or one more paid call
+    if left is not None and left < 1:  # not enough for one more credit
         return "budget_used_up"
     if tally["seen"] <= seen_before:
         return "source_dry"
@@ -213,12 +233,40 @@ def next_round(target: int, tally: dict[str, Any]) -> str:
 PLACEHOLDER = re.compile(r"\{\{.*?\}\}|\{[a-z_]+\}|\[(?:your|company|first|last|full|sender|recipient|insert)[^\]]*\]", re.I)
 
 
-def send_problems(recipients: list[str], subject: str, body: str, suppressed: set[str]) -> list[str]:
-    """Why an email must not go out, one line per problem: a placeholder left in it, or a recipient that is a shared
-    inbox or suppressed. The send tool refuses on any; no approval overrides it."""
+# shortcut: a bare domain with no scheme or www ("acme.io") is not seen as a link; add it if drafts start carrying them
+LINK = re.compile(r"(?:https?://|\bwww\.)(?:[^\s/@<>\"']*@)?([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)", re.I)
+# asking to be paid by wire, bank details, crypto or gift cards; offering a gift card is not asking for one
+MONEY = re.compile(
+    r"\bwire (?:transfer|the (?:money|funds|payment)|payment|funds|money)\b|\bbank (?:details|account (?:number|details))\b|\brouting number\b"
+    r"|\biban\b|\bswift code\b|\bwallet address\b|\b(?:pay|send|transfer|deposit)\b[^.?!\n]{0,40}\b(?:bitcoin|btc|ethereum|usdt|crypto\w*)\b"
+    r"|\b(?:buy|purchase|pick up)\b[^.?!\n]{0,40}\bgift ?cards?\b|\bgift ?card (?:codes?|numbers?)\b", re.I)
+
+
+def _within(host: str, domains: set[str]) -> bool:
+    host = host.lower().removeprefix("www.")
+    return any(host == d or host.endswith(f".{d}") for d in domains)
+
+
+def outside_domains(text: str, allowed: set[str]) -> list[str]:
+    """The domains the text links to or names an address at that are not in allowed (or under one of them)."""
+    found = {h.lower() for h in LINK.findall(text)} | {e.rsplit("@", 1)[1].lower() for e in EMAIL.findall(text)}
+    return sorted(h.removeprefix("www.") for h in found if not _within(h, allowed))
+
+
+def send_problems(recipients: list[str], subject: str, body: str, suppressed: set[str], own: set[str] | None = None) -> list[str]:
+    """Why an email must not go out, one line per problem: a placeholder left in it, a recipient that is a shared inbox or
+    suppressed, a link or address at a domain that is neither the user's (own: the sender's and the ones they listed) nor
+    the recipient's, or a request for money by wire, bank details, crypto or gift cards. The send tool refuses on any; no
+    approval overrides it. own None: the link check is skipped."""
     problems = []
-    if found := sorted({m.group(0) for m in PLACEHOLDER.finditer(f"{subject}\n{body}")}):
+    text = f"{subject}\n{body}"
+    if found := sorted({m.group(0) for m in PLACEHOLDER.finditer(text)}):
         problems.append("it has an unfilled placeholder: " + ", ".join(found))
+    if own is not None and (outside := outside_domains(text, {d.lower() for d in own} | {r.strip().lower().rsplit("@", 1)[-1] for r in recipients})):
+        problems.append("it links to or names an address at a domain that is not yours or the recipient's: " + ", ".join(outside)
+                        + " (if it is yours, the user adds it to the sending domains)")
+    if MONEY.search(text):
+        problems.append("it asks for money by wire, bank details, crypto or gift cards")
     for to in recipients:
         if is_shared(to.strip().lower()):
             problems.append(f"{to} is a shared or role inbox")

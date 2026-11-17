@@ -301,8 +301,15 @@ def build(ctx: ToolContext):
                 await own_plan(ctx, args["plan_id"])  # before anything goes out: the send log lives with the plan
             except FileNotFoundError as e:
                 return _error(str(e))
-        if status == "sent" and (problems := leads.send_problems(
-                [args["to"], *(args.get("cc") or []), *(args.get("bcc") or [])], args.get("subject", ""), args["body"], await list_suppressed(ctx.user_id))):
+        problems = []
+        if status == "sent":  # the email as written, before clicks.rewrite puts our redirect on its links
+            text = f"{args.get('subject', '')}\n{args['body']}"
+            own = await sender.own_domains(ctx.user_id) if leads.LINK.search(text) or leads.EMAIL.search(text) else None  # no link: nothing to look up
+            problems = leads.send_problems([args["to"], *(args.get("cc") or []), *(args.get("bcc") or [])], args.get("subject", ""), args["body"],
+                                           await list_suppressed(ctx.user_id), own)
+            if not args.get("thread_id") and (args.get("step") or 1) <= 1 and (stop := await leads.bounce_stop(ctx.user_id)):
+                problems.append(stop)  # first emails only: follow-ups and replies to people who wrote still go
+        if problems:
             reason = "; ".join(problems)
             if args.get("plan_id"):
                 from src.agent_runtime.tools.campaign import record
