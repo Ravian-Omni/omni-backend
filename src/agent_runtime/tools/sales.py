@@ -305,8 +305,10 @@ def build(ctx: ToolContext):
         if status == "sent":  # the email as written, before clicks.rewrite puts our redirect on its links
             text = f"{args.get('subject', '')}\n{args['body']}"
             own = await sender.own_domains(ctx.user_id) if leads.LINK.search(text) or leads.EMAIL.search(text) else None  # no link: nothing to look up
-            problems = leads.send_problems([args["to"], *(args.get("cc") or []), *(args.get("bcc") or [])], args.get("subject", ""), args["body"],
-                                           await list_suppressed(ctx.user_id), own)
+            to_all = [args["to"], *(args.get("cc") or []), *(args.get("bcc") or [])]
+            # a shared inbox goes only where the lead gate passed it in this chat; the lookup is skipped when none is written to
+            resort = await leads.passed_shared(ctx.chat_id) if any(leads.is_shared(t.strip().lower()) for t in to_all) else frozenset()
+            problems = leads.send_problems(to_all, args.get("subject", ""), args["body"], await list_suppressed(ctx.user_id), own, resort)
             if not args.get("thread_id") and (args.get("step") or 1) <= 1 and (stop := await leads.bounce_stop(ctx.user_id)):
                 problems.append(stop)  # first emails only: follow-ups and replies to people who wrote still go
         if problems:

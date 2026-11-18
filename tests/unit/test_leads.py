@@ -47,6 +47,25 @@ def test_each_way_to_fail_the_gate_says_why(changes, why):
     assert verdict(**changes) == ("fail", why)
 
 
+BOX = {"company": "Solo", "email": "newbiz@solo.com", "email_status": "verified"}  # a shared inbox, no person named
+
+
+def test_a_shared_inbox_stands_in_only_when_it_is_the_one_address_the_list_has_for_a_company():
+    """The user, 18 Nov 2026: use a shared inbox when it is the only email a company has."""
+    rows = [dict(GOOD), {**GOOD, "email": "info@acme.com"}, dict(BOX), {**BOX, "email": "hello@solo.com"}]
+    resort = leads.last_resorts(rows)
+    assert resort == {"newbiz@solo.com"}  # Acme has Ana's own address; of Solo's two inboxes, the first
+    assert leads.gate(BOX, set(), set(), resort=resort) == ("pass", "")
+    assert leads.gate({**GOOD, "email": "info@acme.com"}, set(), set(), resort=resort) == ("fail", "shared or role inbox")
+    assert leads.gate({**BOX, "email": "hello@solo.com"}, set(), set(), resort=resort) == ("fail", "no full name")
+    # the inbox that stands in is held to every other check
+    assert leads.gate({**BOX, "email_status": ""}, set(), set(), resort=resort) == ("fail", "email not checked by the source")
+    assert leads.gate(BOX, {"solo.com"}, set(), resort=resort) == ("fail", "suppressed")
+    assert leads.gate(BOX, set(), {"newbiz@solo.com"}, resort=resort) == ("fail", "already written to")
+    assert leads.last_resorts([{"email": "info@gmail.com"}]) == {"info@gmail.com"}  # still refused, as free mail
+    assert leads.gate({"email": "info@gmail.com", "email_status": "verified"}, set(), set(), resort={"info@gmail.com"})[1].startswith("free-mail")
+
+
 def test_the_source_name_columns_the_enrichers_really_write_are_read():
     row = {"contact_first_name": "Ana", "contact_last_name": "Silva", "business_email": "ana@acme.com", "email_status": "valid"}
     assert leads.gate(row, set(), set()) == ("pass", "")
@@ -90,6 +109,23 @@ def test_a_campaign_renders_only_for_the_contacts_that_pass(ctx, tmp_path):
     out = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p1"))
     assert [m["to"] for m in out["ready"]] == ["ana@acme.com"]
     assert out["skipped"] == {"not a lead: shared or role inbox": 1, "not a lead: email not checked by the source": 1}
+
+
+def test_a_companys_only_shared_inbox_is_saved_as_a_lead_and_rendered_with_the_briefs_fallback_name(ctx, tmp_path):
+    rows = [dict(GOOD), dict(BOX)]
+    record = asyncio.run(artifacts.write(ctx, "enriched_contacts", "Contacts", rows))
+    saved = json.load(open(record["path"]))["rows"]
+    assert [(r["gate"], r["gate_reason"]) for r in saved] == [("pass", ""), ("pass", "")]
+    step = {"segment": "all", "step": 1, "channel": "email", "status": "approved", "subject": "A note", "body": "Hi {{first_name}}, a note."}
+    brief = {"opt_out": "Reply STOP", "postal_address": "1 Main St"}
+    for name, fallbacks in (("p1", {"first_name": "there"}), ("p2", {})):
+        plan = {"rows": [step], "meta": {"audience_artifact_id": record["id"], "brief": {**brief, "fallbacks": fallbacks}}}
+        (tmp_path / f"campaign_plan-{name}.json").write_text(json.dumps(plan))
+    out = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p1"))
+    assert {m["to"]: m["body"].split(",")[0] for m in out["ready"]} == {"ana@acme.com": "Hi Ana", "newbiz@solo.com": "Hi there"}
+    held = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p2"))  # no fallback: the inbox is held, never greeted with a blank
+    assert [m["to"] for m in held["ready"]] == ["ana@acme.com"] and held["skipped"] == {"empty first_name": 1}
+    assert asyncio.run(leads.passed_shared("chat-1")) == {"newbiz@solo.com"}  # what the send gate lets through
 
 
 def test_follow_ups_to_contacts_already_written_to_still_go_but_shared_inboxes_do_not(ctx, tmp_path):

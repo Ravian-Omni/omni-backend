@@ -60,6 +60,16 @@ def test_a_shared_or_role_inbox_is_not_written_to(send, to):
     gmail.assert_not_called()
 
 
+def test_a_shared_inbox_the_lead_gate_passed_in_this_chat_is_written_to(send, monkeypatch):
+    """The user, 18 Nov 2026: a shared inbox is used when it is the only address a company has. The send gate lets through
+    exactly the ones the lead gate passed, so the two cannot disagree."""
+    run, gmail, _ = send
+    monkeypatch.setattr(leads, "passed_shared", AsyncMock(return_value={"newbiz@solo.com"}))
+    assert not run(to="newbiz@solo.com").get("is_error")
+    gmail.assert_called_once()
+    assert "info@acme.com is a shared or role inbox" in refused(run(to="info@acme.com"))  # one the gate did not pass
+
+
 def test_a_suppressed_address_is_not_written_to_and_cc_and_bcc_count(send):
     run, gmail, _ = send
     asyncio.run(suppress_email("u", "Gone@Acme.com", "unsubscribe"))

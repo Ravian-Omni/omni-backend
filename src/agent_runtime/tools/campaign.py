@@ -165,8 +165,9 @@ async def render_plan(ctx: ToolContext, plan_id: str, only_step: int | None = No
     suppressed, written = await leads.sets(ctx.user_id, ctx.chat_id)
     worked = await leads.proven(ctx.chat_id)
     await leads.settle(ctx.chat_id, audience)  # the statuses code decides, also on an audience that never went through save
+    resort = leads.last_resorts(audience)
     for row in audience:
-        verdict, why = leads.gate(row, suppressed, written, worked)
+        verdict, why = leads.gate(row, suppressed, written, worked, resort)
         if verdict != "pass":
             skipped.update([f"not a lead: {why}"])  # once per contact, whatever the step says
             continue
@@ -222,7 +223,7 @@ async def add_touch(user_id: str, chat_id: str, to: str, subject: str, body: str
     audience, row = found
     suppressed, written = await leads.sets(user_id, chat_id)
     await leads.settle(chat_id, [row])
-    verdict, why = leads.gate(row, suppressed, written, await leads.proven(chat_id))
+    verdict, why = leads.gate(row, suppressed, written, await leads.proven(chat_id), leads.last_resorts(leads._rows(audience["path"])))
     if verdict != "pass":
         return refused(f"did not pass the lead gate: {why}")
     for rec in saved:

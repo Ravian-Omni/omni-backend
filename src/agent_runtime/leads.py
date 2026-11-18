@@ -1,7 +1,8 @@
 """The lead gate (signals contract [8]): whether a contact counts as a lead is decided here, in code, never by a prompt.
 
 A lead is a named person with a business email of their own that the source checked, who is not suppressed and was not
-written to before. Every enriched_contacts row is marked `gate` pass or fail with its `gate_reason` when it is saved,
+written to before. A company's shared inbox stands in only when it is the one address the list has for that company
+(last_resorts). Every enriched_contacts row is marked `gate` pass or fail with its `gate_reason` when it is saved,
 and a campaign sends only to rows that pass when it is rendered.
 """
 
@@ -51,15 +52,28 @@ def _checked(row: dict[str, Any]) -> bool:
     return str(row.get("email_verified")).lower() in ("true", "yes", "1") or _status(row) in VERIFIED
 
 
-def gate(row: dict[str, Any], suppressed: set[str], contacted: set[str], proven: set[str] = frozenset()) -> tuple[str, str]:
+def last_resorts(rows: list[dict[str, Any]]) -> set[str]:
+    """The shared inboxes a list may write to (the user, 18 Nov 2026: a shared inbox is used when it is the only address a
+    company has): for each company, told by the email's domain, with no address of a person's own in the list, its first."""
+    by_domain: dict[str, list[str]] = {}
+    for row in rows:
+        if "@" in (email := email_of(row)):
+            by_domain.setdefault(email.rsplit("@", 1)[1], []).append(email)
+    return {emails[0] for emails in by_domain.values() if all(is_shared(e) for e in emails)}
+
+
+def gate(row: dict[str, Any], suppressed: set[str], contacted: set[str], proven: set[str] = frozenset(),
+         resort: set[str] = frozenset()) -> tuple[str, str]:
     """("pass", "") or ("fail", why): the first check the row fails. proven: addresses this chat already wrote to without a
-    bounce: the send showed they work, so they count as checked; every other check still applies."""
+    bounce: the send showed they work, so they count as checked; every other check still applies. resort: the shared inboxes
+    its list may write to (last_resorts): one of those needs no person's name, and passes every other check like any row."""
     name, email = _named(row), email_of(row)
+    allowed = email in resort
     for fails, why in (
-        (len(name.split()) < 2, "no full name"),
+        (len(name.split()) < 2 and not allowed, "no full name"),
         ("*" in name or "*" in email, "masked by the source"),
         (not email, "no email"),
-        (is_shared(email), "shared or role inbox"),
+        (is_shared(email) and not allowed, "shared or role inbox"),
         (email.split("@")[-1] in FREE_MAIL, "free-mail address, not a business email"),
         (not _checked(row) and email not in proven, f"email not verified: {_status(row)}" if _status(row) else "email not checked by the source"),
         (email in suppressed or email.split("@")[-1] in suppressed, "suppressed"),  # an address, or its whole domain
@@ -188,12 +202,18 @@ async def mark(user_id: str, chat_id: str, rows: list[dict[str, Any]]) -> None:
 
     suppressed, written = await sets(user_id, chat_id)
     await settle(chat_id, rows)
-    agenda = None
+    agenda, resort = None, last_resorts(rows)
     for row in rows:
-        row["gate"], row["gate_reason"] = gate(row, suppressed, written)
+        row["gate"], row["gate_reason"] = gate(row, suppressed, written, resort=resort)
         if row["gate"] == "pass" and crm.configured():  # the CRM gets every lead, in the background
             agenda = agenda if agenda is not None else await needs.agenda_of(chat_id)
             crm.later(lambda row=row: crm.lead(row, chat_id, agenda))
+
+
+async def passed_shared(chat_id: str) -> set[str]:
+    """The shared inboxes this chat's saved contacts passed the gate with: the only ones a send may go to."""
+    return {email_of(r) for record in await list_artifacts(chat_id) if record["kind"] == "enriched_contacts"
+            for r in _rows(record["path"]) if r.get("gate") == "pass" and is_shared(email_of(r))}
 
 
 async def tally(chat_id: str, since: str = "") -> dict[str, Any]:
@@ -253,11 +273,13 @@ def outside_domains(text: str, allowed: set[str]) -> list[str]:
     return sorted(h.removeprefix("www.") for h in found if not _within(h, allowed))
 
 
-def send_problems(recipients: list[str], subject: str, body: str, suppressed: set[str], own: set[str] | None = None) -> list[str]:
+def send_problems(recipients: list[str], subject: str, body: str, suppressed: set[str], own: set[str] | None = None,
+                  resort: set[str] = frozenset()) -> list[str]:
     """Why an email must not go out, one line per problem: a placeholder left in it, a recipient that is a shared inbox or
     suppressed, a link or address at a domain that is neither the user's (own: the sender's and the ones they listed) nor
     the recipient's, or a request for money by wire, bank details, crypto or gift cards. The send tool refuses on any; no
-    approval overrides it. own None: the link check is skipped."""
+    approval overrides it. own None: the link check is skipped. resort: the shared inboxes the lead gate passed in this chat
+    (passed_shared): the send gate lets through exactly those."""
     problems = []
     text = f"{subject}\n{body}"
     if found := sorted({m.group(0) for m in PLACEHOLDER.finditer(text)}):
@@ -268,7 +290,7 @@ def send_problems(recipients: list[str], subject: str, body: str, suppressed: se
     if MONEY.search(text):
         problems.append("it asks for money by wire, bank details, crypto or gift cards")
     for to in recipients:
-        if is_shared(to.strip().lower()):
+        if is_shared(to.strip().lower()) and to.strip().lower() not in resort:
             problems.append(f"{to} is a shared or role inbox")
         if to.strip().lower() in suppressed or to.strip().lower().split("@")[-1] in suppressed:
             problems.append(f"{to} is suppressed")
