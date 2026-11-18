@@ -101,11 +101,12 @@ def test_without_a_brief_to_copy_the_sign_off_it_refuses(chat, tmp_path):
     assert touch() == {"refused": "no sign-off: no campaign brief has a postal_address and opt_out to copy"}
 
 
-def test_approve_plan_steps_leaves_a_touch_for_the_user(chat, monkeypatch):
+def test_approve_plan_steps_approves_a_touch_like_any_step(chat, monkeypatch):
+    """The user, 18 Nov 2026: a draft that passes every check is approved without them, product-led ones included."""
     monkeypatch.setattr(hm, "USER_ID", "u")
     plan_id = touch()["plan_id"]
     out = asyncio.run(hm.approve_plan_steps("chat-1", plan_id))
-    assert out["approved_now"] == 0 and plan_of(chat, plan_id)["rows"][0]["status"] == "draft"
+    assert out["approved_now"] == 1 and plan_of(chat, plan_id)["rows"][0]["status"] == "approved"
 
 
 def _old_steps_for(plan, row):  # steps_for before `to` rows existed

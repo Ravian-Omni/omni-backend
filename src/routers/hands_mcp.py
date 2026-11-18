@@ -604,8 +604,7 @@ async def approve_plan_steps(chat_id: str, plan_id: str, steps: list[int] | None
     if record["kind"] != "campaign_plan":
         raise ValueError(f"{plan_id} is a {record['kind']}, not a campaign plan")
     rows = payload.get("rows", [])
-    # a touch Brain_Hands wrote (add_touch, a row with `to`) is approved by the user on the campaign page, never from here
-    newly = [r for r in rows if r.get("status") != "approved" and not r.get("to") and (not steps or int(r.get("step") or 1) in steps)]
+    newly = [r for r in rows if r.get("status") != "approved" and (not steps or int(r.get("step") or 1) in steps)]
     for r in newly:
         r["status"] = "approved"
     if newly:
@@ -624,8 +623,8 @@ async def add_touch(chat_id: str, to: str, subject: str, body: str, send_after_d
     body: plain text; it may use {{first_name}}, {{company}}, {{title}} and {{sender_name}}-style tokens, filled per
     recipient; the sign-off (sender, postal address, opt-out) is added when sending. Step 1: at most 85 words and no link;
     a later step: at most one link. A later step goes in the first email's thread, after the step before it was sent and
-    send_after_days after the first email. Nothing is sent: the user approves the step on the campaign page, then a send
-    asks send_approval as usual. Refusals: empty subject or body; not a contact saved in this chat; did not pass the lead
+    send_after_days after the first email. Nothing is sent: the step is a draft until it is approved (on the campaign page,
+    or by approve_plan_steps), then a send asks send_approval as usual. Refusals: empty subject or body; not a contact saved in this chat; did not pass the lead
     gate: <why>; replied; bounced; not a campaign plan of this chat; not in the plan's contacts list; already in plan <id>;
     no sign-off; first email over 85 words; a link in the first email; more than one link; masked, empty or unknown tokens."""
     if not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
