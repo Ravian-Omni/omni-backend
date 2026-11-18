@@ -52,24 +52,34 @@ def _checked(row: dict[str, Any]) -> bool:
     return str(row.get("email_verified")).lower() in ("true", "yes", "1") or _status(row) in VERIFIED
 
 
-def last_resorts(rows: list[dict[str, Any]]) -> set[str]:
+def last_resorts(rows: list[dict[str, Any]]) -> dict[str, str]:
     """The shared inboxes a list may write to (the user, 18 Nov 2026: a shared inbox is used when it is the only address a
-    company has): for each company, told by the email's domain, with no address of a person's own in the list, its first."""
+    company has), each with "": for each company, told by the email's domain, with no address of a person's own in the
+    list, its first. A shared inbox at a company where a person's own address is listed is given with why it may not."""
     by_domain: dict[str, list[str]] = {}
     for row in rows:
         if "@" in (email := email_of(row)):
             by_domain.setdefault(email.rsplit("@", 1)[1], []).append(email)
-    return {emails[0] for emails in by_domain.values() if all(is_shared(e) for e in emails)}
+    out: dict[str, str] = {}
+    for domain, emails in by_domain.items():
+        if all(is_shared(e) for e in emails):
+            out[emails[0]] = ""
+        else:
+            out.update({e: f"a person at {domain} is listed with their own address" for e in emails if is_shared(e)})
+    return out
 
 
 def gate(row: dict[str, Any], suppressed: set[str], contacted: set[str], proven: set[str] = frozenset(),
-         resort: set[str] = frozenset()) -> tuple[str, str]:
+         resort: dict[str, str] | None = None) -> tuple[str, str]:
     """("pass", "") or ("fail", why): the first check the row fails. proven: addresses this chat already wrote to without a
     bounce: the send showed they work, so they count as checked; every other check still applies. resort: the shared inboxes
-    its list may write to (last_resorts): one of those needs no person's name, and passes every other check like any row."""
+    its list may write to (last_resorts): one of those needs no person's name, and passes every other check like any row;
+    one refused there because a person is listed at its company fails saying so."""
     name, email = _named(row), email_of(row)
-    allowed = email in resort
+    why_not = (resort or {}).get(email)
+    allowed = why_not == ""
     for fails, why in (
+        (bool(why_not), f"shared or role inbox: {why_not}"),
         (len(name.split()) < 2 and not allowed, "no full name"),
         ("*" in name or "*" in email, "masked by the source"),
         (not email, "no email"),

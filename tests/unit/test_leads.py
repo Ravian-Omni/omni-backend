@@ -54,16 +54,18 @@ def test_a_shared_inbox_stands_in_only_when_it_is_the_one_address_the_list_has_f
     """The user, 18 Nov 2026: use a shared inbox when it is the only email a company has."""
     rows = [dict(GOOD), {**GOOD, "email": "info@acme.com"}, dict(BOX), {**BOX, "email": "hello@solo.com"}]
     resort = leads.last_resorts(rows)
-    assert resort == {"newbiz@solo.com"}  # Acme has Ana's own address; of Solo's two inboxes, the first
+    assert resort == {"newbiz@solo.com": "", "info@acme.com": "a person at acme.com is listed with their own address"}  # of Solo's two inboxes, the first
     assert leads.gate(BOX, set(), set(), resort=resort) == ("pass", "")
-    assert leads.gate({**GOOD, "email": "info@acme.com"}, set(), set(), resort=resort) == ("fail", "shared or role inbox")
+    assert leads.gate({**GOOD, "email": "info@acme.com"}, set(), set(), resort=resort) == ("fail", "shared or role inbox: a person at acme.com is listed with their own address")
+    assert leads.gate({"email": "info@acme.com", "email_status": "verified"}, set(), set(), resort=resort)[1].endswith("is listed with their own address")  # unnamed too
+    assert leads.gate({**GOOD, "email": "info@acme.com"}, set(), set()) == ("fail", "shared or role inbox")  # no list given: the plain words
     assert leads.gate({**BOX, "email": "hello@solo.com"}, set(), set(), resort=resort) == ("fail", "no full name")
     # the inbox that stands in is held to every other check
     assert leads.gate({**BOX, "email_status": ""}, set(), set(), resort=resort) == ("fail", "email not checked by the source")
     assert leads.gate(BOX, {"solo.com"}, set(), resort=resort) == ("fail", "suppressed")
     assert leads.gate(BOX, set(), {"newbiz@solo.com"}, resort=resort) == ("fail", "already written to")
-    assert leads.last_resorts([{"email": "info@gmail.com"}]) == {"info@gmail.com"}  # still refused, as free mail
-    assert leads.gate({"email": "info@gmail.com", "email_status": "verified"}, set(), set(), resort={"info@gmail.com"})[1].startswith("free-mail")
+    assert leads.last_resorts([{"email": "info@gmail.com"}]) == {"info@gmail.com": ""}  # still refused, as free mail
+    assert leads.gate({"email": "info@gmail.com", "email_status": "verified"}, set(), set(), resort={"info@gmail.com": ""})[1].startswith("free-mail")
 
 
 def test_the_source_name_columns_the_enrichers_really_write_are_read():
@@ -96,7 +98,7 @@ def test_every_enriched_contacts_row_is_marked_with_its_gate_when_saved(ctx):
         return record, json.load(open(record["path"]))
 
     record, payload = asyncio.run(scenario())
-    assert [(r["gate"], r["gate_reason"]) for r in payload["rows"]] == [("pass", ""), ("fail", "shared or role inbox"), ("fail", "suppressed")]
+    assert [(r["gate"], r["gate_reason"]) for r in payload["rows"]] == [("pass", ""), ("fail", "shared or role inbox: a person at acme.com is listed with their own address"), ("fail", "suppressed")]
     assert {"gate", "gate_reason"} <= set(payload["columns"])  # shown in the table
 
 
@@ -108,7 +110,7 @@ def test_a_campaign_renders_only_for_the_contacts_that_pass(ctx, tmp_path):
     (tmp_path / "enriched_contacts-a1.json").write_text(json.dumps({"rows": audience}))
     out = asyncio.run(campaign.render_plan(ctx, "campaign_plan-p1"))
     assert [m["to"] for m in out["ready"]] == ["ana@acme.com"]
-    assert out["skipped"] == {"not a lead: shared or role inbox": 1, "not a lead: email not checked by the source": 1}
+    assert out["skipped"] == {"not a lead: shared or role inbox: a person at bo.com is listed with their own address": 1, "not a lead: email not checked by the source": 1}
 
 
 def test_a_companys_only_shared_inbox_is_saved_as_a_lead_and_rendered_with_the_briefs_fallback_name(ctx, tmp_path):
@@ -146,7 +148,7 @@ def test_follow_ups_to_contacts_already_written_to_still_go_but_shared_inboxes_d
 
     out = asyncio.run(scenario())
     assert sorted(m["to"] for m in out["ready"]) == ["ana@acme.com", "bo@acme.com"]
-    assert out["skipped"] == {"not a lead: shared or role inbox": 3, "not a lead: email not checked by the source": 1}
+    assert out["skipped"] == {"not a lead: shared or role inbox: a person at acme.com is listed with their own address": 3, "not a lead: email not checked by the source": 1}
 
 
 def test_a_contact_this_chat_wrote_to_is_not_a_duplicate_but_another_chats_is(ctx, tmp_path):

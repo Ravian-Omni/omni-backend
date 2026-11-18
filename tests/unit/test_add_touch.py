@@ -67,12 +67,12 @@ def test_later_touches_number_on_and_only_their_person_gets_them_after_the_user_
     assert sorted((m["to"], m["step"]) for m in out["ready"]) == [("ana@acme.com", 1), ("bo@acme.com", 1)]  # step 2 waits for step 1
     ana = next(m for m in out["ready"] if m["to"] == "ana@acme.com")
     assert ana["body"].startswith("Hi Ana, Rival Co cut prices 20% on Nov 12 (Retail Weekly). For Acme that means") and ana["body"].endswith("Reply STOP to opt out")
-    assert out["skipped"] == {"previous step not sent": 1, "not a lead: shared or role inbox": 1}  # info@ never had a step, but fails the gate first
+    assert out["skipped"] == {"previous step not sent": 1, "not a lead: shared or role inbox: a person at acme.com is listed with their own address": 1}  # info@ never had a step, but fails the gate first
 
 
 @pytest.mark.parametrize("args, why", [
     ({"to": "nobody@acme.com"}, "not a contact saved in this chat"),
-    ({"to": "info@acme.com"}, "did not pass the lead gate: shared or role inbox"),
+    ({"to": "info@acme.com"}, "did not pass the lead gate: shared or role inbox: a person at acme.com is listed with their own address"),
     ({"body": " ".join(["word"] * 86)}, "first email over 85 words"),
     ({"body": "See https://acme.com"}, "a link in the first email"),
     ({"body": "Hi {{nickname}}"}, "unknown token nickname; empty nickname"),
