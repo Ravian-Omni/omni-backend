@@ -140,6 +140,8 @@ class Sending(BaseModel):
     bounce_min: int = Field(3, ge=1)
     bounce_window: int = Field(100, ge=1, le=1000)
     bounces_cleared_at: str = ""
+    # The daily limit: campaign emails sent in the last 24 hours, across every campaign; one more is refused at it. 0: no limit
+    daily_cap: int = Field(25, ge=0, le=2000)
 
 
 SCHEMAS: dict[str, TypeAdapter] = {

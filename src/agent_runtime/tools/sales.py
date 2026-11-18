@@ -318,6 +318,8 @@ def build(ctx: ToolContext):
 
                 await record(ctx, args["plan_id"], {"to": args["to"].lower(), "step": args.get("step"), "status": "blocked", "reason": reason})
             return _error(f"Not sent: {reason}. No approval overrides this: fix the plan or leave the recipient out.")
+        if status == "sent" and (stop := await leads.daily_stop(ctx.user_id)):  # nothing wrong with the email: it waits
+            return _error(f"Not sent: {stop}")
         if status == "sent":
             key = "message_body" if "message_body" in arguments else "body"
             arguments[key] = await clicks.rewrite(arguments[key], bool(arguments.get("is_html")), args["to"], args.get("plan_id", ""), args.get("step"), args.get("subject", ""))

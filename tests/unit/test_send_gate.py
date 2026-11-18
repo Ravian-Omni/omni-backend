@@ -164,3 +164,27 @@ def test_too_many_bounces_stop_new_first_emails_until_the_user_clears_it(send, t
 def test_the_stop_needs_more_than_5_percent_and_at_least_3(temp_db, tmp_path, sent, bounced, stops):
     _sends(tmp_path, sent, bounced)
     assert bool(asyncio.run(leads.bounce_stop("u"))) is stops
+
+
+# --- the daily send limit
+def test_campaign_emails_stop_at_the_daily_limit_and_go_on_once_a_day_has_passed(send, tmp_path):
+    """The only daily cap was a line in Outreach's instructions: a send started in DAXAGENT's own app had none."""
+    from src.agent_runtime import prefs
+    from src.configs.datetime_utils import dt
+
+    run, gmail, _ = send
+    asyncio.run(prefs.put("u", "sending", {"daily_cap": 3}))
+    _sends(tmp_path, sent=3, bounced=0, at=dt.now_iso()[:19] + "+00:00")  # three went out in the last 24 hours
+    assert "3 emails went out in the last 24 hours, the daily limit of 3" in refused(run())
+    assert "the daily limit of 3" in refused(run(step=2, thread_id="t1"))  # a follow-up is a campaign email too
+    gmail.assert_not_called()
+    asyncio.run(prefs.put("u", "sending", {"daily_cap": 0}))  # 0: no limit
+    assert not run().get("is_error")
+
+
+def test_sends_older_than_a_day_do_not_count_toward_the_limit(temp_db, tmp_path):
+    from src.agent_runtime import prefs
+
+    asyncio.run(prefs.put("u", "sending", {"daily_cap": 3}))
+    _sends(tmp_path, sent=40, bounced=0)  # all on 16 Nov 2026
+    assert asyncio.run(leads.daily_stop("u")) == ""

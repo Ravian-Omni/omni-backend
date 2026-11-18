@@ -153,6 +153,26 @@ async def bounce_stop(user_id: str) -> str:
     return ""
 
 
+async def daily_stop(user_id: str) -> str:
+    """Why no more campaign emails go out for now, or "": the user's campaigns sent daily_cap of them in the last 24 hours
+    (prefs "sending"; 0: no limit). A reply to a person who wrote is sent by the handoff, not here, and is never held."""
+    from datetime import timedelta
+
+    from src.agent_runtime import prefs
+    from src.configs.datetime_utils import dt
+
+    cap = (await prefs.get(user_id, "sending"))["daily_cap"]
+    if not cap:
+        return ""
+    since = (dt.now() - timedelta(hours=24)).isoformat()
+    n = sum(r.get("status") == "sent" and str(r.get("at") or "") >= since
+            for record in await find_artifacts(user_id, "", "send_log", 2000) for r in _rows(record["path"]))
+    if n < cap:
+        return ""
+    return (f"{n} emails went out in the last 24 hours, the daily limit of {cap} (prefs \"sending\", daily_cap): this one waits "
+            "until a day has passed. Replies to people who wrote still go.")
+
+
 async def sets(user_id: str, exclude_chat: str | None = None) -> tuple[set[str], set[str]]:
     """(suppressed addresses, addresses already written to) for gate()."""
     return await list_suppressed(user_id), await contacted(user_id, exclude_chat)
