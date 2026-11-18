@@ -35,13 +35,15 @@ class ToolContext:
     data_sources: set[str] = field(default_factory=set)
 
     def resolve_tool(self, short_or_full: str) -> str | None:
-        """Find the full name of a known remote tool from its short name."""
+        """Find the full name of a known remote tool from its short name, or from the name a vendor put its own prefix on
+        (business_enrichment for salesgenie_business_enrichment) when exactly one tool ends with it."""
         if short_or_full in self.remote_tool_classes:
             return short_or_full
         for full in self.remote_tool_classes:
             if full.endswith("__" + short_or_full):
                 return full
-        return None
+        loose = [full for full in self.remote_tool_classes if full.endswith("_" + short_or_full)]
+        return loose[0] if len(loose) == 1 else None
 
 
 def server_of(full_tool: str) -> str:

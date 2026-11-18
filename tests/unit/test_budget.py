@@ -119,3 +119,16 @@ def test_the_web_app_sets_and_reads_a_tasks_budget(temp_db):
     assert client.put("/agents/budget/chat-w", json={"credits": 40}).json()["credits_left"] == 40
     assert client.get("/agents/budget/chat-w").json()["credits_left"] == 40
     assert client.put("/agents/budget/chat-w", json={"credits": -1}).status_code == 422
+
+
+def test_a_spend_approval_finds_a_tool_by_the_name_its_vendor_prefixed():
+    """16 Nov 2026: the instructions say business_enrichment, the server lists salesgenie_business_enrichment, and a
+    13-record batch was dropped as "Unknown tool"."""
+    from src.agent_runtime.tools.context import ToolContext
+    known = {"mcp__data-axle__salesgenie_business_enrichment": "spend", "mcp__data-axle__salesgenie_business_search": "read",
+             "mcp__data-axle__salesgenie_consumer_enrichment": "spend"}
+    find = lambda name: ToolContext.resolve_tool(SimpleNamespace(remote_tool_classes=known), name)  # noqa: E731
+    assert find("business_enrichment") == "mcp__data-axle__salesgenie_business_enrichment"
+    assert find("salesgenie_business_search") == "mcp__data-axle__salesgenie_business_search"  # the exact short name, as before
+    assert find("contact_enrichment") is None  # no such tool: still unknown
+    assert find("enrichment") is None  # two tools end with it: never a guess
