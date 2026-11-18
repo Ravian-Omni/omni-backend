@@ -98,7 +98,7 @@ def test_a_person_who_replied_or_bounced_gets_no_new_touch(chat):
 
 def test_without_a_brief_to_copy_the_sign_off_it_refuses(chat, tmp_path):
     (tmp_path / "campaign_plan-old00000.json").write_text(json.dumps({"rows": [], "meta": {"brief": {"opt_out": "Reply STOP"}}}))
-    assert touch() == {"refused": "no sign-off: no campaign brief has a postal_address and opt_out to copy"}
+    assert touch() == {"refused": "no sign-off: give postal_address and opt_out, or keep a campaign brief that has both"}
 
 
 def test_approve_plan_steps_approves_a_touch_like_any_step(chat, monkeypatch):
@@ -127,3 +127,11 @@ def _old_steps_for(plan, row):  # steps_for before `to` rows existed
 def test_a_plan_with_no_to_rows_picks_the_same_steps_as_before(plan):
     for row in ({"email": "a@b.com", "industry": "Retail"}, {"email": "c@d.com", "industry": "Food", "play": "follow"}, {}):
         assert creatives.steps_for(plan, row) == _old_steps_for(plan, row)
+
+
+def test_a_sign_off_given_is_the_new_plans_brief_and_a_partial_one_is_refused(chat):
+    mine = {"sender_name": "Lo", "sender_company": "Fresh Co", "postal_address": "9 New St", "opt_out": "Reply STOP", "sender_title": " "}
+    out = asyncio.run(campaign.add_touch("u", "chat-1", "ana@acme.com", "Hi", FIRST, 0, "", mine))
+    assert plan_of(chat, out["plan_id"])["meta"]["brief"] == {"sender_name": "Lo", "sender_company": "Fresh Co", "postal_address": "9 New St", "opt_out": "Reply STOP"}
+    partial = asyncio.run(campaign.add_touch("u", "chat-1", "bo@acme.com", "Hi", FIRST, 0, "", {"sender_name": "Lo", "postal_address": "9 New St"}))
+    assert partial == {"refused": "no sign-off: give postal_address and opt_out, or keep a campaign brief that has both"}  # not filled from the old brief

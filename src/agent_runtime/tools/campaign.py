@@ -207,11 +207,13 @@ async def render_plan(ctx: ToolContext, plan_id: str, only_step: int | None = No
 _touching = asyncio.Lock()  # two touches added at once must not both rewrite the same plan file
 
 
-async def add_touch(user_id: str, chat_id: str, to: str, subject: str, body: str, send_after_days: int = 0, plan_id: str = "") -> dict[str, Any]:
+async def add_touch(user_id: str, chat_id: str, to: str, subject: str, body: str, send_after_days: int = 0, plan_id: str = "",
+                    sign_off: dict[str, str] | None = None) -> dict[str, Any]:
     """One email for one person, its copy stored exactly as given, as a draft step of the chat's plan (contract [21] item 4):
     {plan_id, step, status} or {refused: why}. The person must pass the lead gate in this chat now, from its saved contacts.
     The step is the person's highest step plus one; with no plan_id a plan is started, on the contacts list that holds them
-    and with the sign-off of the newest campaign brief that has one. The user approves it on the campaign page."""
+    and with the sign-off given (sender_name, sender_title, sender_company, postal_address, opt_out), else that of the newest
+    campaign brief that has one. The user approves it on the campaign page."""
     to = to.strip().lower()
     refused = lambda why: {"refused": why}  # noqa: E731
     if not subject.strip() or not body.strip():
@@ -249,10 +251,13 @@ async def add_touch(user_id: str, chat_id: str, to: str, subject: str, body: str
             if mine := next((rec["id"] for rec in saved if rec["kind"] == "campaign_plan"
                              and any(str(s.get("to") or "").lower() == to for s in leads._rows(rec["path"]))), None):
                 return refused(f"already in plan {mine}: pass its plan_id")
-            plans = await find_artifacts(user_id, "", "campaign_plan", 200)  # the user's, newest first
-            brief = next((b for rec in plans if (b := _brief(rec["path"])).get("postal_address") and b.get("opt_out")), None)
+            if given := {k: v.strip() for k, v in (sign_off or {}).items() if v and v.strip()}:
+                brief = given if given.get("postal_address") and given.get("opt_out") else None
+            else:
+                plans = await find_artifacts(user_id, "", "campaign_plan", 200)  # the user's, newest first
+                brief = next((b for rec in plans if (b := _brief(rec["path"])).get("postal_address") and b.get("opt_out")), None)
             if not brief:
-                return refused("no sign-off: no campaign brief has a postal_address and opt_out to copy")
+                return refused("no sign-off: give postal_address and opt_out, or keep a campaign brief that has both")
             record, plan = None, {"rows": []}
         n = max((int(s.get("step") or 1) for s in plan["rows"] if str(s.get("to") or "").lower() == to), default=0) + 1
         links = len(creatives.LINK.findall(body))
