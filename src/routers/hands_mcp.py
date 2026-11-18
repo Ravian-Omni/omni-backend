@@ -476,7 +476,8 @@ async def next_event(key: str, timeout: int = 25) -> dict[str, Any]:
         await _dispatch()  # its turn may have come without another run ending here
     if not _find(key) and (waiting := await queued_run(key)):  # behind another run: nothing yet
         return {"chat_id": waiting["chat_id"], "events": [], "closed": False, "pending": False, "queued": True, "position": waiting["position"]}
-    t = _thread(key)
+    if not (t := _find(key)):  # not running here (it ended before a restart, or never was): over, so the poller stops
+        return {"chat_id": key, "events": [], "closed": True, "pending": False, "unknown": True}
     events: list[dict[str, Any]] = []
     t.polling += 1
     try:

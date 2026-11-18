@@ -132,3 +132,12 @@ def test_the_queue_is_in_the_database_so_a_restart_does_not_lose_it(env):
     waiting, started, left = run(scenario())
     assert [(w["task"], w["lead_target"], w["credit_budget"]) for w in waiting] == [("waiting", 5, 40.0)]
     assert started == ["waiting"] and left == []
+
+
+def test_a_key_not_running_here_answers_closed_at_once_so_its_poller_stops(env):
+    async def poll():
+        started = time.monotonic()
+        return await hm.next_event("run-before-a-restart", timeout=25), time.monotonic() - started
+
+    out, took = run(poll())
+    assert out == {"chat_id": "run-before-a-restart", "events": [], "closed": True, "pending": False, "unknown": True} and took < 1
