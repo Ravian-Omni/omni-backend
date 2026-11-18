@@ -652,10 +652,12 @@ async def handoffs(status: str = "", chat_id: str | None = None, since: str | No
 
 @mcp.tool(annotations=WRITE)
 async def sweep() -> dict[str, Any]:
-    """Check every sent campaign thread in Gmail now and open handoffs for new replies (the reply watcher's sweep)."""
+    """Check every sent campaign thread in Gmail now and open handoffs for new replies (the reply watcher's sweep). The
+    handoffs opened here carry the facts and no drafted answer (draft ""): you write the answer and send it with
+    send_handoff. For propose_meeting, read.free_times holds the free times found in the calendar."""
     from src.agent_runtime import watcher
 
-    return await watcher.sweep(USER_ID)
+    return await watcher.sweep(USER_ID, draft=False)
 
 
 @mcp.tool(annotations=WRITE)

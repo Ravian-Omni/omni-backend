@@ -103,3 +103,29 @@ def test_a_bounce_holds_the_address_and_hands_the_notice_to_a_person(world, tmp_
     assert [(r["to"], r["status"]) for r in rows if r["status"] == "bounced"] == [("a@x.com", "bounced")]
     watcher.state["running"] = False
     assert asyncio.run(watcher.sweep("u"))["bounces"] == 0 and len(handed) == 1  # held: not checked or handed off again
+
+
+def test_a_check_brain_hands_asked_for_hands_over_the_facts_and_drafts_nothing(world, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from src.routers import hands_mcp as hm
+
+    recorded, handed = world
+    REAL_FETCHED = campaign.fetch_replies
+
+    async def fetch(ctx, plan_id):
+        found = await REAL_FETCHED(ctx, plan_id)
+        found["replies"].append({"to": "c@x.com", "thread_id": "t3", "message_id": "m3", "text": "Can we talk Tuesday?",
+                                 "route": "propose_meeting", "read": {"intent": "meeting"}})
+        return found
+
+    drafted = AsyncMock(return_value="drafted")
+    monkeypatch.setattr(campaign, "fetch_replies", fetch)
+    monkeypatch.setattr(watcher, "_draft", drafted)
+    monkeypatch.setattr(inbox, "free_slots", AsyncMock(return_value=["Tue 10:00", "Tue 14:00"]))
+    monkeypatch.setattr(hm, "USER_ID", "u")
+    asyncio.run(hm.sweep())
+    assert [(h["contact"], h["route"], h["draft"], h["read"]) for h in handed] == [
+        ("b@x.com", "answer", "", {"intent": "question"}),
+        ("c@x.com", "propose_meeting", "", {"intent": "meeting", "free_times": ["Tue 10:00", "Tue 14:00"]})]
+    drafted.assert_not_called()  # no model writes a word; the watcher's own sweep still drafts (the test above)

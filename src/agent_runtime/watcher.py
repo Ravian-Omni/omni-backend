@@ -78,8 +78,21 @@ async def _draft(ctx, plan_id: str, route: str, reply: str, read: dict) -> str:
         return ""
 
 
-async def sweep(user_id: str = "local_user") -> dict:
-    """Check every sent campaign thread once; returns what happened."""
+async def _facts(user_id: str, route: str, read: dict) -> dict:
+    """Jev's reading, with the free times meeting_slots finds when the route is propose_meeting: for a caller that writes
+    the answer itself."""
+    if route != "propose_meeting":
+        return read
+    try:
+        return {**read, "free_times": await inbox.free_slots(user_id)}
+    except Exception as e:  # no calendar: the answer is written without times
+        logger.warning(f"[watcher] free times failed: {e}")
+        return read
+
+
+async def sweep(user_id: str = "local_user", draft: bool = True) -> dict:
+    """Check every sent campaign thread once; returns what happened. draft False (a check Brain_Hands asked for): each
+    handoff carries the facts and no drafted answer (draft ""), since the caller writes it."""
     if state["running"]:
         return state["summary"] or {}
     state["running"] = True
@@ -114,9 +127,10 @@ async def sweep(user_id: str = "local_user") -> dict:
                     await campaign.record_reply(ctx, plan_id, r["to"], read.get("intent", "other"), route, "", r.get("message_id") or "",
                                                 text=r["text"], subject=r.get("subject", ""), thread_id=r["thread_id"])
                     if route in PERSON_ROUTES:
-                        h = await inbox.open_handoff(ctx, contact=r["to"], route=route, reply=r["text"], read=read, plan_id=plan_id,
+                        h = await inbox.open_handoff(ctx, contact=r["to"], route=route, reply=r["text"], plan_id=plan_id,
+                                                     read=read if draft else await _facts(user_id, route, read),
                                                      thread_id=r["thread_id"], subject=r.get("subject", ""),
-                                                     draft=await _draft(ctx, plan_id, route, r["text"], read))
+                                                     draft=await _draft(ctx, plan_id, route, r["text"], read) if draft else "")
                         summary["handoffs"].append({"id": h["id"], "contact": h["contact"], "owner": h["owner"] or "shared inbox",
                                                     "notified": h["notified"]})
         if not rules["dry_run"]:  # what else Brain_Hands is told: partner referrals and booked meetings (off without BRAIN_HANDS_URL)
