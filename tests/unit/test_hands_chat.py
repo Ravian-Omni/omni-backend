@@ -38,7 +38,7 @@ def route(monkeypatch):
     monkeypatch.setattr(chat_bridge, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(is_running=lambda c: False)))
     monkeypatch.setattr(hm, "_chats", {})
     monkeypatch.setattr(hm.ChatService, "create_chat_mode_session", AsyncMock(return_value={"chat_id": "chat-q"}))
-    monkeypatch.setattr(hm, "get_chat_repository", AsyncMock(return_value=SimpleNamespace(get_chat=AsyncMock(side_effect=lambda u, c, coll: c == "chat-q"))))
+    monkeypatch.setattr(hm, "get_chat_repository", AsyncMock(return_value=SimpleNamespace(get_chat=AsyncMock(side_effect=lambda u, c, coll: c == "chat-q" and coll == "chats"))))
     return script, got
 
 
@@ -103,3 +103,14 @@ def test_request_routes_chat_and_task_and_gives_back_the_id(route, monkeypatch):
     assert started.await_args.kwargs["chat_id"] == "chat-t" and started.await_args.kwargs["lead_target"] == 25
     with pytest.raises(ValueError, match='request is "chat" or "task"'):
         asyncio.run(hm.request("other", "x", ctx))
+
+
+def test_what_a_chat_saved_is_read_by_its_id(route, monkeypatch):
+    saved = [{"id": "analysis-1", "kind": "analysis", "title": "Inbox summary", "row_count": 3, "persona": "assistant", "created_at": "t", "chat_id": "chat-q"}]
+    monkeypatch.setattr(hm, "db_list_artifacts", AsyncMock(return_value=saved))
+    monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(is_running=lambda c: False)))
+    assert asyncio.run(hm.task_status(chat_id="chat-q")) == {
+        "chat_id": "chat-q", "request": "chat", "stage": "done", "saved": [{"id": "analysis-1", "kind": "analysis", "title": "Inbox summary", "rows": 3}]}
+    assert [a["id"] for a in asyncio.run(hm.list_artifacts(chat_id="chat-q"))["artifacts"]] == ["analysis-1"]
+    with pytest.raises(ValueError, match="no task or chat nope"):
+        asyncio.run(hm.list_artifacts(chat_id="nope"))

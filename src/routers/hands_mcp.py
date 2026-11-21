@@ -575,7 +575,16 @@ async def task_status(key: str = "", chat_id: str = "") -> dict[str, Any]:
     chat_id = chat_id or key
     if not chat_id:
         raise ValueError("give the key of a run started here or a task's chat_id")
+    if await _is_chat(chat_id):  # a chat (the chat tool) has no plan or steps: whether it is answering, and what it saved
+        saved = [{"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"]} for a in await db_list_artifacts(chat_id)]
+        return {"chat_id": chat_id, "request": "chat", "stage": "running" if (await get_websocket_manager()).is_running(chat_id) else "done", "saved": saved}
     return await status.task_status(USER_ID, chat_id)
+
+
+async def _is_chat(chat_id: str) -> bool:
+    """A chat-mode chat (made by chat, or the web app's chat mode), not a task chat."""
+    repo = await get_chat_repository()
+    return not await repo.get_chat(USER_ID, chat_id, "omni") and bool(await repo.get_chat(USER_ID, chat_id, "chats"))
 
 
 @mcp.tool(annotations=READ)
@@ -606,8 +615,8 @@ async def list_artifacts(chat_id: str = "", search: str = "", kind: str = "") ->
     """The files a task saved (lead lists, buyer maps, enriched contacts, campaign plans, …), newest first: id, kind,
     title, rows, the agent that saved it and its task's chat_id. Without chat_id: the newest 50 files of every task,
     narrowed by search (words in the title, source or id) and kind. Read one with read_artifact."""
-    if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
-        raise ValueError(f"no task {chat_id}")
+    if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni") and not await _is_chat(chat_id):
+        raise ValueError(f"no task or chat {chat_id}")
     found = await db_list_artifacts(chat_id) if chat_id else await find_artifacts(USER_ID, search, kind, 50)
     return {"chat_id": chat_id, "artifacts": [
         {"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"], "agent": a["persona"],
