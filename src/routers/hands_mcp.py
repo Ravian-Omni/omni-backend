@@ -281,6 +281,8 @@ async def _source(ctx: Context) -> str:
 async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | None = None, chat_id: str = "",
                     agenda_id: str = "", lead_target: int = 0, credit_budget: float | None = None) -> dict[str, Any]:
     """Start a task run (a lead search, a campaign, outreach, a reply) and return its chat_id; drive it with next_event and answer.
+    Tasks are for long, multi-step work: several agents, saved lists, credits, sends. A small request answered in one turn
+    (check the inbox or calendar, one web search, look someone up, sum up a saved list) is not a task: use chat.
     chat_id: the conversation to continue, so its agents see what was done there before; empty starts a new one, or with an
     agenda_id continues that agenda's chat (a goal has one chat).
     A run on a chat that is running, or beyond the parallel limit, is queued: {queued: true, position}; a chat's runs go in order.
@@ -695,7 +697,8 @@ _chats: dict[str, ChatThread] = {}  # chat-mode chats driven from here, by chat_
 async def chat(message: str, chat_id: str = "", timeout: int = 180) -> dict[str, Any]:
     """Ask DAX's chat assistant something quick and get its reply in this call: check the inbox, search the web, look
     something up in a connected app, read or sum up a saved list, draft one short note. One assistant, no plan, no team of
-    agents; use start_run for multi-step work. chat_id: continue that chat (empty starts a new one; the answer gives it).
+    agents. Never for long-running or multi-step work (lead lists, buyers, enrichment, campaigns, outreach, a goal's
+    research): that goes to start_run; chat says when a request needs a task. chat_id: continue that chat (empty starts a new one; the answer gives it).
     Returns {chat_id, reply, done}; done false with `question` when the assistant waits on an answer (an approval to send,
     a choice): call chat again with the same chat_id and your answer as the message, as the question's answer_with says.
     Waits up to timeout seconds (at most 600); done false with no question means it is still working: call again with

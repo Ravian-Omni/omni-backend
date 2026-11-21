@@ -68,6 +68,12 @@ def _result_to_text(result: Any) -> tuple[str, bool]:
     return str(result), False
 
 
+def read_first(server: str, schemas: list[dict], classes: dict[str, str]) -> list[dict]:
+    """An app's tools with its read tools first (fetch emails, list events), in their own order: when only a share of
+    them fits, it keeps what most jobs need, not deletes and settings."""
+    return sorted(schemas, key=lambda t: classes.get(f"mcp__{server}__{t['name']}") != "read")
+
+
 class OpenAIRunner:
     """One persona run on the OpenAI model, driving a PersonaSession's plumbing."""
 
@@ -120,7 +126,7 @@ class OpenAIRunner:
             if note:
                 notes += note
             notes += server_notes(server)  # when to call it, as the server itself publishes on initialize()
-            schemas = s._remote_tools.get(server, [])
+            schemas = read_first(server, s._remote_tools.get(server, []), remote_classes)
             if len(schemas) > share:
                 logger.warning(f"[{s.persona.name}] {server}: offering {share} of {len(schemas)} tools (OpenAI allows {MAX_TOOLS})")
                 notes += f"\n\nOnly the first {share} tools of {server} are available in this run.\n"

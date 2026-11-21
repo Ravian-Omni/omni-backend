@@ -26,7 +26,8 @@ _FREE_DESC = re.compile(r"\b0\s*credits?\b|\bfree\b|\bno charge\b|\bpreview only
 _BALANCE_NAME = re.compile(r"\b(balance|available|remaining|usage|quota)\b", re.I)
 _SEND_NAME = re.compile(
     r"\b(send|post|publish|email|message|notify|create|write|update|delete|remove|upload|"
-    r"submit|schedule|invite|assign|reply|draft|share|add|set|move|archive|trash|forward|modify|mark|label|batch|insert|patch|put|execute|run)\b",
+    r"submit|schedule|invite|assign|reply|draft|share|add|set|move|archive|trash|forward|modify|mark|label|batch|insert|patch|put|execute|run|"
+    r"duplicate|import|watch|copy|clone|cancel|stop|start|restore|merge|approve|accept|decline|rename)\b",
     re.I,
 )
 _READ_NAME = re.compile(r"\b(search|list|get|fetch|read|lookup|find|preview|check|count|describe)\b", re.I)
