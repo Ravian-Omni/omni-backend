@@ -6,6 +6,26 @@ from typing import Any
 from src.configs.datetime_utils import dt
 
 
+COMPLETION = "process_completion_agent"  # a finished run's summary: what was done, what failed, what was saved where
+REQUEST = "chat_manager"  # a run's request
+REQUEST_CHARS = 1500  # an earlier run's request, cut: the current run's stays whole
+LEDGER = "saved_files"  # the code-built list of the chat's saved files; rebuilt on every trim
+
+
+def compact(messages: list[dict[str, Any]], ledger: str = "") -> list[dict[str, Any]]:
+    """What the agents are given of a chat's history: the current run (everything after the last completion) word for
+    word; from the runs before, only each completion whole and each request cut to REQUEST_CHARS; and the ledger (the
+    chat's saved files, from the database) just before the current run. The stored history is not changed."""
+    ends = [i for i, m in enumerate(messages) if m.get("name") == COMPLETION]
+    if not ends:
+        return messages
+    past, current = messages[: ends[-1] + 1], [m for m in messages[ends[-1] + 1 :] if m.get("name") != LEDGER]
+    kept = [m if m.get("name") == COMPLETION else {**m, "content": str(m.get("content") or "")[:REQUEST_CHARS]}
+            for m in past if m.get("name") in (COMPLETION, REQUEST)]
+    files = [{"role": "user", "name": LEDGER, "content": ledger}] if ledger else []
+    return kept + files + current
+
+
 class ChatType(Enum):
     """Enum for chat types in the memory system."""
 

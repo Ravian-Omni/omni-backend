@@ -22,6 +22,7 @@ from src.database import update_chat_history
 from src.dependencies import get_websocket_manager
 from src.managers.connection import WebSocketManager
 from src.omni.manager import Omni
+from src.omni.memory import COMPLETION, compact
 from src.services.websocket_service import (
     CAPABILITY_CLASS_MAP,
     build_user_context,
@@ -130,6 +131,15 @@ async def _send_error(websocket: WebSocket, chat_id: str, message: str) -> None:
 # =============================================================================
 
 
+async def _ledger(chat_id: str) -> str:
+    """The chat's saved files, newest first, for the agents: id, kind, title and rows, read from the database."""
+    from src.database import list_artifacts
+
+    files = await list_artifacts(chat_id)
+    return ("Files saved in this chat (id, kind, title, rows), newest first; read one with read_artifact:\n"
+            + "\n".join(f"- {a['id']} ({a['kind']}) {a['title']}, {a['row_count']} rows" for a in files)) if files else ""
+
+
 async def _resume_running(websocket: WebSocket, chat_id: str, ws_manager: WebSocketManager) -> None:
     """A run that outlived a reload: tell the page it is working, and show what it waits on."""
     if ws_manager.is_running(chat_id):
@@ -189,6 +199,9 @@ async def _handle_messages(
                         session_id=chat_id, initial_message=message, chat=instance
                     )
                 else:  # "omni" or "capability"
+                    if mode == "omni" and any(m.get("name") == COMPLETION for m in instance.manager.groupchat.messages):
+                        # an open chat taking its next task: the runs it finished are kept as their results, as on a reload
+                        instance.manager.resume(messages=compact(list(instance.manager.groupchat.messages), await _ledger(chat_id)))
                     coro = ws_manager.start_chat_stream(
                         session_id=chat_id, initial_message=message, omni=instance
                     )
@@ -389,6 +402,7 @@ async def omni_websocket(
 
         # Resume history
         if messages:
+            messages = compact(messages, await _ledger(chat_id))  # finished runs as their results, not their whole transcripts
             omni.manager.resume(messages=messages)
             omni.memory.load_main_messages(messages)
 
