@@ -518,6 +518,49 @@ async def pop_queued_run(run_id: int) -> None:
     await db.commit()
 
 
+TASK_COLUMNS = ("id", "run_key", "chat_id", "agenda_id", "title", "state", "step", "waiting_on", "started_at", "last_progress_at", "ended_at", "result")
+
+
+async def save_task(task: dict) -> None:
+    """Create a task, or change the fields given of one that exists (by id)."""
+    db = await get_db()
+    fields = {k: json.dumps(v) if k in ("waiting_on", "result") and not isinstance(v, str) else v for k, v in task.items() if k in TASK_COLUMNS}
+    changes = {k: v for k, v in fields.items() if k != "id"}
+    cursor = await db.execute(f"UPDATE tasks SET {', '.join(f'{k} = ?' for k in changes)} WHERE id = ?", (*changes.values(), fields["id"]))
+    if cursor.rowcount == 0:  # not an upsert: SQLite checks NOT NULL before ON CONFLICT, so a partial change would be refused
+        await db.execute(f"INSERT INTO tasks ({', '.join(fields)}) VALUES ({', '.join('?' * len(fields))})", tuple(fields.values()))
+    await db.commit()
+
+
+def _task(row) -> dict:
+    task = dict(zip(TASK_COLUMNS, row))
+    for k in ("waiting_on", "result"):
+        task[k] = json.loads(task[k]) if task[k] else None
+    return task
+
+
+async def find_task(ref: str) -> dict | None:
+    """The task with this id, else the newest one with this run key or chat_id."""
+    cursor = await (await get_db()).execute(
+        f"SELECT {', '.join(TASK_COLUMNS)} FROM tasks WHERE id = ? OR run_key = ? OR chat_id = ? "
+        "ORDER BY (id = ?) DESC, started_at DESC LIMIT 1", (ref, ref, ref, ref))
+    row = await cursor.fetchone()
+    return _task(row) if row else None
+
+
+async def list_task_rows(active: bool = False, agenda_id: str = "", limit: int = 50) -> list[dict]:
+    """Tasks newest first; active: only those not ended (queued, running, waiting)."""
+    where, args = [], []
+    if active:
+        where.append("state IN ('queued', 'running', 'waiting')")
+    if agenda_id:
+        where.append("agenda_id = ?"); args.append(agenda_id)
+    cursor = await (await get_db()).execute(
+        f"SELECT {', '.join(TASK_COLUMNS)} FROM tasks {'WHERE ' + ' AND '.join(where) if where else ''} ORDER BY started_at DESC LIMIT ?",
+        (*args, limit))
+    return [_task(r) for r in await cursor.fetchall()]
+
+
 async def queued_run(key: str) -> dict | None:
     """A queued run by its key, with its place in the queue (1 = next)."""
     for place, run in enumerate(await list_queued_runs(), 1):
@@ -1150,6 +1193,9 @@ __all__ = [
     "list_decisions",
     "list_open_decisions",
     "run_started",
+    "save_task",
+    "find_task",
+    "list_task_rows",
     "note_source_emails",
     "source_emails",
     "was_pushed",

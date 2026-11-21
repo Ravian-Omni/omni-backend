@@ -14,6 +14,8 @@ import asyncio
 import json
 import os
 import time
+import uuid
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -29,7 +31,7 @@ from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payl
 from src.database import answer_decision, run_started
 from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
                           count_resume, list_marked_runs, list_queued_runs, load_pref, pop_queued_run, queued_run, save_pref, set_budget,
-                          unmark_run)
+                          unmark_run, find_task, list_task_rows, save_task)
 from src.database import list_artifacts as db_list_artifacts
 from src.dependencies import get_websocket_manager
 from src.services import brain_hands, chat_bridge, needs, run_result, task_status as status
@@ -113,6 +115,9 @@ def simplify(event: dict[str, Any], context: str = "", plan: list[dict] | None =
 class HandsThread(Thread):
     """A Thread whose events go to a queue instead of to a chat app."""
 
+    task_id = ""  # its row in tasks (contract [26]), set when a run begins
+    noted = 0.0  # when last_progress_at was last written
+
     def __init__(self, key: str, chat_id: str) -> None:
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.ask_text = ""  # Omni's last verification text, or the message a stopped plan waits on
@@ -139,6 +144,9 @@ class HandsThread(Thread):
             form = status.loads(content.get("content"))
             self.ask_text = str(form.get("intro") or "") if isinstance(form, dict) else str(form or "")
         self.last_event = time.monotonic()
+        if self.task_id and self.last_event - self.noted > PROGRESS_WRITE_S:  # every event is progress; written at most this often
+            self.noted = self.last_event
+            await _track(self.task_id, last_progress_at=dt.now_iso())
         if not (simple := simplify(event, self.ask_text, self.plan)):
             return
         ended = simple["type"] == "completion" or (simple["type"] == "error" and event.get("error_code") == FAILED_RUN)
@@ -147,10 +155,15 @@ class HandsThread(Thread):
             if simple["type"] == "plan":
                 self._progress(simple["steps"])
                 self.plan = simple["steps"]
+                if current := next((s for s in simple["steps"] if s.get("status") == "running"), None):
+                    await _track(self.task_id, step=str(current.get("task") or current.get("agent") or "")[:300])
             if simple["type"] == "input_request":
                 simple["chat_id"] = self.chat_id  # the conversation to answer in, and to continue later
                 self.asked_at = time.monotonic()
                 await self._announce(simple, event)
+                q = simple.get("question") or {}
+                await _track(self.task_id, state="waiting", waiting_on={"who": "user", "what": str(q.get("title") or q.get("message") or q.get("kind") or "")[:300],
+                                                                       "since": dt.now_iso()})
             if simple["type"] == "completion" and await self._close_round(simple):
                 going_on = True  # another sourcing round is starting: this is not the run's end
                 return
@@ -166,6 +179,7 @@ class HandsThread(Thread):
             if not going_on:
                 self.queue.put_nowait(simple)  # before the chat is freed: its next run clears this queue when it begins
                 if ended:
+                    await _track(self.task_id, state=_end_state(simple), ended_at=dt.now_iso(), waiting_on="", result=simple.get("result") or "")
                     _run_ended(self.chat_id)
 
     async def _safe_result(self, end: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +200,8 @@ class HandsThread(Thread):
                                **({"agenda_id": self.agenda_id} if self.agenda_id else {}), "result": result})
         _active.discard(self.chat_id)
         site.end_run(self.chat_id)
+        if self.task_id:
+            _watch(_track(self.task_id, state="failed", ended_at=dt.now_iso(), waiting_on="", result=result))
 
     def _base(self) -> dict[str, Any]:
         return run_result.envelope({"chat_id": self.chat_id, "request": self.request}, key=self.key, agenda_id=self.agenda_id)
@@ -295,13 +311,55 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
         raise ValueError(f"no task {chat_id}")
     chat_id = chat_id or (agenda_id and await chat_of_agenda(USER_ID, agenda_id)) or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
-    key = key or chat_id
+    task_id = f"dt_{uuid.uuid4().hex[:12]}"
+    key = key or task_id  # unique: a chat may hold many tasks, each told apart
+    now = dt.now_iso()
+    await save_task({"id": task_id, "run_key": key, "chat_id": chat_id, "agenda_id": agenda_id, "title": task.strip().split("\n")[0][:200],
+                     "state": "queued", "started_at": now, "last_progress_at": now})
     await save_pref(USER_ID, f"run_by:{chat_id}", await _source(ctx))  # the web app marks the task as run by it
     if agenda_id:
         await save_pref(USER_ID, f"agenda:{chat_id}", agenda_id)
     place = await _admit({"key": key, "chat_id": chat_id, "task": task, "files": files or [], "lead_target": lead_target, "credit_budget": credit_budget})
     agenda = await needs.agenda_of(chat_id)
-    return {"key": key, "chat_id": chat_id, **({"queued": True, "position": place} if place else {}), **({"agenda_id": agenda} if agenda else {})}
+    return {"id": task_id, "key": key, "chat_id": chat_id, **({"queued": True, "position": place} if place else {}), **({"agenda_id": agenda} if agenda else {})}
+
+
+STALL_MIN = 10  # a running task with no progress for this long is reported stalled
+PROGRESS_WRITE_S = 10
+
+
+async def _track(task_id: str, **fields: Any) -> None:
+    """Write what happened to a task; a failure here never stops the run or its events."""
+    if not task_id:
+        return
+    try:
+        await save_task({"id": task_id, **fields})
+    except Exception as e:
+        logger.warning(f"[hands] task {task_id} not updated: {e}")
+
+
+def _watch(coro) -> None:
+    task = asyncio.create_task(coro)
+    _watching.add(task)
+    task.add_done_callback(_watching.discard)
+
+
+def _end_state(completion: dict[str, Any]) -> str:
+    """done, cancelled or failed, from a run's last event."""
+    if completion.get("type") == "error":
+        return "failed"
+    return {"complete": "done", "cancelled": "cancelled", "stopped": "cancelled"}.get(str(completion.get("status")), "failed")
+
+
+async def _view(task: dict[str, Any]) -> dict[str, Any]:
+    """A task in contract [26]'s shape; running with no progress for STALL_MIN minutes reads stalled."""
+    state = task["state"]
+    if state == "running" and (datetime.now(timezone.utc) - datetime.fromisoformat(task["last_progress_at"])).total_seconds() > STALL_MIN * 60:
+        state = "stalled"
+    queued = await queued_run(task["run_key"]) if state == "queued" else None
+    return {"v": 1, "id": task["id"], "app": "daxagent", "agenda_id": task["agenda_id"], "parent_id": task["run_key"], "chat_id": task["chat_id"],
+            "title": task["title"], "state": state, "waiting_on": task["waiting_on"], "step": task["step"], "started_at": task["started_at"],
+            "last_progress_at": task["last_progress_at"], "position": queued["position"] if queued else None, "result": task["result"]}
 
 
 async def _busy() -> set[str]:
@@ -334,6 +392,8 @@ async def _begin(run: dict[str, Any]) -> None:
     t.seen = (await leads.tally(chat_id, t.started_at))["seen"] if t.lead_target else 0
     _threads[key] = t
     _active.add(chat_id)
+    t.task_id = (row["id"] if (row := await find_task(key)) and row["run_key"] == key else "")
+    await _track(t.task_id, state="running", last_progress_at=dt.now_iso(), waiting_on="")
     await save_pref(USER_ID, f"run_params:{chat_id}", {"key": key, "lead_target": t.lead_target})  # what a resume after a restart needs
     t.request = run["task"]
     t.inbox.put_nowait(json.dumps({"type": "start", "task": run["task"], "files": run["files"]}))
@@ -387,6 +447,8 @@ async def _drop(run: dict[str, Any], error: Exception) -> None:
     agenda = await needs.agenda_of(run["chat_id"])
     result = run_result.envelope({"chat_id": run["chat_id"], "request": run["task"]}, key=run["key"], agenda_id=agenda,
                                  error=f"the run could not start after {BEGIN_TRIES} tries: {error}", ended_at=dt.now_iso())
+    if (row := await find_task(run["key"])) and row["run_key"] == run["key"]:
+        await _track(row["id"], state="failed", ended_at=dt.now_iso(), result=result)
     _dropped[run["key"]] = {"type": "completion", "status": "failed", "chat_id": run["chat_id"], **({"agenda_id": agenda} if agenda else {}), "result": result}
     await brain_hands.push("dax.run_failed", f"{run['key']}:not_started", "A queued DAX run could not start", result["reason"],
                            chat_id=run["chat_id"], key=run["key"], agenda_id=agenda, reason=result["reason"], retryable=result["retryable"])
@@ -550,6 +612,7 @@ async def answer(key: str, response: str, request_id: str = "") -> dict[str, Any
         return {"ok": False, "reason": "not_open", "note": "that question is not open (nothing waits, or it was answered in the web app, or request_id is stale)"}
     if t:
         t.pending = False
+        await _track(t.task_id, state="running", waiting_on="", last_progress_at=dt.now_iso())
     return {"ok": True, "chat_id": chat_id, "task_id": chat_id, "request_id": open_id}
 
 
@@ -567,7 +630,14 @@ async def task_status(key: str = "", chat_id: str = "") -> dict[str, Any]:
     stopped), a note, each plan step's agent, task, status and result, progress (percent of steps finished), the agents
     at work with their current step, the open question with how to answer it, credits approved and declined, saved
     work, the final summary, timings and campaigns (each campaign plan's steps approved, drafted, sent, replied and its
-    next step). Give the key of a run started here or the chat_id of any task."""
+    next step). Give the task's id, the key of a run started here or the chat_id of any task. A task started here also
+    carries contract [26]'s fields: id, state (queued, running, waiting, stalled, done, failed, cancelled), waiting_on,
+    step, started_at, last_progress_at, position, result."""
+    task = await find_task(key or chat_id) if (key or chat_id) else None
+    if task and task["state"] == "queued":
+        return {**await _view(task), "queued": True, "chat_id": task["chat_id"], "waiting_on": await _waiting_on(task["chat_id"])}
+    if task and key == task["id"]:
+        key = task["run_key"]
     if key and (t := _find(key)):
         chat_id = t.chat_id
     elif key and not chat_id and (waiting := await queued_run(key)):  # not started yet: say what it waits behind
@@ -575,6 +645,8 @@ async def task_status(key: str = "", chat_id: str = "") -> dict[str, Any]:
     chat_id = chat_id or key
     if not chat_id:
         raise ValueError("give the key of a run started here or a task's chat_id")
+    if task:
+        return {**await status.task_status(USER_ID, chat_id), **await _view(task)}
     if await _is_chat(chat_id):  # a chat (the chat tool) has no plan or steps: whether it is answering, and what it saved
         saved = [{"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"]} for a in await db_list_artifacts(chat_id)]
         return {"chat_id": chat_id, "request": "chat", "stage": "running" if (await get_websocket_manager()).is_running(chat_id) else "done", "saved": saved}
@@ -599,8 +671,12 @@ async def company_facts(website: str, name: str = "") -> dict[str, Any] | None:
 
 
 @mcp.tool(annotations=READ)
-async def list_tasks(limit: int = 10) -> dict[str, Any]:
-    """The most recent tasks, newest first, with their chat_id, folder name, request, stage and percent finished."""
+async def list_tasks(limit: int = 10, active: bool = False, agenda_id: str = "") -> dict[str, Any]:
+    """The most recent tasks, newest first, with their chat_id, folder name, request, stage and percent finished. With
+    active or agenda_id: the tasks started here, in contract [26]'s shape (active: queued, running, waiting or stalled), each
+    with its own id, any number on one chat."""
+    if active or agenda_id:
+        return {"tasks": [await _view(r) for r in await list_task_rows(active, agenda_id, min(max(limit, 1), 200))]}
     keys = {t.chat_id: k for k, t in _threads.items()}
     tasks = []
     for c in [c for c in await list_conversations(USER_ID) if c["collection"] == "omni"][: min(max(limit, 1), 50)]:
@@ -686,6 +762,23 @@ async def add_touch(chat_id: str, to: str, subject: str, body: str, send_after_d
     sign_off = {"sender_name": sender_name, "sender_title": sender_title, "sender_company": sender_company,
                 "postal_address": postal_address, "opt_out": opt_out}
     return await campaign.add_touch(USER_ID, chat_id, to, subject, body, send_after_days, plan_id or "", sign_off)
+
+
+@mcp.tool(annotations=WRITE)
+async def cancel(id: str) -> dict[str, Any]:
+    """End a task (its id, key or chat_id): a queued one leaves the queue, a running or waiting one is stopped as the web
+    app's Stop does, and what it held (its chat, its slot) is freed. Returns the task as task_status gives it."""
+    task = await find_task(id)
+    if not task:
+        raise ValueError(f"no task {id}")
+    if task["state"] == "queued":
+        if waiting := await queued_run(task["run_key"]):
+            await pop_queued_run(waiting["id"])
+        await _track(task["id"], state="cancelled", ended_at=dt.now_iso())
+    elif task["state"] in ("running", "waiting"):
+        await (await get_websocket_manager()).stop_session(task["chat_id"], reason=f"cancelled by the caller ({id})")
+        await _track(task["id"], state="cancelled", ended_at=dt.now_iso(), waiting_on="")
+    return await _view(await find_task(task["id"]))
 
 
 @mcp.tool(annotations=READ)

@@ -156,6 +156,24 @@ CREATE TABLE IF NOT EXISTS run_queue (
     created_at TEXT NOT NULL
 );
 
+-- Each task started over /hands/mcp (contract [26]), kept so its id and state survive a restart: one chat may hold many.
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    run_key TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    agenda_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    step TEXT NOT NULL DEFAULT '',
+    waiting_on TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    last_progress_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_key ON tasks(run_key, started_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_chat ON tasks(chat_id, started_at);
+
 -- Credits a goal may still spend without asking, per agenda (per chat when it has none).
 CREATE TABLE IF NOT EXISTS budgets (
     scope TEXT PRIMARY KEY,

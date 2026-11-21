@@ -167,8 +167,11 @@ def blocked(env, monkeypatch):
 
 
 def test_a_queued_key_says_what_it_waits_behind(blocked):
-    assert run(hm.task_status(key="sch_1")) == {"queued": True, "position": 1, "chat_id": "chat-a", "waiting_on": {
-        "started_at": "2026-11-20T09:16:45+00:00", "source": "web_app", "state": "awaiting_plan_approval"}}
+    out = run(hm.task_status(key="sch_1"))
+    assert {k: out[k] for k in ("queued", "position", "chat_id", "state", "parent_id")} == {"queued": True, "position": 1, "chat_id": "chat-a",
+                                                                                           "state": "queued", "parent_id": "sch_1"}
+    assert out["waiting_on"] == {"started_at": "2026-11-20T09:16:45+00:00", "source": "web_app", "state": "awaiting_plan_approval"}
+    assert out["id"].startswith("dt_")
 
 
 def test_a_web_app_question_blocking_a_queued_run_is_told_once_and_cannot_be_answered_from_here(blocked):
@@ -189,3 +192,74 @@ def test_no_question_or_a_run_of_ours_tells_nothing(blocked):
     hm._active.clear(); pending.clear()
     run(hm._tell_blocked())
     assert pushed == []
+
+
+# --- contract [26]: every task has its own id, kept in storage; state, stalled, cancel
+def test_each_task_has_its_own_id_and_a_chat_may_hold_several(env, monkeypatch):
+    monkeypatch.setattr(hm.status, "task_status", AsyncMock(return_value={"stage": "running"}))  # the chat's own progress
+    async def scenario():
+        a = await hm.start_run("first", CTX, chat_id="chat-a")
+        b = await hm.start_run("second", CTX, chat_id="chat-a")  # same chat: queued behind, told apart by id
+        return a, b, await hm.task_status(key=a["id"]), await hm.task_status(key=b["id"]), await hm.list_tasks(active=True)
+
+    a, b, sa, sb, listed = run(scenario())
+    assert a["id"] != b["id"] and a["key"] == a["id"] and b["queued"]
+    assert (sb["state"], sb["position"], sb["chat_id"]) == ("queued", 1, "chat-a")
+    assert {t["id"]: t["state"] for t in listed["tasks"]} == {a["id"]: "running", b["id"]: "queued"}
+
+
+def test_a_task_waits_on_a_question_ends_with_its_result_and_reads_stalled_when_quiet(env, monkeypatch):
+    monkeypatch.setattr(hm.status, "task_status", AsyncMock(return_value={"stage": "running"}))  # the chat's own progress
+    monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
+    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "get_chat_title", AsyncMock(return_value=""))
+
+    async def scenario():
+        started = await hm.start_run("find buyers", CTX, chat_id="chat-a")
+        t = object.__new__(REAL_THREAD)
+        t.chat_id, t.queue, t.inbox, t.ask_text, t.plan = "chat-a", asyncio.Queue(), asyncio.Queue(), "", []
+        t.agenda_id, t.lead_target, t.rounds, t.seen, t.started_at, t.polling, t.last_poll = "", 0, 0, 0, "2000-01-01T00:00:00+00:00", 0, 0.0
+        t.key, t.request, t.stop_reason, t.asked_at, t.last_event = started["key"], "", "", None, time.monotonic()
+        t.pending, t.ready, t.notes, t.say, t.task, t.task_id = False, False, {}, AsyncMock(), SimpleNamespace(done=lambda: False), started["id"]
+        monkeypatch.setattr(t, "_announce", AsyncMock())
+        monkeypatch.setattr(t, "_safe_result", AsyncMock(return_value={"status": "complete", "summary": "done"}))
+        hm._threads[started["key"]] = t
+        card = {"type": "input_request", "data": {"content": {"agent": "get_user_acceptance", "prompt": "Approve the plan?"}}}
+        await t.send_json(card)
+        waiting = await hm.task_status(key=started["id"])
+        await hm.save_task({"id": started["id"], "state": "running", "last_progress_at": "2026-11-20T10:04:08+00:00"})
+        stalled = await hm.task_status(key=started["id"])
+        await t.send_json({"type": "completion", "status": "complete"})
+        await asyncio.gather(*hm._watching)
+        return waiting, stalled, await hm.task_status(key=started["id"])
+
+    waiting, stalled, done = run(scenario())
+    assert waiting["state"] == "waiting" and waiting["waiting_on"]["who"] == "user"
+    assert stalled["state"] == "stalled"  # running, no progress for more than STALL_MIN
+    assert done["state"] == "done" and done["result"] == {"status": "complete", "summary": "done"} and done["waiting_on"] is None
+
+
+def test_cancel_frees_a_queued_task_and_stops_a_running_one(env, monkeypatch):
+    stopped = AsyncMock()
+    manager = SimpleNamespace(running_chats=lambda: [], is_running=lambda c: False, stop_session=stopped)
+    monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=manager))
+
+    async def scenario():
+        a = await hm.start_run("first", CTX, chat_id="chat-a")
+        b = await hm.start_run("second", CTX, chat_id="chat-a")
+        return await hm.cancel(b["id"]), await list_queued_runs(), await hm.cancel(a["id"])
+
+    queued, left, running = run(scenario())
+    assert queued["state"] == "cancelled" and left == []
+    assert running["state"] == "cancelled" and stopped.await_args.args[0] == "chat-a"
+
+
+def test_a_task_is_still_known_after_a_restart(env, monkeypatch):
+    monkeypatch.setattr(hm.status, "task_status", AsyncMock(return_value={"stage": "running"}))  # the chat's own progress
+    async def scenario():
+        a = await hm.start_run("first", CTX, chat_id="chat-a")
+        hm._threads.clear(); hm._active.clear()  # the process restarted: nothing in memory
+        return a, await hm.task_status(key=a["id"]), await hm.list_tasks(active=True)
+
+    a, status_after, listed = run(scenario())
+    assert status_after["id"] == a["id"] and status_after["parent_id"] == a["key"] and [t["id"] for t in listed["tasks"]] == [a["id"]]

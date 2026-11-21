@@ -255,7 +255,7 @@ def test_start_run_continues_a_chat_without_the_last_runs_leftovers(monkeypatch,
         assert [json.loads(first.inbox.get_nowait())["task"] for _ in range(2)] == ["outreach", "follow up"]
         # the chat_id is the conversation: a run started without a key is driven by it, and so is one with a key
         hm._threads.clear()
-        assert (await hm.start_run("b", ctx))["chat_id"] == "new" and "new" in hm._threads
+        assert (await hm.start_run("b", ctx))["chat_id"] == "new" and hm._find("new") is not None
         await hm.start_run("c", ctx, key="mine", chat_id="old")
         assert hm._find("old") is hm._threads["mine"]
         assert (await hm.next_event("old", timeout=1))["chat_id"] == "old"
