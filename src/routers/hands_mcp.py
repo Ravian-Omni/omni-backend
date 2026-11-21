@@ -216,7 +216,7 @@ class HandsThread(Thread):
     async def _close_round(self, done: dict[str, Any]) -> bool:
         """Put the lead counts on a completion. True when the lead target is not met and sourcing goes on instead: the next
         round is queued as a note, which the manager starts as the next task, and this completion is not shown."""
-        tally = await leads.tally(self.chat_id)
+        tally = await leads.tally(self.chat_id, self.started_at)  # this run's contacts, not every list the chat ever saved
         done["credits_spent"] = await needs.credits_approved(self.chat_id, self.started_at)  # across every sourcing round of the run
         done["leads"] = {"target": self.lead_target or None, "passed": tally["passed"], "failed": tally["failed"]}
         if not self.lead_target:
@@ -331,7 +331,7 @@ async def _begin(run: dict[str, Any]) -> None:
     t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
     t.lead_target, t.rounds, t.started_at = max(0, int(run["lead_target"])), 0, dt.now_iso()
     site.begin_run(chat_id, t.started_at)  # the run's cap on site reads counts from here, across its sourcing rounds
-    t.seen = (await leads.tally(chat_id))["seen"] if t.lead_target else 0
+    t.seen = (await leads.tally(chat_id, t.started_at))["seen"] if t.lead_target else 0
     _threads[key] = t
     _active.add(chat_id)
     await save_pref(USER_ID, f"run_params:{chat_id}", {"key": key, "lead_target": t.lead_target})  # what a resume after a restart needs

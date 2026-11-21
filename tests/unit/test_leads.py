@@ -179,7 +179,7 @@ def thread(target=3):
 def run_completions(monkeypatch, tallies, **thread_args):
     """One completion per tally; returns the thread, the notes the manager got and the completions that reached the caller."""
     notes, pending = [], iter(tallies)
-    monkeypatch.setattr(hm.leads, "tally", AsyncMock(side_effect=lambda _chat: next(pending)))
+    monkeypatch.setattr(hm.leads, "tally", AsyncMock(side_effect=lambda _chat, _since="": next(pending)))
     monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
     monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(add_note=lambda chat, text: notes.append(text))))
     t = thread(**thread_args)
@@ -219,3 +219,23 @@ def test_a_run_without_a_target_just_reports_its_leads_and_a_stopped_run_is_not_
     t = thread()
     asyncio.run(t.send_json({"type": "completion", "status": "cancelled"}))
     assert t.queue.get_nowait()["leads"]["stopped_because"] == "stopped"
+
+
+def test_a_buyer_named_in_buyer_name_has_a_full_name():
+    row = {"buyer_name": "Ana Silva", "buyer_title": "CMO", "email": "ana@acme.com", "email_status": "verified", "company": "Acme"}
+    assert leads.gate(row, set(), set()) == ("pass", "")
+    assert leads.gate({**row, "buyer_name": "Ana"}, set(), set()) == ("fail", "no full name")
+
+
+def test_a_run_counts_its_own_contacts_and_not_company_audit_rows(ctx, tmp_path):
+    async def scenario():
+        await (await get_chat_repository()).create_chat({"user_id": "u", "chat_id": "chat-1"}, "omni")
+        for log, at, rows in (("old", "2026-11-16T14:21:00+00:00", [{"company_name": "Acme", "prior_contact_status": "none"}] * 3 + [dict(GOOD)]),
+                              ("new", "2026-11-21T16:30:00+00:00", [{"business_name": "Solo"}, {**GOOD, "email": "bo@acme.com", "first_name": "Bo"}])):
+            (path := tmp_path / f"enriched_contacts-{log}.json").write_text(json.dumps({"rows": rows}))
+            await save_artifact({"id": f"enriched_contacts-{log}", "chat_id": "chat-1", "persona": "contact_enricher", "kind": "enriched_contacts",
+                                 "title": log, "path": str(path), "row_count": len(rows), "source": "", "created_at": at})
+        return await leads.tally("chat-1"), await leads.tally("chat-1", "2026-11-21T16:27:58+00:00")
+
+    every, this_run = asyncio.run(scenario())
+    assert every["seen"] == 2 and this_run["seen"] == 1  # the company-only rows are no contacts; the run sees only what it saved

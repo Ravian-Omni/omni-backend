@@ -54,7 +54,7 @@ async def _now():
 
 def test_credits_add_up_across_the_sourcing_rounds_of_one_run(temp_db, monkeypatch):
     tallies = iter([tally(1, 8), tally(3, 14)])
-    monkeypatch.setattr(hm.leads, "tally", AsyncMock(side_effect=lambda _chat: next(tallies)))
+    monkeypatch.setattr(hm.leads, "tally", AsyncMock(side_effect=lambda _chat, _since="": next(tallies)))
     monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(add_note=lambda *_: None)))
 
     async def scenario():

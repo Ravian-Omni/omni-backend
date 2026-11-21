@@ -18,8 +18,8 @@ FIRST_MAX_WORDS = 85  # the opener (step 1): short, and no link at all
 ALIASES: dict[str, tuple[str, ...]] = {
     "first_name": ("first_name", "firstName", "contact_first_name"),
     "last_name": ("last_name", "lastName", "contact_last_name"),
-    "full_name": ("full_name", "name", "contact_name"),
-    "title": ("title", "job_title", "contact_title"),
+    "full_name": ("full_name", "name", "contact_name", "buyer_name"),
+    "title": ("title", "job_title", "contact_title", "buyer_title"),
     "company": ("company", "business_name", "company_name", "businessName", "masked_name"),
     "city": ("city",),
     "state": ("state",),

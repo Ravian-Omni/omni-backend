@@ -248,13 +248,15 @@ async def passed_shared(chat_id: str) -> set[str]:
 
 async def tally(chat_id: str, since: str = "") -> dict[str, Any]:
     """The chat's contacts by the marks saved with them (a later save of a contact replaces an earlier one):
-    how many there are, how many are leads, and why the others are not. since: only lists saved at or after this ISO time."""
+    how many there are, how many are leads, and why the others are not. since: only lists saved at or after this ISO time.
+    A row with neither a person's name nor an email (a company audit table saved as contacts) is not a contact."""
     by_contact: dict[str, dict[str, Any]] = {}
     for record in reversed(await list_artifacts(chat_id)):  # oldest first
         if record["kind"] != "enriched_contacts" or record["created_at"] < since:
             continue
         for row in _rows(record["path"]):
-            by_contact[email_of(row) or f"{_named(row)}|{creatives.field(row, 'company')}".lower()] = row
+            if email_of(row) or _named(row):
+                by_contact[email_of(row) or f"{_named(row)}|{creatives.field(row, 'company')}".lower()] = row
     failed = Counter(r.get("gate_reason") or "not checked" for r in by_contact.values() if r.get("gate") != "pass")
     return {"seen": len(by_contact), "passed": sum(r.get("gate") == "pass" for r in by_contact.values()), "failed": dict(failed)}
 
