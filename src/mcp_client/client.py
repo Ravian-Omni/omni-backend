@@ -1,6 +1,7 @@
 """Minimal client for remote (streamable HTTP) MCP servers."""
 
 import asyncio
+import os
 import re
 import time
 from typing import Any
@@ -141,6 +142,7 @@ class _Connection:
     def __init__(self, server: str):
         self.server = server
         self.queue: asyncio.Queue = asyncio.Queue()
+        self.current: asyncio.Future | None = None  # the call being run: a session that dies under it must fail it
         self.task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
@@ -153,24 +155,33 @@ class _Connection:
                             tool, arguments, future = await asyncio.wait_for(self.queue.get(), self.IDLE_S)
                         except asyncio.TimeoutError:
                             return  # idle: close; the next call reopens
+                        self.current = future
                         try:
                             future.set_result(await session.call_tool(tool, arguments))
                         except Exception as e:
                             future.set_exception(e)
+                        self.current = None  # not in a finally: a call cut off by a cancellation stays for the outer finally to fail
         except Exception as e:
             logger.warning(f"MCP connection to {self.server} closed: {e}")
         finally:
-            while not self.queue.empty():  # fail waiting calls so callers can retry on a new connection
-                *_, future = self.queue.get_nowait()
+            pending = [self.current] if self.current else []  # a call cut off mid-way (a cancellation is not an Exception)
+            while not self.queue.empty():  # and the waiting calls: callers retry on a new connection
+                pending.append(self.queue.get_nowait()[-1])
+            for future in pending:
                 if not future.done():
                     future.set_exception(ConnectionError(f"MCP connection to {self.server} closed"))
 
     async def call(self, tool: str, arguments: dict[str, Any]):
         future = asyncio.get_running_loop().create_future()
         await self.queue.put((tool, arguments, future))
-        return await future
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), CALL_TIMEOUT_S)  # shield: a timed-out call stays in its own slot
+        except TimeoutError:
+            self.task.cancel()  # a hung session would hold every later call: drop it, the next call opens a new one
+            raise TimeoutError(f"{self.server}.{tool} gave no answer in {CALL_TIMEOUT_S} s") from None
 
 
+CALL_TIMEOUT_S = int(os.getenv("DAXAGENT_MCP_CALL_TIMEOUT_S") or 180)  # no tool call waits for ever; a step that hits it fails
 _connections: dict[str, _Connection] = {}
 
 
