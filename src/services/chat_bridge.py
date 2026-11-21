@@ -95,6 +95,8 @@ def text_of(event: dict, notes: dict[str, str | None]) -> str | None:
     if inner_type == "artifact" and inner.get("artifact"):
         artifact = inner["artifact"]
         return f"Saved {artifact.get('kind') or 'artifact'}: {artifact.get('title') or ''}".strip()
+    if inner_type == "task_suggestion" and (s := inner.get("suggestion")):  # chat says this needs a task, and which
+        return f"This needs a task ({s.get('title') or 'task'}). Start it with this request:\n{s.get('request') or ''}".strip()
     text = inner.get("content") if inner_type == "message" else None
     if not isinstance(text, str) or not text.strip() or inner.get("streaming"):
         return None
@@ -163,6 +165,30 @@ class Thread:
             self.pending = False
         if text := text_of(event, self.notes):
             await self.say(text)
+
+
+class ChatThread(Thread):
+    """The same thread on a chat-mode chat (the chat route, one assistant): a quick job in one turn, no plan."""
+
+    def __init__(self, chat_id: str):
+        self.turn: asyncio.Queue[str | None] = asyncio.Queue()  # the turn's texts; None: it ended or waits on an answer
+        self.asked = ""  # the open question's text, while one is open
+        super().__init__("chat", chat_id, chat_id, self.turn.put)
+
+    async def _run(self) -> None:
+        from src.routers import websocket
+
+        try:
+            await websocket.chat_websocket(self, self.chat_id, USER_ID, await get_websocket_manager())
+        finally:
+            self.turn.put_nowait(None)  # a turn waiting on a thread that closed is told, not left hanging
+
+    async def send_json(self, event: dict) -> None:
+        if event.get("type") == "input_request":
+            self.asked = text_of(event, {}) or "The assistant waits on an answer."
+        await super().send_json(event)
+        if event.get("type") in ("completion", "input_request", "error"):
+            self.turn.put_nowait(None)
 
 
 async def open_thread(app: str, key: str, say: Callable[[str], Awaitable[None]]) -> Thread:

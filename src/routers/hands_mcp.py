@@ -33,13 +33,18 @@ from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifac
 from src.database import list_artifacts as db_list_artifacts
 from src.dependencies import get_websocket_manager
 from src.services import brain_hands, chat_bridge, needs, run_result, task_status as status
-from src.services.chat_bridge import USER_ID, Thread
+from src.services.chat_bridge import USER_ID, ChatThread, Thread
 from src.services.chat_service import ChatService
 from src.utilities.async_errors import AsyncErrorCode
 
 INSTRUCTIONS = (
     "DAXAGENT runs multi-step tasks for the user with a team of agents: find leads and buyers, enrich contacts, research "
     "the market, build a campaign, write and send outreach as the user, answer replies, or anything a connected app can do. "
+    "Chat or task: use chat(message) for a quick job one assistant does in a turn and answers at once: check the inbox or "
+    "the calendar, search the web, look up a company or person, read or sum up a saved list, a question about earlier work. "
+    "Use start_run for work with several steps or agents, or that saves lists, spends credits or sends a campaign: lead "
+    "lists, buyers, enrichment, campaigns, outreach, a goal's research. When unsure, chat first: it says when a task is "
+    "needed. "
     "chat_id is the conversation: start_run returns it, every question and next_event carries it, and next_event, answer "
     "and task_status take it. Start one with start_run(task, files), then call next_event(chat_id) in a loop; to continue "
     "the same conversation (its agents see what was done there before) pass its chat_id to start_run instead of starting "
@@ -681,6 +686,41 @@ async def handoffs(status: str = "", chat_id: str | None = None, since: str | No
     if since:
         rows = [h for h in rows if h["created_at"] > since]
     return {"handoffs": rows}
+
+
+_chats: dict[str, ChatThread] = {}  # chat-mode chats driven from here, by chat_id
+
+
+@mcp.tool(annotations=WRITE)
+async def chat(message: str, chat_id: str = "", timeout: int = 180) -> dict[str, Any]:
+    """Ask DAX's chat assistant something quick and get its reply in this call: check the inbox, search the web, look
+    something up in a connected app, read or sum up a saved list, draft one short note. One assistant, no plan, no team of
+    agents; use start_run for multi-step work. chat_id: continue that chat (empty starts a new one; the answer gives it).
+    Returns {chat_id, reply, done}; done false with `question` when the assistant waits on an answer (an approval to send,
+    a choice): call chat again with the same chat_id and your answer as the message, as the question's answer_with says.
+    Waits up to timeout seconds (at most 600); done false with no question means it is still working: call again with
+    message "" to collect the rest."""
+    if not chat_id:
+        chat_id = (await ChatService.create_chat_mode_session(USER_ID))["chat_id"]
+    elif not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "chats"):
+        raise ValueError(f"no chat {chat_id}: chat_id is one this tool or the web app's chat mode made")
+    t = _chats.get(chat_id)
+    if not t or t.task.done():
+        t = _chats[chat_id] = ChatThread(chat_id)
+    while not t.turn.empty():
+        t.turn.get_nowait()  # what a turn left unread is not this turn's
+    if message.strip():
+        t.send(message.strip())
+    texts: list[str] = []
+    try:
+        async with asyncio.timeout(min(max(timeout, 1), 600)):
+            while (text := await t.turn.get()) is not None:
+                texts.append(text)
+    except TimeoutError:
+        return {"chat_id": chat_id, "reply": "\n\n".join(texts), "done": False}
+    if t.pending and texts and texts[-1] == t.asked:
+        texts.pop()  # the question is given apart from the reply
+    return {"chat_id": chat_id, "reply": "\n\n".join(texts), "done": not t.pending, **({"question": t.asked} if t.pending else {})}
 
 
 @mcp.tool(annotations=WRITE)
