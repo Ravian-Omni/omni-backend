@@ -87,3 +87,19 @@ def test_a_chat_that_cannot_run_is_an_error_not_an_empty_answer(route, monkeypat
     monkeypatch.setattr(websocket, "chat_websocket", broken)
     with pytest.raises(RuntimeError, match="the chat could not run: WebSocket manager not initialized"):
         asyncio.run(hm.chat("hi"))
+
+
+def test_request_routes_chat_and_task_and_gives_back_the_id(route, monkeypatch):
+    script, _ = route
+    script["Any new mail?"] = [status("started"), said("None today."), status("finished"), {"type": "completion", "status": "complete"}]
+    started = AsyncMock(return_value={"key": "chat-t", "chat_id": "chat-t"})
+    monkeypatch.setattr(hm, "start_run", started)
+    ctx = SimpleNamespace()
+
+    chat_out = asyncio.run(hm.request("chat", "Any new mail?", ctx))
+    assert (chat_out["request"], chat_out["request_id"], chat_out["reply"], chat_out["done"]) == ("chat", "chat-q", "None today.", True)
+    task_out = asyncio.run(hm.request("task", "Find 25 marketing leads", ctx, request_id="chat-t", lead_target=25))
+    assert (task_out["request"], task_out["request_id"]) == ("task", "chat-t")
+    assert started.await_args.kwargs["chat_id"] == "chat-t" and started.await_args.kwargs["lead_target"] == 25
+    with pytest.raises(ValueError, match='request is "chat" or "task"'):
+        asyncio.run(hm.request("other", "x", ctx))

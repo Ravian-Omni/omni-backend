@@ -730,6 +730,24 @@ async def chat(message: str, chat_id: str = "", timeout: int = 180) -> dict[str,
 
 
 @mcp.tool(annotations=WRITE)
+async def request(request: str, query: str, ctx: Context, request_id: str = "", files: list[str] | None = None, agenda_id: str = "",
+                  lead_target: int = 0, credit_budget: float | None = None, timeout: int = 180) -> dict[str, Any]:
+    """One door for both kinds of work. request: "chat" for a small request answered in one turn (check the inbox or
+    calendar, one web search, look someone up, sum up a saved list); "task" for long, multi-step work (lead lists,
+    buyers, enrichment, campaigns, outreach, a goal's research). query: what to do, in plain words. request_id: the
+    chat's or task's id to continue (empty starts a new one); every answer gives it back. A chat answers in this call,
+    as chat does ({reply, done, question}); a task starts, as start_run does, and is followed with next_event,
+    answer and task_status, each taking request_id. files, agenda_id, lead_target and credit_budget are for a task;
+    timeout for a chat."""
+    if request == "chat":
+        return {"request": "chat", "request_id": (out := await chat(query, request_id, timeout))["chat_id"], **out}
+    if request == "task":
+        out = await start_run(query, ctx, key="", files=files, chat_id=request_id, agenda_id=agenda_id, lead_target=lead_target, credit_budget=credit_budget)
+        return {"request": "task", "request_id": out["chat_id"], **out}
+    raise ValueError('request is "chat" or "task"')
+
+
+@mcp.tool(annotations=WRITE)
 async def sweep() -> dict[str, Any]:
     """Check every sent campaign thread in Gmail now and open handoffs for new replies (the reply watcher's sweep). The
     handoffs opened here carry the facts and no drafted answer (draft ""): you write the answer and send it with
