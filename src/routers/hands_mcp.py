@@ -26,7 +26,7 @@ from src.agent_runtime import leads, site
 from src.configs.datetime_utils import dt
 from src.agent_runtime.tools import campaign
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
-from src.database import answer_decision
+from src.database import answer_decision, run_started
 from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
                           count_resume, list_marked_runs, list_queued_runs, load_pref, pop_queued_run, queued_run, save_pref, set_budget,
                           unmark_run)
@@ -430,6 +430,7 @@ async def _tend() -> None:
         await asyncio.sleep(TEND_S)
         try:
             await _expire_questions()
+            await _tell_blocked()
             await _dispatch()
         except Exception as e:  # the next turn tries again
             logger.warning(f"[hands] tend: {e}")
@@ -453,6 +454,26 @@ async def _expire_questions() -> None:
             need = await needs.build(t.chat_id, rid, question, card, str(open_.get("timestamp") or ""))
             await needs.push({**need, "id": f"{rid}:no_answer"}, reason="no_answer")
         await manager.stop_session(t.chat_id, t.stop_reason)
+
+
+_told_blocked: set[tuple[str, str]] = set()  # (request_id, queued key) already told; shortcut: in memory, a restart tells once more
+
+
+async def _tell_blocked() -> None:
+    """A queued run whose chat waits on a question asked in the web app (not a run of ours) is told to Brain_Hands once
+    per question, as a need it shows and never answers (answerable False): only the person answers it, in the web app."""
+    manager = await get_websocket_manager()
+    for run in await list_queued_runs():
+        chat, key = run["chat_id"], run["key"]
+        open_ = manager.pending_request(chat)
+        if chat in _active or not open_ or open_.get("answered") or not (rid := str(open_.get("request_id") or "")):
+            continue
+        if (rid, key) in _told_blocked:
+            continue
+        card, asked_by = status.card_of(open_)
+        need = await needs.build(chat, rid, status.question_of(card, asked_by, "", []), card, str(open_.get("timestamp") or ""))
+        await needs.push({**need, "id": f"{rid}:blocks:{key}"}, reason="blocks_queued", queued_key=key, answerable=False)
+        _told_blocked.add((rid, key))
 
 
 def _run_ended(chat_id: str) -> None:
@@ -516,11 +537,21 @@ async def answer(key: str, response: str, request_id: str = "") -> dict[str, Any
     if not t and not await (await get_chat_repository()).get_chat(USER_ID, key, "omni"):
         raise ValueError(f"no run or task {key}")
     open_id = (manager.pending_request(chat_id) or {}).get("request_id")  # the live question: the web app may have answered it
+    if not t and any(rid == str(request_id or open_id) for rid, _ in _told_blocked):  # a web-app run's question: the person answers it there
+        return {"ok": False, "reason": "web_app_question", "note": "that question belongs to a run started in DAX's app; the user answers it there"}
     if not await manager.handle_input_response(chat_id, reply, request_id or None):
         return {"ok": False, "reason": "not_open", "note": "that question is not open (nothing waits, or it was answered in the web app, or request_id is stale)"}
     if t:
         t.pending = False
     return {"ok": True, "chat_id": chat_id, "task_id": chat_id, "request_id": open_id}
+
+
+async def _waiting_on(chat_id: str) -> dict[str, Any] | None:
+    """The run a queued run waits behind: when it began, who started it, and where it is; None when none runs the chat."""
+    if chat_id not in _active and chat_id not in (await get_websocket_manager()).running_chats():
+        return None
+    return {"started_at": await run_started(chat_id), "source": "brain_hands" if chat_id in _active else "web_app",
+            "state": (await status.task_status(USER_ID, chat_id))["stage"]}
 
 
 @mcp.tool(annotations=READ)
@@ -532,6 +563,8 @@ async def task_status(key: str = "", chat_id: str = "") -> dict[str, Any]:
     next step). Give the key of a run started here or the chat_id of any task."""
     if key and (t := _find(key)):
         chat_id = t.chat_id
+    elif key and not chat_id and (waiting := await queued_run(key)):  # not started yet: say what it waits behind
+        return {"queued": True, "position": waiting["position"], "chat_id": waiting["chat_id"], "waiting_on": await _waiting_on(waiting["chat_id"])}
     chat_id = chat_id or key
     if not chat_id:
         raise ValueError("give the key of a run started here or a task's chat_id")

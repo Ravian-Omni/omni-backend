@@ -141,3 +141,51 @@ def test_a_key_not_running_here_answers_closed_at_once_so_its_poller_stops(env):
 
     out, took = run(poll())
     assert out == {"chat_id": "run-before-a-restart", "events": [], "closed": True, "pending": False, "unknown": True} and took < 1
+
+
+@pytest.fixture
+def blocked(env, monkeypatch):
+    """chat-a runs from the web app and waits on its plan approval (request 41); a Brain_Hands run is queued behind it."""
+    pending = {"chat-a": {"request_id": "41", "timestamp": "2026-11-20T09:17:13+00:00", "answered": False}}
+    manager = SimpleNamespace(running_chats=lambda: ["chat-a"], is_running=lambda c: c == "chat-a", pending_request=pending.get,
+                              handle_input_response=AsyncMock(return_value=True))
+    pushed = []
+
+    async def push(need, **extra):
+        pushed.append({**need, **extra})
+        return True
+
+    monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=manager))
+    monkeypatch.setattr(hm, "_told_blocked", set())
+    monkeypatch.setattr(hm.needs, "push", push)
+    monkeypatch.setattr(hm.status, "card_of", lambda event: ({"agent": "get_user_acceptance"}, "planner"))
+    monkeypatch.setattr(hm.status, "question_of", lambda *a: {"kind": "plan_approval", "answer_with": "yes or no", "title": "Approve the plan?"})
+    monkeypatch.setattr(hm.status, "task_status", AsyncMock(return_value={"stage": "awaiting_plan_approval"}))
+    monkeypatch.setattr(hm, "run_started", AsyncMock(return_value="2026-11-20T09:16:45+00:00"))
+    run(hm.start_run("a question for DAX", CTX, key="sch_1", chat_id="chat-a"))
+    return pending, pushed, manager
+
+
+def test_a_queued_key_says_what_it_waits_behind(blocked):
+    assert run(hm.task_status(key="sch_1")) == {"queued": True, "position": 1, "chat_id": "chat-a", "waiting_on": {
+        "started_at": "2026-11-20T09:16:45+00:00", "source": "web_app", "state": "awaiting_plan_approval"}}
+
+
+def test_a_web_app_question_blocking_a_queued_run_is_told_once_and_cannot_be_answered_from_here(blocked):
+    pending, pushed, manager = blocked
+    run(hm._tell_blocked()); run(hm._tell_blocked())  # two tend turns: one need
+    [need] = pushed
+    assert (need["id"], need["reason"], need["queued_key"], need["answerable"], need["data"]["task_id"]) == ("41:blocks:sch_1", "blocks_queued", "sch_1", False, "chat-a")
+    assert run(hm.answer("chat-a", "yes"))["reason"] == "web_app_question" and manager.handle_input_response.await_count == 0
+    pending["chat-a"] = {"request_id": "42", "timestamp": "x", "answered": False}  # a new question: told again
+    run(hm._tell_blocked())
+    assert [p["id"] for p in pushed] == ["41:blocks:sch_1", "42:blocks:sch_1"]
+
+
+def test_no_question_or_a_run_of_ours_tells_nothing(blocked):
+    pending, pushed, _ = blocked
+    hm._active.add("chat-a")  # Brain_Hands' own run: its questions reach it as events already
+    run(hm._tell_blocked())
+    hm._active.clear(); pending.clear()
+    run(hm._tell_blocked())
+    assert pushed == []
