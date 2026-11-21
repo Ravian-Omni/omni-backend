@@ -135,7 +135,7 @@ class SettingsService:
             agent_model = OpenAIRunner.model_config()["model"]
         except ValueError:  # no default model configured
             entry, agent_model = {}, ""
-        if settings.AGENT_PROVIDER != "openai":
+        if settings.AGENT_PROVIDER not in ("openai", "openrouter"):
             agent_model = settings.AGENT_MODEL or ""
         return {
             "tasks": {"provider": entry.get("api_type") or "openai", "model": entry.get("model", "")},

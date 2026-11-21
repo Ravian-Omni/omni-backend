@@ -92,7 +92,8 @@ class OpenAIRunner:
             "model": model,
             "api_key": entry.get("api_key") or settings.OPENAI_API_KEY or "",
             "base_url": entry.get("base_url"),
-            "extra_body": entry.get("extra_body") or {"reasoning_effort": "none"},
+            # reasoning_effort "none" is what OpenAI's luna needs for tools; it is not sent to OpenRouter
+            "extra_body": entry.get("extra_body") or ({} if settings.AGENT_PROVIDER == "openrouter" else {"reasoning_effort": "none"}),
             "max_output_tokens": int(getattr(settings, "AGENT_MAX_OUTPUT_TOKENS", 0) or DEFAULT_MAX_OUTPUT_TOKENS),
         }
 

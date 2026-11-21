@@ -86,7 +86,8 @@ class Settings:
         )
 
         # Agent runtime (personas): "openai" runs them on the chat-completions model from
-        # configs/llm_model_mapping.json (gpt-5.6-luna); "anthropic" runs them on the Claude Agent SDK.
+        # configs/llm_model_mapping.json; "anthropic" runs them on the Claude Agent SDK; "openrouter" runs them, and every
+        # OpenAI model in the mapping, on OpenRouter (OPENROUTER_MODEL), through the same chat-completions code.
         self.AGENT_PROVIDER = (os.getenv("DAXAGENT_AGENT_PROVIDER") or "anthropic").strip().lower()
         self.AGENT_MODEL = os.getenv("DAXAGENT_AGENT_MODEL") or ("claude-haiku-4-5-20251001" if self.AGENT_PROVIDER == "anthropic" else None)
         self.CHAT_ENGINE = (os.getenv("DAXAGENT_CHAT_ENGINE") or "sdk").strip().lower()  # sdk | autogen
@@ -98,6 +99,10 @@ class Settings:
         # LLM Provider API Keys
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
         self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        # OpenRouter (contract [28]): used only when DAXAGENT_AGENT_PROVIDER is "openrouter"; the key alone switches nothing
+        self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+        self.OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL") or "deepseek/deepseek-v4.1-flash-1017"
+        self.OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
         self.TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
         self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
         self.BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
