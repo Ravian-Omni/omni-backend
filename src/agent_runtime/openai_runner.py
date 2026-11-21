@@ -332,6 +332,7 @@ class OpenAIRunner:
             try:
                 await s._stream_message(finished_event)
                 await s._persist("assistant", s.persona.name, finished_event, usage=s.run_usage(cfg["model"]))
+                await s.meter(cfg["model"])
             except Exception as e:
                 logger.debug(f"[{s.persona.name}] could not emit finish status: {e}")
 

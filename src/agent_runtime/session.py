@@ -628,6 +628,7 @@ class PersonaSession:
             try:
                 await self._stream_message(finished_event)
                 await self._persist("assistant", self.persona.name, finished_event, usage=self.run_usage(self._model))
+                await self.meter(self._model)
             except Exception as e:
                 logger.debug(f"[{self.persona.name}] could not emit finish status: {e}")
 
@@ -708,6 +709,15 @@ class PersonaSession:
 
     def get_usage_summary(self) -> dict[str, Any]:
         return self._usage.copy()
+
+    async def meter(self, model: str) -> None:
+        """This run's tokens into token_usage, the per-chat meter (one row per persona run)."""
+        from src.services.token_usage_service import TokenUsageService
+
+        u = self.run_usage(model)
+        if u["total_tokens"] > 0:
+            await TokenUsageService.record_usage(self.context.chat_id, model, u["prompt_tokens"], u["completion_tokens"], u["total_tokens"],
+                                                 u["cost_usd"], agent_name=self.persona.name, capability="persona")
 
     def run_usage(self, model: str) -> dict[str, Any]:
         """This run's tokens and model, kept on its finish line for the admin dashboard, whatever the outcome (per_run

@@ -264,6 +264,12 @@ class OmniGroupChatManager(autogen.GroupChatManager):
         async_to_sync(
             update_chat_history(self.chat_id, message_data, settings.OMNI_COLLECTION)
         )
+        if (delta := sender_usage["message_delta"])["total_tokens"] > 0:  # the per-call meter (token_usage), not only the log
+            from src.services.token_usage_service import TokenUsageService
+
+            async_to_sync(TokenUsageService.record_usage(
+                self.chat_id, sender_usage["current_total"].get("model") or "unknown", delta["prompt_tokens"], delta["completion_tokens"],
+                delta["total_tokens"], delta["cost"], agent_name=sender.name, capability="omni"))
 
     # Additional utility methods for comprehensive usage tracking
 
