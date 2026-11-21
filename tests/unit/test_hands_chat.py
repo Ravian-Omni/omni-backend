@@ -78,3 +78,12 @@ def test_chat_says_when_a_task_is_needed(route):
 def test_a_chat_id_that_is_not_a_chat_is_refused(route):
     with pytest.raises(ValueError, match="no chat nope"):
         asyncio.run(hm.chat("hi", chat_id="nope"))
+
+
+def test_a_chat_that_cannot_run_is_an_error_not_an_empty_answer(route, monkeypatch):
+    async def broken(ws, chat_id, user_id, manager):
+        raise RuntimeError("WebSocket manager not initialized")
+
+    monkeypatch.setattr(websocket, "chat_websocket", broken)
+    with pytest.raises(RuntimeError, match="the chat could not run: WebSocket manager not initialized"):
+        asyncio.run(hm.chat("hi"))

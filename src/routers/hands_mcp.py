@@ -718,6 +718,9 @@ async def chat(message: str, chat_id: str = "", timeout: int = 180) -> dict[str,
                 texts.append(text)
     except TimeoutError:
         return {"chat_id": chat_id, "reply": "\n\n".join(texts), "done": False}
+    if t.task.done() and not texts:  # the chat closed without a word: say so, never a silent "done"
+        why = t.task.exception() if not t.task.cancelled() else None
+        raise RuntimeError(f"the chat could not run: {why}" if why else "the chat closed without answering")
     if t.pending and texts and texts[-1] == t.asked:
         texts.pop()  # the question is given apart from the reply
     return {"chat_id": chat_id, "reply": "\n\n".join(texts), "done": not t.pending, **({"question": t.asked} if t.pending else {})}
