@@ -336,6 +336,41 @@ async def _track(task_id: str, **fields: Any) -> None:
         await save_task({"id": task_id, **fields})
     except Exception as e:
         logger.warning(f"[hands] task {task_id} not updated: {e}")
+        return
+    if fields.get("state") in ENDED and (row := await find_task(task_id)):
+        _ended(row, fields["state"])
+
+
+ENDED = ("done", "failed", "cancelled")
+
+
+def _ended(row: dict[str, Any], state: str, id: str = "") -> None:
+    """Contract [29]'s task.ended push; stalled is not final, a later end of the same task wins."""
+    brain_hands.push_in_background(
+        "task.ended", id or f"{row['id']}:{state}", row["title"], "",  # the result itself: task_status
+        v=1, task_id=row["id"], chat_id=row["chat_id"], agenda_id=row["agenda_id"], run_key=row["run_key"], state=state,
+        step=row["step"], ended_at=row["ended_at"] or dt.now_iso())
+
+
+async def _settle() -> None:
+    """A task row left running or waiting by a run that no longer goes is closed failed; a live one quiet for STALL_MIN
+    minutes is pushed stalled, once per quiet stretch."""
+    going = {k: t for k, t in _threads.items() if not t.task.done()}
+    live = {t.task_id for t in going.values()} | set(going)  # by key too: a starting run is in _threads before its task_id is set
+    for row in await list_task_rows(True, None, 200):
+        if row["state"] not in ("running", "waiting"):
+            continue
+        if row["id"] not in live and row["run_key"] not in live:
+            ended = dt.now_iso()
+            await _track(row["id"], state="failed", ended_at=ended, waiting_on="", result=run_result.envelope(
+                {"chat_id": row["chat_id"], "request": row["title"], "stage": "stopped"}, key=row["run_key"], agenda_id=row["agenda_id"],
+                started_at=row["started_at"], ended_at=ended, stop_reason="lost: the run that held this task is no longer going"))
+        elif row["state"] == "running" and (await _view(row))["state"] == "stalled" and (told := f"{row['id']}:stalled:{row['last_progress_at']}") not in _stall_told:
+            _stall_told.add(told)
+            _ended(row, "stalled", told)
+
+
+_stall_told: set[str] = set()
 
 
 def _watch(coro) -> None:
@@ -501,6 +536,7 @@ async def _tend() -> None:
             await _expire_questions()
             await _tell_blocked()
             await _dispatch()
+            await _settle()
         except Exception as e:  # the next turn tries again
             logger.warning(f"[hands] tend: {e}")
 

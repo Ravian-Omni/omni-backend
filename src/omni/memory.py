@@ -9,7 +9,7 @@ from src.configs.datetime_utils import dt
 COMPLETION = "process_completion_agent"  # a finished run's summary: what was done, what failed, what was saved where
 REQUEST = "chat_manager"  # a run's request
 REQUEST_CHARS = 1500  # an earlier run's request, cut: the current run's stays whole
-LEDGER = "saved_files"  # the code-built list of the chat's saved files; rebuilt on every trim
+LEDGER = "Admin"  # the code-built list of the chat's saved files; rebuilt on every trim. autogen's admin name: resume rejects names that are not agents
 
 
 def compact(messages: list[dict[str, Any]], ledger: str = "") -> list[dict[str, Any]]:
