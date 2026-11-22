@@ -12,16 +12,19 @@ _tasks: set[asyncio.Task] = set()
 
 async def push(kind: str, id: str, title: str, text: str, **data) -> bool:
     """POST one notification to Brain_Hands; `data` is the contract's data object, empty values left out. Nothing is
-    sent when BRAIN_HANDS_URL is unset."""
-    url = os.getenv("BRAIN_HANDS_URL", "").rstrip("/")
-    if not url:
+    sent when neither COMM_URL nor BRAIN_HANDS_URL is set. With COMM_URL it goes to the exchange (Comm_Chan, contract
+    [29]), which routes each kind to the apps that take it and retries; without, straight to Brain_Hands."""
+    comm = os.getenv("COMM_URL", "").rstrip("/")
+    url = f"{comm}/send" if comm else os.getenv("BRAIN_HANDS_URL", "").rstrip("/") + "/notifications"
+    if url in ("/send", "/notifications"):
         return False
-    body = {"app": "daxagent", "kind": kind, "id": id, "title": title, "text": text[:3000], "data": {k: v for k, v in data.items() if v}}
-    headers = {"Authorization": f"Bearer {os.getenv('BRAIN_HANDS_TOKEN', '')}"}
+    body = {"app": "daxagent", "kind": kind, "id": id, "title": title, "text": text[:3000], "data": {k: v for k, v in data.items() if v},
+            **({"agenda_id": data["agenda_id"]} if data.get("agenda_id") else {})}
+    headers = {"Authorization": f"Bearer {os.getenv('COMM_TOKEN' if comm else 'BRAIN_HANDS_TOKEN', '')}"}
     async with httpx.AsyncClient(timeout=10) as client:
         for wait in (*RETRY_AFTER_S, None):
             try:
-                response = await client.post(f"{url}/notifications", json=body, headers=headers)
+                response = await client.post(url, json=body, headers=headers)
             except httpx.HTTPError as e:
                 logger.warning(f"[brain_hands] {id} not sent: {e}")
                 return False

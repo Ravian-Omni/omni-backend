@@ -38,7 +38,17 @@ def server(monkeypatch, *statuses):
     monkeypatch.setattr(brain_hands, "RETRY_AFTER_S", (0, 0))
     monkeypatch.setenv("BRAIN_HANDS_URL", "http://hands.test/")
     monkeypatch.setenv("BRAIN_HANDS_TOKEN", "tok")
+    monkeypatch.delenv("COMM_URL", raising=False)
     return seen
+
+
+def test_with_comm_url_the_push_goes_to_the_exchange_with_its_token(monkeypatch):
+    seen = server(monkeypatch, 200)
+    monkeypatch.setenv("COMM_URL", "http://comm.test/")
+    monkeypatch.setenv("COMM_TOKEN", "comm-tok")
+    assert asyncio.run(brain_hands.push("task.ended", "dt_a:done", "goal", "", task_id="dt_a", agenda_id="agd_1"))
+    assert str(seen[0].url) == "http://comm.test/send" and seen[0].headers["authorization"] == "Bearer comm-tok"
+    assert json.loads(seen[0].read())["agenda_id"] == "agd_1"
 
 
 def test_the_pushed_route_is_the_stored_one_for_every_route(temp_db, monkeypatch):
