@@ -60,9 +60,25 @@ def _short(text: str, n: int = 110) -> str:
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
-async def build(server: str) -> Persona | None:
-    """Build the specialist for one server, or None when it is not eligible or reachable."""
+async def _composio_active() -> set[str] | None:
+    """The Composio apps with an active account (upper-case slugs), or None when Composio cannot be asked."""
+    from src.chat.tools.composio import ComposioToolManager
+
+    try:
+        return set((await ComposioToolManager("local_user", None, None).get_user_connected_apps_async("local_user"))["app_names"])
+    except Exception as e:
+        logger.warning(f"Composio apps unknown, specialists not filtered by them: {e}")
+        return None
+
+
+async def build(server: str, active: set[str] | None = None) -> Persona | None:
+    """Build the specialist for one server, or None when it is not eligible or reachable. A Composio-bridged server whose
+    app has no active account is left out: its MCP link answers, but every tool says "not connected" (817f8f3c)."""
     if not specialist_eligible(server) or not await is_connected(server):
+        return None
+    toolkits = {t.upper() for t in (options(server).get("composio") or {}).get("toolkits") or []}
+    if active is not None and toolkits - active:
+        logger.info(f"Specialist for '{server}' skipped: {', '.join(sorted(toolkits - active))} not connected in Composio")
         return None
     try:
         tools = await list_tools(server)
@@ -117,9 +133,10 @@ async def refresh() -> dict[str, Persona]:
     """Rebuild every specialist; call after servers are added, removed, switched or connected."""
     global _cache, _by_server
     fresh, by_server = {}, {}
+    active = await _composio_active() if any((options(s).get("composio") or {}).get("toolkits") for s in server_names()) else None
     for server in server_names():
         try:
-            persona = await build(server)
+            persona = await build(server, active)
         except Exception as e:
             logger.warning(f"Specialist build failed for '{server}': {e}")
             persona = None

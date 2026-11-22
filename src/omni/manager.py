@@ -40,7 +40,7 @@ from src.omni.capabilities_descriptions import (
 )
 from src.utilities.custom_manager import ChatContext, create_capability_chat
 from src.omni.capability_manager import CapabilityConfig, CapabilityManager
-from src.omni.memory import OmniMemory
+from src.omni.memory import COMPLETION, LEDGER, OmniMemory
 from src.omni.response_format import (
     AgentSelectionResponse,
     CapabilityRoutingResponse,
@@ -346,6 +346,8 @@ class CustomUserProxyAgent(UserProxyAgent):
         # return await aioconsole.ainput(prompt)
 
 
+EMPTY_PLAN_NOTE = ("Your plan has no steps, but no agent has been tried in this run. Every agent listed to you is switched on and "
+                   "connected; what earlier runs could not reach is not a reason to skip this one. Plan the steps with those agents.")
 SKIPPED = "The user skipped the questions. Proceed with the stated assumptions and sensible defaults; do not ask again."
 
 
@@ -1263,6 +1265,17 @@ class Omni:
         return (True, {"role": "assistant", "content": None, "tool_calls": calls}) if calls else (False, None)
 
     @staticmethod
+    def _empty_first_plan(messages: list) -> bool:
+        """The run's first plan has no steps and no agent has run yet: a task closed on a guess that nothing can do it
+        (817f8f3c), not on a try. Asked again once; a second empty plan stands."""
+        run = messages[next((i for i in range(len(messages) - 1, -1, -1) if messages[i].get("name") == COMPLETION), -1) + 1:]
+        try:
+            empty = not json.loads(run[-1]["content"]).get("breakdown")
+        except (TypeError, ValueError, KeyError, AttributeError, IndexError):
+            return False
+        return empty and not any(m.get("name") in ("agent_executor", "agent_router") or m.get("content") == EMPTY_PLAN_NOTE for m in run)
+
+    @staticmethod
     def _caller_stopped_mid_plan(messages: list) -> bool:
         """The caller answered in prose (blocked, a detail missing, a step it did not run) while the plan has steps left."""
         if len(messages) < 2 or messages[-2].get("name") != "agent_caller":
@@ -1316,6 +1329,11 @@ class Omni:
             try:
                 if last_speaker.name in ["planner_agent"]:
                     status = json.loads(messages[-1]["content"]).get("overall_status")
+                    if status == "completed" and self._empty_first_plan(messages):
+                        note = {"role": "user", "name": LEDGER, "content": EMPTY_PLAN_NOTE}
+                        messages.append(note)  # the group's record; the planner answers from its own, so it is sent too
+                        self.manager.send(note, self.planner, request_reply=False, silent=True)
+                        return self.planner
                     if status == "completed":
                         return groupchat.agent_by_name("process_completion_agent")
             except Exception as e:
