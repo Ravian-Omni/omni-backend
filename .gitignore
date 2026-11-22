@@ -211,5 +211,3 @@ nuitka-crash-report.xml
 # Temporary/utility scripts
 update_imports.py
 .removed_capabilities/
-
-.evidence_first/

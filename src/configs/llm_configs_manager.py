@@ -40,20 +40,6 @@ _PROVIDER_KEY_ATTRS = {
 }
 
 
-KEEP_ON_OPENAI = {"browser_llm_config"}  # the browser's vision model: not moved, the OpenRouter model may not read images
-
-
-def _openrouter(config_name: str) -> bool:
-    """The switch (DAXAGENT_AGENT_PROVIDER=openrouter) is on and this OpenAI entry moves to OpenRouter."""
-    return settings.AGENT_PROVIDER == "openrouter" and config_name not in KEEP_ON_OPENAI
-
-
-def _on_openrouter(entry: dict[str, Any]) -> dict[str, Any]:
-    """An OpenAI entry on OpenRouter: its key, address and model; OpenAI-only request extras dropped."""
-    moved = {k: v for k, v in entry.items() if k != "extra_body"}
-    return {**moved, "api_key": settings.OPENROUTER_API_KEY or "", "base_url": settings.OPENROUTER_BASE_URL, "model": settings.OPENROUTER_MODEL}
-
-
 class LLMConfigManager:
     """LLM Configuration Manager using local API keys and model mapping.
 
@@ -119,8 +105,6 @@ class LLMConfigManager:
             # AutoGen needs api_type for non-OpenAI providers
             if provider == "anthropic":
                 config_entry["api_type"] = "anthropic"
-            if provider == "openai" and _openrouter(config_name):
-                config_entry = _on_openrouter(config_entry)
 
             configs[config_name] = config_entry
 

@@ -505,7 +505,7 @@ class PersonaSession:
         await self._persist("user", "user", {"role": "user", "content": user_message}, content=user_message)
         self._history.append({"role": "user", "content": user_message})
 
-        if (getattr(settings, "AGENT_PROVIDER", "anthropic") or "anthropic") in ("openai", "openrouter"):
+        if (getattr(settings, "AGENT_PROVIDER", "anthropic") or "anthropic") == "openai":
             from src.agent_runtime.openai_runner import OpenAIRunner
 
             return await OpenAIRunner(self).run(user_message)
@@ -741,7 +741,7 @@ class PersonaSession:
         async def warm() -> None:
             try:
                 await self._ensure_ws()
-                if (getattr(settings, "AGENT_PROVIDER", "anthropic") or "anthropic") in ("openai", "openrouter"):
+                if (getattr(settings, "AGENT_PROVIDER", "anthropic") or "anthropic") == "openai":
                     return  # the OpenAI runner builds its tools per run; there is no client to start
                 await self._ensure_client()
             except Exception as e:
