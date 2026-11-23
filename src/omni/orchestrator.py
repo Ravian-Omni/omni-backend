@@ -101,6 +101,17 @@ CARDS: dict[str, dict[str, str]] = {
         "call_when": "The task involves a data file the user attached or named, or analysing, scoring, segmenting or charting data that is already in an artifact. Pass it the file path or artifact id.",
         "not_when": "The data still has to be found (lead_finder or buyer_finder come first), or an agent of the user's own reads that kind of file and matches the request.",
     },
+    "python_developer": {
+        "does": "Writes, runs and fixes Python in the user's workspace: scripts, API calls, file conversions, cleaning and merging files, small automations. Runs what it writes before it reports, and saves the script and its output.",
+        "call_when": "The deliverable is a Python script or what one produces: convert, clean, merge or generate files, call an API, automate a repeatable step.",
+        "not_when": "Analysis, charts, scoring or models on the user's data (ml_engineer).",
+    },
+    "web_surfer": {
+        "does": "Browses live websites in a headless browser (Obscura): opens pages, follows links, clicks, scrolls, uses a site's search and filters, and reads what JavaScript renders. Saves the facts found, each with its URL. Asks the user before submitting anything on a site.",
+        "call_when": "The answer is on websites and needs browsing: named sites or URLs to read, several pages to follow, a site search or filter to use, or details to collect from many pages.",
+        "not_when": "Companies or people from Data Axle (lead_finder, buyer_finder), or a quick fact one web search answers.",
+        "needs": "The Obscura browser running (Settings, Connections).",
+    },
     "campaign_strategizer": {
         "does": "Reads market intelligence on the user's competitors from MarketWatch and saves a strategy (where we win, pricing angle, objections, messaging, offer) that campaign_builder writes from. Every fact is cited.",
         "call_when": "The request mentions competitors, positioning or the campaign's angle, or a campaign is being written while MarketWatch is listed as connected.",
@@ -163,6 +174,13 @@ ABILITIES: dict[str, list[str]] = {
         "graph tools (when the memory server lists them): the people, companies and decisions linked to a memory.",
         "remember / forget: stores the exact text the user asked to remember, or removes a memory (removing asks the user first).",
     ],
+    "web_surfer": [
+        "browser_navigate, then browser_snapshot / browser_markdown / browser_links / browser_extract: opens a URL and reads the rendered page.",
+        "browser_click / browser_fill / browser_type / browser_select_option / browser_scroll: acts on the page by the references a snapshot returns.",
+        "WebSearch: finds the pages to start from.",
+        "save_artifact kind analysis or other: the findings or the list, one row per item with its source URL; returns the artifact id.",
+        "ask_user: confirms before submitting a form, signing in, buying or posting on a site.",
+    ],
     "lead_finder": [
         "sic_lookup: takes industry words (e.g. 'dentists'); returns the matching 4-digit SIC codes.",
         "business_search (Data Axle, free): takes primary_sic_code_id, a place (city, state, zip, county, or geo_lat + geo_lon + geo_distance for a radius), employees min/max, revenue min/max and limit; returns masked businesses (name and address partly starred) with infogroupId, city, state and SIC.",
@@ -190,6 +208,11 @@ ABILITIES: dict[str, list[str]] = {
         "save_artifact kind analysis, scored_leads or segments: the findings or the scored rows; returns the artifact id.",
         "newton_upload, then ask, get_answer, build_pipeline, train_pipeline, get_job, get_data_story and choose_model (Newton, when connected): a full analysis or a trained model; returns its findings, charts and the project_id.",
         "ask_user_for_data / ask_user_choice: asks for a dataset, the target column or the holdout.",
+    ],
+    "python_developer": [
+        "run_python / execute_command: runs Python and shell commands in the workspace, installs packages.",
+        "Read, Write, Edit, Glob, Grep: files under the working directory and the shared-files folder.",
+        "read_artifact / save_artifact: data from other agents in, the script's output out; returns the artifact id.",
     ],
     "campaign_strategizer": [
         "catalog / scout_runs (MarketWatch, free): which competitors and topics are tracked, and how fresh the data is.",
@@ -245,8 +268,8 @@ assert set(ABILITIES) == set(CARDS)
 NAMES = {"email_sender": "Email sender", "manual_verification": "User verification"}
 # Agents that exist only once the user has signed in to their MCP server (Settings, Connections): until then no step
 # sees them; after, they and their server's functions reach the planner on the next task.
-NEEDS_MCP = {"ml_engineer": "newton", "campaign_strategizer": "marketwatch"}
-ORDER = list(CARDS)[:10]  # the pipeline, user_context to signal_play; email_sender and manual_verification have no place in it
+NEEDS_MCP = {"ml_engineer": "newton", "campaign_strategizer": "marketwatch", "web_surfer": "obscura"}
+ORDER = list(CARDS)[:12]  # the pipeline, user_context to signal_play; email_sender and manual_verification have no place in it
 
 HEADER = """## Agents you can assign
 These cards, and the connected-app specialists listed after them, are the only agents that can be given tasks. For each part of the request, use the agent whose "Call when" matches it, and never one whose "Not when" matches. When an agent "Needs" something the chat does not have yet, plan the agent that produces it first. Use the fewest agents that cover the request, one task each, always in this order: $order. An agent of the user's own goes where its card says, otherwise right after the agents whose output it needs. When the user attached a file, the agent whose card names that kind of file and matches the request takes it; if several match, the user's own agent comes first."""

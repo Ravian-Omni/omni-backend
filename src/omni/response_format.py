@@ -83,6 +83,8 @@ class Capability(str, Enum):
     OUTREACH = "outreach"
     INBOX_AGENT = "inbox_agent"
     ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
+    PYTHON_DEVELOPER = "python_developer"
+    WEB_SURFER = "web_surfer"
     SIGNAL_PLAY = "signal_play"
     MEETING_PREP = "meeting_prep"
     RECOVERY_NOTE = "recovery_note"
@@ -296,6 +298,8 @@ class Capability(str, Enum):
     OUTREACH = "outreach"
     INBOX_AGENT = "inbox_agent"
     ML_ENGINEER = "ml_engineer"  # Data Analyst: reads and analyses the user's files
+    PYTHON_DEVELOPER = "python_developer"
+    WEB_SURFER = "web_surfer"
     SIGNAL_PLAY = "signal_play"
     MEETING_PREP = "meeting_prep"
     RECOVERY_NOTE = "recovery_note"

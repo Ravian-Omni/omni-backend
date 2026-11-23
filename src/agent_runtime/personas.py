@@ -89,6 +89,29 @@ _register(Persona(
 ))
 
 _register(Persona(
+    name="python_developer",
+    display_name="Python Developer",
+    tagline="Writes and runs Python scripts in your workspace",
+    description=prompts.PYTHON_DEVELOPER_DESCRIPTION,
+    system_prompt=prompts.PYTHON_DEVELOPER,
+    builtin_tools=CODING_BUILTINS,
+    daxagent_tools=["execute_command", "ask_user_for_data", *COMMON_TOOLS],
+    max_turns=60,
+))
+
+_register(Persona(
+    name="web_surfer",
+    display_name="Web Surfer",
+    tagline="Browses live websites and brings back what they say",
+    description=prompts.WEB_SURFER_DESCRIPTION,
+    system_prompt=prompts.WEB_SURFER,
+    builtin_tools=["Read", "WebSearch"],
+    daxagent_tools=[*COMMON_TOOLS],
+    remote_mcp=True,  # Obscura's browser, assigned to this persona alone (its server config names web_surfer)
+    max_turns=60,
+))
+
+_register(Persona(
     name="lead_finder",
     display_name="Lead Finder",
     tagline="Turns an ideal customer profile into a lead list",

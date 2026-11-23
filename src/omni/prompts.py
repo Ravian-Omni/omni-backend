@@ -529,7 +529,7 @@ MANDATORY EXECUTION PROCESS:
 4. Confirm successful execution
 
 EXECUTION REQUIREMENTS:
-- For user_context, ml_engineer, lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, inbox_agent, signal_play, meeting_prep, recovery_note: call the persona with the complete task (for ml_engineer include the file path or artifact id; for signal_play, meeting_prep and recovery_note the whole "SIGNAL PLAY: {{...}}", "MEETING PREP: {{...}}" or "RECOVERY NOTE: {{...}}" request, word for word) and pass on its summary and artifact ids
+- For user_context, web_surfer, ml_engineer, python_developer, lead_finder, buyer_finder, contact_enricher, campaign_strategizer, campaign_builder, outreach, inbox_agent, signal_play, meeting_prep, recovery_note: call the persona with the complete task (for ml_engineer include the file path or artifact id; for signal_play, meeting_prep and recovery_note the whole "SIGNAL PLAY: {{...}}", "MEETING PREP: {{...}}" or "RECOVERY NOTE: {{...}}" request, word for word) and pass on its summary and artifact ids
 - For Composio tools (e.g. GMAIL_SEND_EMAIL): Execute the tool action with provided parameters
 
 FAILURE IS NOT AN OPTION:

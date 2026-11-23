@@ -77,6 +77,22 @@
           "task"
         ]
       }
+    },
+    "obscura": {
+      "url": "http://127.0.0.1:8326/mcp",
+      "daxagent": {
+        "display_name": "Obscura browser",
+        "description": "A headless browser (Obscura, open source) that opens live web pages, renders their JavaScript and lets an agent read, click, scroll and fill them",
+        "auth": "none",
+        "personas": [
+          "web_surfer"
+        ],
+        "specialist": false,
+        "modes": [
+          "task"
+        ],
+        "planner_note": "Reached through the persona web_surfer, never called directly in a plan step. DAX starts it on 127.0.0.1:8326 when the obscura binary is installed (OBSCURA_BIN, default ~/.daxagent/bin/obscura).\n"
+      }
     }
   }
 }

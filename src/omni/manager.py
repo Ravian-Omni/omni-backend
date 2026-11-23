@@ -29,6 +29,8 @@ from src.agent_runtime.prompts import (
     CONTACT_ENRICHER_DESCRIPTION,
     LEAD_FINDER_DESCRIPTION,
     ML_ENGINEER_DESCRIPTION,
+    PYTHON_DEVELOPER_DESCRIPTION,
+    WEB_SURFER_DESCRIPTION,
     OUTREACH_DESCRIPTION,
     SIGNAL_PLAY_DESCRIPTION,
     MEETING_PREP_DESCRIPTION,
@@ -974,6 +976,8 @@ class Omni:
         persona_descriptions = {
             "user_context": USER_CONTEXT_DESCRIPTION,
         "ml_engineer": ML_ENGINEER_DESCRIPTION,
+            "python_developer": PYTHON_DEVELOPER_DESCRIPTION,
+            "web_surfer": WEB_SURFER_DESCRIPTION,
             "lead_finder": LEAD_FINDER_DESCRIPTION,
             "buyer_finder": BUYER_FINDER_DESCRIPTION,
             "contact_enricher": CONTACT_ENRICHER_DESCRIPTION,

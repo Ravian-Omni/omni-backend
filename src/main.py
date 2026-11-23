@@ -30,7 +30,7 @@ from src.routers import chat
 from src.routers import settings as settings_router
 from src.routers import auth as auth_router
 from src.routers import track
-from src.services import chat_title
+from src.services import chat_title, obscura
 from src.routers import admin, evals, feedback, handoffs, hands_keys, hands_mcp, mcp, share, slack, software_developer, teams, websocket
 from src.utilities.logging import cleanup_logging, setup_logging
 
@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
     os.environ["HOME"] = os.path.expanduser("~")
     try:
         # Startup: Connect to databases
+        obscura.start()  # the Web Surfer's browser, before the MCP servers are first checked
         logger.info("📊 Websocket Manager...")
         await init_managers()
         logger.info("✅ Websocket Manager established")
@@ -96,7 +97,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down FastAPI application...")
 
     try:
-        # Add any other cleanup tasks here
+        obscura.stop()
         logger.info("🧹 Application shutdown completed successfully")
 
     except Exception as e:
