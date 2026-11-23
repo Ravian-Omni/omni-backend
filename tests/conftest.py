@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 _DATA_DIR = tempfile.mkdtemp(prefix="daxagent-tests-")
 os.environ["DAXAGENT_DATA_DIR"] = _DATA_DIR
 atexit.register(shutil.rmtree, _DATA_DIR, True)
+# Nor posts to the live exchange or Brain_Hands: empty, not removed, so load_dotenv (no override) cannot fill them from .env
+os.environ["COMM_URL"] = os.environ["BRAIN_HANDS_URL"] = ""
 
 from src.main import app
 from src.managers.connection import WebSocketManager
