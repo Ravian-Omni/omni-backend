@@ -51,6 +51,14 @@ def test_with_comm_url_the_push_goes_to_the_exchange_with_its_token(monkeypatch)
     assert json.loads(seen[0].read())["agenda_id"] == "agd_1"
 
 
+def test_an_exchange_without_a_token_gets_no_authorization_header(monkeypatch):
+    seen = server(monkeypatch, 200)
+    monkeypatch.setenv("COMM_URL", "http://comm.test/")
+    monkeypatch.setenv("COMM_TOKEN", "")
+    assert asyncio.run(brain_hands.push("task.ended", "dt_a:done", "goal", ""))
+    assert "authorization" not in seen[0].headers
+
+
 def test_the_pushed_route_is_the_stored_one_for_every_route(temp_db, monkeypatch):
     seen = server(monkeypatch, *[200] * 7)
     monkeypatch.setattr(inbox, "notify", AsyncMock(return_value=[]))
@@ -84,6 +92,7 @@ def test_the_reply_is_pushed_in_the_contract_shape(monkeypatch):
 
 def test_nothing_is_sent_without_a_url_and_only_a_5xx_is_retried(monkeypatch):
     monkeypatch.delenv("BRAIN_HANDS_URL", raising=False)
+    monkeypatch.delenv("COMM_URL", raising=False)
     assert asyncio.run(brain_hands.push_reply("h", "", "hi")) is False
     seen = server(monkeypatch, 503, 502, 200)
     assert asyncio.run(brain_hands.push_reply("h", "", "hi")) is True and len(seen) == 3

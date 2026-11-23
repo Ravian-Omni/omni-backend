@@ -20,7 +20,8 @@ async def push(kind: str, id: str, title: str, text: str, **data) -> bool:
         return False
     body = {"app": "daxagent", "kind": kind, "id": id, "title": title, "text": text[:3000], "data": {k: v for k, v in data.items() if v},
             **({"agenda_id": data["agenda_id"]} if data.get("agenda_id") else {})}
-    headers = {"Authorization": f"Bearer {os.getenv('COMM_TOKEN' if comm else 'BRAIN_HANDS_TOKEN', '')}"}
+    token = os.getenv("COMM_TOKEN" if comm else "BRAIN_HANDS_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}  # a laptop exchange runs without a token
     async with httpx.AsyncClient(timeout=10) as client:
         for wait in (*RETRY_AFTER_S, None):
             try:
