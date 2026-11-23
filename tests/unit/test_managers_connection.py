@@ -81,3 +81,22 @@ async def test_a_thread_driving_a_run_keeps_it_when_the_page_opens_and_leaves_th
     assert manager._connections["chat"] is thread and not manager._stop_flags["chat"]
     await manager.disconnect("chat", thread)
     assert "chat" not in manager._connections
+
+
+@pytest.mark.asyncio
+async def test_a_send_failing_on_a_page_that_already_left_keeps_the_thread_on_the_chat():
+    """Chat 776cad9a: the page closed mid-send, the thread took the chat back, then the failed send closed the whole session;
+    the thread's next run sent its plan question to the next page only, and Brain Hands never saw it."""
+    manager = WebSocketManager()
+    thread = MagicMock(drives_run=True, accept=AsyncMock(), send_json=AsyncMock())
+    page = MagicMock(spec=["accept", "send_json"], accept=AsyncMock())
+
+    async def closed(_):
+        await manager.disconnect("chat", page)  # the page leaves while this send is in flight
+        raise RuntimeError("Unexpected ASGI message 'websocket.send', after sending 'websocket.close'")
+
+    page.send_json = AsyncMock(side_effect=closed)
+    await manager.connect(thread, "chat")
+    await manager.connect(page, "chat")
+    await manager._send_message("chat", {"type": "message"})
+    assert manager._connections["chat"] is thread and "chat" not in manager._closed_connections

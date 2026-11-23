@@ -1041,7 +1041,7 @@ class WebSocketManager:
             logger.warning(
                 f"[{error.code.value}] WebSocket disconnected for session {session_id}"
             )
-            await self.disconnect(session_id)
+            await self.disconnect(session_id, websocket)
         except Exception as e:
             error = create_error(
                 AsyncErrorCode.WEBSOCKET_SEND_FAILED,
@@ -1053,7 +1053,7 @@ class WebSocketManager:
             logger.error(
                 f"[{error.code.value}] Error sending message for session {session_id}: {e}"
             )
-            await self.disconnect(session_id)
+            await self.disconnect(session_id, websocket)  # this socket only: a thread now holding the session keeps it
 
     async def _handle_stream_error(
         self,

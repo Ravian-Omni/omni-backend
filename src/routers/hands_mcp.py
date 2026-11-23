@@ -420,6 +420,7 @@ async def _begin(run: dict[str, Any]) -> None:
     t = next((o for o in _threads.values() if o.chat_id == chat_id and not o.task.done()), None) or HandsThread(key, chat_id)
     while not t.queue.empty():
         t.queue.get_nowait()  # the last run's leftovers are not this run's events
+    t.key = key  # a reused thread's results answer this run, not the one that opened it
     t.ask_text, t.plan, t.stop_reason, t.asked_at, t.last_event = "", [], "", None, time.monotonic()
     t.agenda_id = await needs.agenda_of(chat_id)  # a continued chat keeps its agenda
     t.lead_target, t.rounds, t.started_at = max(0, int(run["lead_target"])), 0, dt.now_iso()

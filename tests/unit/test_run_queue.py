@@ -120,6 +120,22 @@ def test_a_completion_event_frees_the_chat_for_its_next_queued_run(env, monkeypa
     assert queued["queued"] is True and started == ["second"]
 
 
+def test_a_reused_thread_answers_the_run_that_reused_it(env, monkeypatch):
+    """Chat 776cad9a: run sch_13daa1ff86 was reported lost with in_reply_to the key of the run that opened its thread."""
+    monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
+
+    async def scenario():
+        t = object.__new__(REAL_THREAD)
+        t.chat_id, t.key, t.queue, t.inbox, t.task = "chat-a", "k1", asyncio.Queue(), asyncio.Queue(), SimpleNamespace(done=lambda: False)
+        hm._threads["k1"] = t  # the first run ended; its thread is still open on the chat
+        await hm.start_run("second", CTX, key="k2", chat_id="chat-a")
+        t.lost("the run ended without finishing")
+        return hm._threads["k2"], t.queue.get_nowait()
+
+    thread, lost = run(scenario())
+    assert thread.key == "k2" and lost["result"]["in_reply_to"] == "k2"
+
+
 def test_the_queue_is_in_the_database_so_a_restart_does_not_lose_it(env):
     async def scenario():
         await hm.start_run("running", CTX, key="k1", chat_id="chat-a")
