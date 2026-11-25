@@ -1,6 +1,6 @@
 """Standard Industrial Classification (SIC) lookup.
 
-Data Axle filters businesses by ``primary_sic_code_id`` and accepts the 4-digit
+Data Axle filters businesses by ``primary_sic_code`` and accepts the 4-digit
 SIC code (2-digit and 6-digit prefixes work too). Users describe industries in
 words, and the SIC vocabulary is formal ("Eating Places" for restaurants,
 "Legal Services" for law firms), so the lookup combines a synonym table for

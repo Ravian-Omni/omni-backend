@@ -350,8 +350,11 @@ class WebSocketManager:
             omni.set_task_id(str(uuid.uuid4()))
             await omni.refresh_user_context()
             request, reason = initial_message.get("task"), ""
-            if signal_play.is_goal(request) and hasattr(omni.manager, "refuse"):  # only the orchestrator takes Brain_Hands' goals
-                request, reason = signal_play.prepare(request)
+            agent = ""
+            if hasattr(omni.manager, "refuse"):  # only the orchestrator takes Brain_Hands' goals
+                agent, request = signal_play.direct(request)
+                if signal_play.is_goal(request):
+                    request, reason = signal_play.prepare(request)
             message = str({"task": request, "files": initial_message.get("files")})
             await mark_run(session_id, str(request), initial_message.get("files"))
             started = await run_started(session_id)
@@ -359,6 +362,8 @@ class WebSocketManager:
             task = asyncio.create_task(
                 omni.manager.refuse(message, reason)
                 if reason
+                else omni.manager.direct(message, lambda: omni.run_persona_capability(agent, str(request)))
+                if agent
                 else omni.manager.a_initiate_chat(omni.manager, message=message, clear_history=False)
             )
 

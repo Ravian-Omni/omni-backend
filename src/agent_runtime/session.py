@@ -25,7 +25,7 @@ from src.agent_runtime.personas import Persona, fill, get_persona
 from src.agent_runtime.tools import ToolContext, build_server, full_name
 from src.configs.datetime_utils import dt
 from src.configs.settings import settings
-from src.database import update_chat_history, update_chat_history_by_context
+from src.database import record_spend, update_chat_history, update_chat_history_by_context
 from src.managers.cancellation_token import CancellationToken
 from src.agent_runtime.tools.context import server_of
 from src.mcp_client import auth_headers, call_tool, is_connected, list_tools, options, server_names, server_url
@@ -350,9 +350,14 @@ class PersonaSession:
             return PermissionResultAllow(updated_input=input_data)
         allowance = self.tool_context.spend_allowance if cls == "spend" else self.tool_context.send_allowance
         key = tool_name if tool_name in self._classes else next((k for k in self._classes if k.endswith("__" + short)), tool_name)
+        # an approval counts records: a batch call (Data Axle enrichment, up to 100 `records`) uses one per record
+        records = input_data.get("records")
+        n = len(records) if cls == "spend" and isinstance(records, list) and records else 1
         for k in (key, "*"):  # "*" = an approved send batch, whichever send tool the agent then uses
-            if allowance.get(k, 0) > 0:
-                allowance[k] -= 1
+            if allowance.get(k, 0) >= n:
+                allowance[k] -= n
+                if cls == "spend":
+                    await record_spend(self.context.chat_id, short, n * 2, self.context.call_id or "")  # 2 a record: the most it takes
                 return PermissionResultAllow(updated_input=input_data)
         if cls == "spend":
             # One card per batch, never one per call: the agent asks for the whole batch first.

@@ -209,6 +209,13 @@ class OmniGroupChatManager(autogen.GroupChatManager):
             await self._process_message_async({"role": "user", "name": name, "content": content, "raw_message": content,
                                                "usage": {}, "task_id": self.task_id})
 
+    async def direct(self, message: str, run) -> None:
+        """A Brain_Hands run that names one agent: the request is stored, that agent takes it with no judge, form, plan or
+        router in between, and its answer ends the run."""
+        await self._process_message_async({"role": "user", "name": "chat_manager", "content": message, "raw_message": message,
+                                           "usage": {}, "task_id": self.task_id})
+        await self.conclude(await run())
+
     async def conclude(self, answer: str) -> None:
         """End a run that did its work with this answer, shown and stored as its summary."""
         await self._process_message_async({"role": "user", "name": "conversation_agent", "content": answer, "raw_message": answer,

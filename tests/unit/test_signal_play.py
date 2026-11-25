@@ -117,3 +117,21 @@ async def test_start_chat_stream_refuses_a_bad_signal_and_hands_a_good_one_on_re
 
     plain = await run("Find me 10 dentists in Austin")
     assert "Find me 10 dentists in Austin" in plain.a_initiate_chat.call_args.kwargs["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_names_its_agent_goes_to_that_agent_alone_and_its_answer_ends_the_run():
+    ws = MagicMock(accept=AsyncMock(), send_json=AsyncMock())
+    manager = WebSocketManager()
+    await manager.connect(ws, "c1")
+    entries = []
+    omni = MagicMock(refresh_user_context=AsyncMock(), run_persona_capability=AsyncMock(return_value="20 businesses saved"))
+    me = SimpleNamespace(task_id="t1", _process_message_async=AsyncMock(side_effect=lambda m: entries.append(m)))
+    me.conclude = lambda answer: OmniGroupChatManager.conclude(me, answer)
+    omni.manager = SimpleNamespace(refuse=AsyncMock(), a_initiate_chat=AsyncMock(),
+                                   direct=lambda message, run: OmniGroupChatManager.direct(me, message, run))
+    await manager.start_chat_stream("c1", {"type": "start", "task": f"{signal_play.DIRECT} lead_finder\nFind 20 dentists in Austin", "files": []}, omni)
+    omni.manager.a_initiate_chat.assert_not_called()  # no judge, form, plan or router
+    omni.run_persona_capability.assert_awaited_once_with("lead_finder", "Find 20 dentists in Austin")
+    assert [e["name"] for e in entries] == ["chat_manager", "conversation_agent"] and entries[-1]["content"] == "20 businesses saved"
+    assert signal_play.direct("Find 20 dentists") == ("", "Find 20 dentists")  # a plain task is untouched

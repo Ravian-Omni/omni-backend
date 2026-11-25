@@ -21,6 +21,15 @@ GOALS = {  # prefix: (required fields, all fields) of the JSON after it
 }
 
 
+DIRECT = "AGENT:"  # "AGENT: lead_finder\n<task>": a Brain_Hands run that names its one agent (start_run's `agent`)
+
+
+def direct(task) -> tuple[str, str]:
+    """(agent, the task without the prefix) for a run that names its agent, else ("", task)."""
+    match = re.match(rf"\s*{DIRECT}\s*(\w+)\s*\n", str(task or ""))
+    return (match.group(1), str(task)[match.end():]) if match else ("", task)
+
+
 def goal_of(task) -> str:
     """The goal's prefix, or "" when the task is not one of these goals."""
     return next((p for p in GOALS if str(task or "").lstrip().startswith(p)), "")

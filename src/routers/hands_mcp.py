@@ -25,6 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
 from src.agent_runtime import leads, site
+from src.agent_runtime.personas import persona_names
 from src.configs.datetime_utils import dt
 from src.agent_runtime.tools import campaign
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
@@ -37,6 +38,7 @@ from src.dependencies import get_websocket_manager
 from src.services import brain_hands, chat_bridge, needs, run_result, task_status as status
 from src.services.chat_bridge import USER_ID, ChatThread, Thread
 from src.services.chat_service import ChatService
+from src.omni import signal_play
 from src.utilities.async_errors import AsyncErrorCode
 
 INSTRUCTIONS = (
@@ -295,7 +297,7 @@ async def _source(ctx: Context) -> str:
 
 @mcp.tool(annotations=WRITE)
 async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | None = None, chat_id: str = "",
-                    agenda_id: str = "", lead_target: int = 0, credit_budget: float | None = None) -> dict[str, Any]:
+                    agenda_id: str = "", lead_target: int = 0, credit_budget: float | None = None, agent: str = "") -> dict[str, Any]:
     """Start a task run (a lead search, a campaign, outreach, a reply) and return its chat_id; drive it with next_event and answer.
     Tasks are for long, multi-step work: several agents, saved lists, credits, sends. A small request answered in one turn
     (check the inbox or calendar, one web search, look someone up, sum up a saved list) is not a task: use chat.
@@ -307,7 +309,11 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
     lead_target: how many leads that pass the lead gate the run must produce; it keeps sourcing until they are found, the
     source runs dry or a round limit is hit, and its completion says which in `leads` (target, passed, failed, stopped_because).
     credit_budget: the credits this goal may still spend without asking (what is left of its cap). A credit spend that fits is
-    approved by DAXAGENT itself and logged; one above it raises a card as before. Kept per agenda (per chat without one)."""
+    approved by DAXAGENT itself and logged; one above it raises a card as before. Kept per agenda (per chat without one).
+    agent: one agent to do the whole task (e.g. lead_finder, buyer_finder, contact_enricher, outreach): it takes the task
+    straight away, with no questions form, plan, plan approval or router, and its answer is the run's result."""
+    if agent and agent not in persona_names():
+        raise ValueError(f"no agent {agent}; known: {', '.join(persona_names())}")
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
         raise ValueError(f"no task {chat_id}")
     chat_id = chat_id or (agenda_id and await chat_of_agenda(USER_ID, agenda_id)) or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
@@ -319,7 +325,7 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
     await save_pref(USER_ID, f"run_by:{chat_id}", await _source(ctx))  # the web app marks the task as run by it
     if agenda_id:
         await save_pref(USER_ID, f"agenda:{chat_id}", agenda_id)
-    place = await _admit({"key": key, "chat_id": chat_id, "task": task, "files": files or [], "lead_target": lead_target, "credit_budget": credit_budget})
+    place = await _admit({"key": key, "chat_id": chat_id, "task": f"{signal_play.DIRECT} {agent}\n{task}" if agent else task, "files": files or [], "lead_target": lead_target, "credit_budget": credit_budget})
     agenda = await needs.agenda_of(chat_id)
     return {"id": task_id, "key": key, "chat_id": chat_id, **({"queued": True, "position": place} if place else {}), **({"agenda_id": agenda} if agenda else {})}
 
@@ -870,18 +876,18 @@ async def chat(message: str, chat_id: str = "", timeout: int = 180) -> dict[str,
 
 @mcp.tool(annotations=WRITE)
 async def request(request: str, query: str, ctx: Context, request_id: str = "", files: list[str] | None = None, agenda_id: str = "",
-                  lead_target: int = 0, credit_budget: float | None = None, timeout: int = 180) -> dict[str, Any]:
+                  lead_target: int = 0, credit_budget: float | None = None, timeout: int = 180, agent: str = "") -> dict[str, Any]:
     """One door for both kinds of work. request: "chat" for a small request answered in one turn (check the inbox or
     calendar, one web search, look someone up, sum up a saved list); "task" for long, multi-step work (lead lists,
     buyers, enrichment, campaigns, outreach, a goal's research). query: what to do, in plain words. request_id: the
     chat's or task's id to continue (empty starts a new one); every answer gives it back. A chat answers in this call,
     as chat does ({reply, done, question}); a task starts, as start_run does, and is followed with next_event,
-    answer and task_status, each taking request_id. files, agenda_id, lead_target and credit_budget are for a task;
+    answer and task_status, each taking request_id. files, agenda_id, lead_target, credit_budget and agent are for a task;
     timeout for a chat."""
     if request == "chat":
         return {"request": "chat", "request_id": (out := await chat(query, request_id, timeout))["chat_id"], **out}
     if request == "task":
-        out = await start_run(query, ctx, key="", files=files, chat_id=request_id, agenda_id=agenda_id, lead_target=lead_target, credit_budget=credit_budget)
+        out = await start_run(query, ctx, key="", files=files, chat_id=request_id, agenda_id=agenda_id, lead_target=lead_target, credit_budget=credit_budget, agent=agent)
         return {"request": "task", "request_id": out["chat_id"], **out}
     raise ValueError('request is "chat" or "task"')
 

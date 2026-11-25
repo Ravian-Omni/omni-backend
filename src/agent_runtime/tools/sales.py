@@ -92,7 +92,7 @@ def build(ctx: ToolContext):
     @tool(
         "sic_lookup",
         "Find SIC industry codes for an industry described in words (e.g. 'dental offices', 'SaaS companies'). "
-        "Returns the best matching 4-digit codes with descriptions; pass a code to Data Axle as primary_sic_code_id.",
+        "Returns the best matching 4-digit codes with descriptions; pass the codes to Data Axle as primary_sic_code (comma joined).",
         {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": ["query"]},
     )
     async def sic_lookup(args: dict) -> dict:
@@ -100,16 +100,16 @@ def build(ctx: ToolContext):
 
     @tool(
         "request_spend_approval",
-        "Ask the user to approve spending credits BEFORE calling a tool that costs credits (e.g. business_enrichment). "
+        "Ask the user to approve spending credits BEFORE calling a tool that costs credits (e.g. salesgenie_business_enrichment). "
         "Shows the count, the credit cost and the balance. If approved, that many calls of the tool are allowed; "
         "declined means do not call it.",
         {
             "type": "object",
             "properties": {
-                "tool": {"type": "string", "description": "The credit-consuming tool, e.g. contact_enrichment"},
+                "tool": {"type": "string", "description": "The credit-consuming tool, e.g. salesgenie_business_enrichment"},
                 "count": {"type": "integer", "minimum": 1, "description": "How many records you will enrich"},
                 "reason": {"type": "string", "description": "One line on why, e.g. 'resolve the 40 buyer contacts in buyer_map-1a2b'"},
-                "credits_per_call": {"type": "integer", "minimum": 1, "description": "Default 1"},
+                "credits_per_call": {"type": "integer", "minimum": 1, "description": "Credits per record. Default 2 (a Data Axle enrichment with an email)"},
             },
             "required": ["tool", "count", "reason"],
         },
@@ -121,7 +121,7 @@ def build(ctx: ToolContext):
                           + ", ".join(k.split('__')[-1] for k, c in ctx.remote_tool_classes.items() if c == 'spend'))
         server = _server_of(full)
         count = int(args["count"])
-        per_call = int(args.get("credits_per_call") or 1)
+        per_call = int(args.get("credits_per_call") or 2)
         balance = await _credit_balance(server)
         decision = await ctx.decisions.confirm_spend(
             tool=full.split("__")[-1], server=server, count=count, credits=count * per_call,

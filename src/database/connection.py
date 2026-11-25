@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS suppressions (
     PRIMARY KEY (user_id, email)
 );
 
--- Dollars paid to an outside data source (treg, since removed) per call, and the word it gave for an email it checked: kept as history.
+-- What each paid data call cost: dollars for treg (removed, kept as history), credits for a Data Axle enrichment (the most it can take).
 CREATE TABLE IF NOT EXISTS data_spend (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT NOT NULL,
@@ -439,6 +439,10 @@ async def init_db() -> None:
             await _db.execute(f"ALTER TABLE chats ADD COLUMN {column} TEXT")
         except aiosqlite.OperationalError:
             pass  # already there
+    try:  # databases made before Data Axle credit spends were recorded here
+        await _db.execute("ALTER TABLE data_spend ADD COLUMN credits REAL NOT NULL DEFAULT 0")
+    except aiosqlite.OperationalError:
+        pass  # already there
     try:  # databases made before chats had a title
         await _db.execute("ALTER TABLE chats ADD COLUMN title TEXT")
     except aiosqlite.OperationalError:

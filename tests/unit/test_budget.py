@@ -132,3 +132,24 @@ def test_a_spend_approval_finds_a_tool_by_the_name_its_vendor_prefixed():
     assert find("salesgenie_business_search") == "mcp__data-axle__salesgenie_business_search"  # the exact short name, as before
     assert find("contact_enrichment") is None  # no such tool: still unknown
     assert find("enrichment") is None  # two tools end with it: never a guess
+
+
+def test_an_approval_counts_records_so_one_batch_call_cannot_spend_past_it_and_each_spend_is_recorded(temp_db):
+    from src.agent_runtime.session import PersonaSession
+    from src.database.connection import get_db
+
+    tool = "mcp__data-axle__salesgenie_business_enrichment"
+    s = object.__new__(PersonaSession)
+    s._classes = {tool: "spend"}
+    s.tool_context = SimpleNamespace(spend_allowance={tool: 3}, send_allowance={})
+    s.context = SimpleNamespace(chat_id="chat-a", call_id="call-1")
+
+    async def go():
+        above = await s._permission_gate(tool, {"records": [{"name": n} for n in "abcd"]}, None)  # 4 records, 3 approved
+        fits = await s._permission_gate(tool, {"records": [{"name": n} for n in "abc"]}, None)
+        rows = await (await (await get_db()).execute("SELECT endpoint, credits, usd FROM data_spend")).fetchall()
+        return above, fits, rows, s.tool_context.spend_allowance[tool]
+
+    above, fits, rows, left = asyncio.run(go())
+    assert type(above).__name__ == "PermissionResultDeny" and type(fits).__name__ == "PermissionResultAllow"
+    assert [tuple(r) for r in rows] == [("salesgenie_business_enrichment", 6.0, 0.0)] and left == 0

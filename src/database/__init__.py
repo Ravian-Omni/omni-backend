@@ -613,6 +613,13 @@ async def run_started(chat_id: str) -> str:
     return row[0] if row else ""
 
 
+async def record_spend(chat_id: str, endpoint: str, credits: float, call_id: str = "") -> None:
+    db = await get_db()
+    await db.execute("INSERT INTO data_spend (chat_id, at, endpoint, usd, credits, call_id) VALUES (?, ?, ?, 0, ?, ?)",
+                     (chat_id, dt.now_iso(), endpoint, credits, call_id))
+    await db.commit()
+
+
 async def note_source_emails(chat_id: str, server: str, emails: set[str]) -> None:
     db = await get_db()
     await db.executemany("INSERT OR IGNORE INTO source_emails (chat_id, email, server, seen_at) VALUES (?, ?, ?, ?)",
@@ -1197,6 +1204,7 @@ __all__ = [
     "find_task",
     "list_task_rows",
     "note_source_emails",
+    "record_spend",
     "source_emails",
     "was_pushed",
     "mark_pushed",
