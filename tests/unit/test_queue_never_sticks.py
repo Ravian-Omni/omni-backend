@@ -18,7 +18,7 @@ def ended(monkeypatch):
     """The chats _run_ended was called for; and a run with no lead target, a task status and no learnings."""
     out = []
     monkeypatch.setattr(hm, "_run_ended", out.append)
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=0))
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
     monkeypatch.setattr(hm, "get_chat_title", AsyncMock(return_value=""))
     return out
@@ -132,7 +132,7 @@ def test_an_unanswered_question_stops_the_run_after_the_limit_and_pushes_no_answ
     # the stop's own completion then ends the run with that reason
     monkeypatch.setattr(hm, "_run_ended", lambda chat: None)
     monkeypatch.setattr(hm.status, "task_status", AsyncMock(side_effect=ValueError("no task")))
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=0))
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
     monkeypatch.setattr(hm, "get_chat_title", AsyncMock(return_value=""))
     (done,) = deliver(t, {"type": "completion", "status": "cancelled"})

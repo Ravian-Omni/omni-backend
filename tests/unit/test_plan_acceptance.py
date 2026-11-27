@@ -26,6 +26,23 @@ def test_a_your_call_form_asked_again_after_a_skip_ends_the_task():
     assert not Omni._skipped_verification([request, ask, skip, {"name": "chat_manager", "content": "Here are the details"}])
 
 
+def test_the_same_plan_answer_three_times_in_a_row_ends_the_run():
+    # chat e22e7a32: a caller's free text to "Approve the plan?" re-planned 50 times in 130 s
+    def say(t):
+        return {"name": "get_user_acceptance", "content": t}
+
+    plan = {"name": "planner_agent", "content": "{}"}
+    assert Omni._same_plan_answer([say("Change X"), plan, say("change x "), plan, say("Change X")]) == 3
+    assert Omni._same_plan_answer([say("Change X"), plan, say("Change Y")]) == 1
+
+
+def test_a_plan_approval_request_carries_its_card_name():
+    from src.services.task_status import card_of
+
+    card, _ = card_of({"data": {"content": '{"agent": "get_user_acceptance", "prompt": "Proceed?"}'}})
+    assert card["card"] == "plan_approval" and card["agent"] == "get_user_acceptance"
+
+
 def test_only_a_short_go_ahead_resumes_an_unfinished_plan():
     # the chat's request is str({"task": ..., "files": ...}); the routing resumes the plan only when its text is a go-ahead
     assert Omni._is_approval(Omni._request_text(str({"task": "ok", "files": []})))

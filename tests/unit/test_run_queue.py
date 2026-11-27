@@ -100,7 +100,7 @@ def test_chats_run_in_parallel_up_to_the_limit_and_web_runs_count(env, monkeypat
 
 def test_a_completion_event_frees_the_chat_for_its_next_queued_run(env, monkeypatch):
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=0))
 
     async def scenario():
         t = object.__new__(REAL_THREAD)  # the real send_json, on a thread running chat-a
@@ -227,7 +227,7 @@ def test_each_task_has_its_own_id_and_a_chat_may_hold_several(env, monkeypatch):
 def test_a_task_waits_on_a_question_ends_with_its_result_and_reads_stalled_when_quiet(env, monkeypatch):
     monkeypatch.setattr(hm.status, "task_status", AsyncMock(return_value={"stage": "running"}))  # the chat's own progress
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 0, "seen": 0, "failed": {}}))
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=0))
     monkeypatch.setattr(hm, "get_chat_title", AsyncMock(return_value=""))
 
     async def scenario():

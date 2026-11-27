@@ -241,7 +241,7 @@ class OpenAIRunner:
             raise RuntimeError("OPENAI_API_KEY is not set; the persona runtime cannot reach the model")
         client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg.get("base_url") or None)
         notes = await self._collect_tools()
-        notes += await prefs.prompt_notes(s.context.user_id, s.persona.name)  # Settings > Memory and Agents
+        notes += await prefs.prompt_notes(s.context.user_id, s.persona.name, s.context.chat_id)  # Settings > Memory and Agents
         s._own_prompt = await prefs.agent_prompt(s.context.user_id, s.persona.name)
         specs = [t.spec() for t in self.tools.values()]
         logger.info(f"[{s.persona.name}] openai runner: model={cfg['model']} tools={len(specs)}")

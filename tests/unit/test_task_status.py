@@ -136,7 +136,7 @@ def test_an_outside_agent_reads_the_files_a_task_saved(tmp_path, monkeypatch):
     import asyncio
 
     import src.database as database
-    from src.database import connection, get_chat_repository, save_artifact
+    from src.database import connection, get_chat_repository, save_artifact, save_pref
     from src.routers import hands_mcp as hm
 
     monkeypatch.setattr(connection.settings, "ROOT_DIR", str(tmp_path))
@@ -156,14 +156,26 @@ def test_an_outside_agent_reads_the_files_a_task_saved(tmp_path, monkeypatch):
                                  "title": "Retail leads", "path": str(path), "row_count": 5})
         listed = (await hm.list_artifacts("mine"))["artifacts"]
         page = await hm.read_artifact("lead_list-1", "mine", offset=3, limit=10)
-        # the account's files open by id from any task, and list across tasks; another account's do neither
-        assert (await hm.read_artifact("lead_list-1", "other"))["chat_id"] == (await hm.read_artifact("lead_list-1"))["chat_id"] == "mine"
-        assert [(a["id"], a["chat_id"]) for a in (await hm.list_artifacts(search="retail"))["artifacts"]] == [("lead_list-1", "mine")]
-        assert (await hm.list_artifacts(kind="buyer_map"))["artifacts"] == []
+        # a goal's files open and list for the tasks of its agenda only; another agenda's, or another account's, do neither
+        for chat_id, agenda in (("mine", "ag-1"), ("other", "ag-2"), ("mine-too", "ag-1")):
+            await save_pref(hm.USER_ID, f"agenda:{chat_id}", agenda)
+        assert (await hm.read_artifact("lead_list-1", agenda_id="ag-1"))["chat_id"] == (await hm.read_artifact("lead_list-1", "mine-too"))["chat_id"] == "mine"
+        assert [(a["id"], a["chat_id"]) for a in (await hm.list_artifacts(search="retail", agenda_id="ag-1"))["artifacts"]] == [("lead_list-1", "mine")]
+        assert (await hm.list_artifacts(search="retail", agenda_id="ag-2"))["artifacts"] == []
+        assert (await hm.list_artifacts(kind="buyer_map", agenda_id="ag-1"))["artifacts"] == []
+        errors = []
+        for call in (lambda: hm.read_artifact("lead_list-1", "other"), lambda: hm.read_artifact("lead_list-1", agenda_id="ag-2"),
+                     lambda: hm.read_artifact("lead_list-1"), lambda: hm.list_artifacts(search="retail"),
+                     lambda: hm.list_artifacts("mine", agenda_id="ag-2")):  # another agenda's file or task, or no scope at all
+            try:
+                await call()
+            except ValueError as e:
+                errors.append(str(e))
+        assert len(errors) == 5
         errors = []
         for artifact_id in ("lead_list-9", "lead_list-2"):  # a file that is not there, another account's file
             try:
-                await hm.read_artifact(artifact_id)
+                await hm.read_artifact(artifact_id, "mine")
             except ValueError as e:
                 errors.append(str(e))
         # a plan's steps are drafts until approved; over the MCP there is no campaign page to click

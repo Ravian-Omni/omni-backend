@@ -67,7 +67,7 @@ def run_thread(monkeypatch, events, state):
     monkeypatch.setattr(hm.run_result, "learnings", AsyncMock(return_value=["Data Axle had no buyer at Osaic."]))
     monkeypatch.setattr(hm, "save_pref", AsyncMock())
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value={"passed": 1, "seen": 1, "failed": {}}))
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=2))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=2))
     ended = []
     monkeypatch.setattr(hm, "_run_ended", ended.append)
     t = thread(target=0)

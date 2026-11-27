@@ -457,12 +457,16 @@ async def mcp_context() -> str:
     return "".join(sections)
 
 
-async def user_cards(user_id: str) -> list[dict]:
-    """The user's cards; an agent in NEEDS_MCP says which server it needs and whether the user has signed in to it."""
+async def user_cards(user_id: str, chat_id: str = "") -> list[dict]:
+    """The user's cards; an agent in NEEDS_MCP says which server it needs and whether the user has signed in to it.
+    A chat that serves an agenda has no user_context card: the user's saved profile never reaches an outside goal."""
+    from src.database import chat_agenda
     from src.mcp_client import is_connected, options
     from src.mcp_client.config import enabled_servers
 
     cards = card_list(await prefs.get(user_id, "custom_agents"), await prefs.get(user_id, "agents"))
+    if chat_id and await chat_agenda(chat_id):
+        cards = [c for c in cards if c["name"] != "user_context"]
     for c in cards:
         if server := NEEDS_MCP.get(c["name"]):
             c["needs_mcp"] = {"server": options(server).get("display_name", server),
@@ -532,9 +536,9 @@ async def planner_core(user_id: str) -> str:
     return Template(text).safe_substitute(today_date=dt.now().strftime("%A, %d %B %Y"), order=", ".join(ORDER))
 
 
-async def planner_prompt(user_id: str) -> str:
+async def planner_prompt(user_id: str, chat_id: str = "") -> str:
     """Everything the planner reads when a task starts, except the Composio app list Omni adds on top."""
-    cards = await add_abilities(await user_cards(user_id))
+    cards = await add_abilities(await user_cards(user_id, chat_id))
     return (with_cards(await planner_core(user_id), capabilities(cards, await specialist_cards()))
             + waiting_notes(cards) + await mcp_context()
-            + await prefs.memory_notes(user_id) + await prefs.off_agents_notes(user_id))
+            + await prefs.memory_notes(user_id, chat_id) + await prefs.off_agents_notes(user_id))

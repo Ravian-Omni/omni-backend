@@ -180,7 +180,7 @@ def run_completions(monkeypatch, tallies, **thread_args):
     """One completion per tally; returns the thread, the notes the manager got and the completions that reached the caller."""
     notes, pending = [], iter(tallies)
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(side_effect=lambda _chat, _since="": next(pending)))
-    monkeypatch.setattr(hm.needs, "credits_approved", AsyncMock(return_value=0))
+    monkeypatch.setattr(hm, "credits_spent", AsyncMock(return_value=0))
     monkeypatch.setattr(hm, "get_websocket_manager", AsyncMock(return_value=SimpleNamespace(add_note=lambda chat, text: notes.append(text))))
     t = thread(**thread_args)
 

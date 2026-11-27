@@ -101,10 +101,14 @@ def test_start_run_stores_the_agenda_on_the_chat_and_a_continued_chat_keeps_it(t
         again = await hm.start_run("follow up", ctx, key="k2", chat_id="old")  # no agenda given: the chat's own
         hm._threads.clear()
         plain = await hm.start_run("other", ctx, key="k3", chat_id="old", agenda_id="")
-        return first, again, plain
+        hm._threads.clear()
+        try:  # chat 47930aa0 carried three goals: another agenda never continues this one's chat
+            await hm.start_run("a different goal", ctx, key="k4", chat_id="old", agenda_id="agd_10")
+        except ValueError as e:
+            return first, again, plain, str(e)
 
-    first, again, plain = asyncio.run(scenario())
-    assert first["agenda_id"] == again["agenda_id"] == plain["agenda_id"] == "agd_9"
+    first, again, plain, refused = asyncio.run(scenario())
+    assert first["agenda_id"] == again["agenda_id"] == plain["agenda_id"] == "agd_9" and "another agenda" in refused
     assert [t.agenda_id for t in seen] == ["agd_9"] * 3
 
 
@@ -230,3 +234,48 @@ def test_open_needs_survive_in_the_log_and_a_lost_run_is_closed_and_pushed(temp_
     body = json.loads(seen[0].read())
     assert body["id"] == f"{ids['lost']}:run_lost" and body["data"]["reason"] == "run_lost" and body["data"]["task_id"] == "chat-a"
     assert body["data"]["card"] == CARD and body["data"]["request_id"] == str(ids["lost"])
+
+
+def test_a_run_for_an_agenda_gets_no_saved_memory_and_a_web_app_chat_still_does(temp_db):
+    # 23 Nov, "AEO / GEO strategy for DATA AXLE": the user's one saved profile (selling Phys AI) reached a goal about another product
+    from src.agent_runtime import prefs
+    from src.database import save_pref
+
+    async def scenario():
+        await prefs.put("u", "memory", {"enabled": True, "items": [{"text": "Sells Phys AI"}]})
+        await save_pref("u", "agenda:goal-chat", "agd_1")
+        return [await f for f in (prefs.memory_notes("u", "goal-chat"), prefs.prompt_notes("u", "outreach", "goal-chat"),
+                                  prefs.memory_notes("u", "web-chat"), prefs.memory_notes("u"))]
+
+    goal, persona, web, none = asyncio.run(scenario())
+    assert goal == prefs.AGENDA_NOTE and "Phys AI" not in persona and prefs.AGENDA_NOTE in persona
+    assert "Phys AI" in web and "Phys AI" in none
+
+
+def test_an_agenda_run_is_offered_no_user_context_and_cannot_run_it_while_a_web_app_chat_can(temp_db, monkeypatch):
+    from src.database import save_pref
+    from src.omni import orchestrator
+    from src.omni.manager import Omni
+
+    ran = []
+
+    async def run_persona(name, query, **kw):
+        ran.append(name)
+        return "done"
+
+    monkeypatch.setattr("src.omni.manager.run_persona", run_persona)
+    monkeypatch.setattr("src.omni.manager.get_websocket_manager", AsyncMock())
+
+    async def scenario():
+        await save_pref("u", "agenda:goal-chat", "agd_1")
+        cards = {c: [k["name"] for k in await orchestrator.user_cards("u", c)] for c in ("goal-chat", "web-chat")}
+        answers = []
+        for chat in ("goal-chat", "web-chat"):
+            omni = SimpleNamespace(capability_manager=SimpleNamespace(user_id="u", chat_id=chat, chat_dir="/tmp", memory=None), find_call_id=lambda *_: "c",
+                                   task_id="t", cancellation_token=None)
+            answers.append(await Omni.run_persona_capability(omni, "user_context", "who am I?"))
+        return cards, answers
+
+    cards, (goal, web) = asyncio.run(scenario())
+    assert "user_context" not in cards["goal-chat"] and "user_context" in cards["web-chat"]
+    assert goal.startswith("user_context step dropped") and ran == ["user_context"]

@@ -54,7 +54,7 @@ from src.chat.tools.composio import ComposioToolCache, ComposioToolManager
 from src.mcp_client.config import reserved_servers
 from src.mcp_client.registry import register_mcp_tools
 from src.utilities.async_helpers import async_to_sync
-from src.database import answer_decision, log_decision, update_chat_history
+from src.database import answer_decision, chat_agenda, log_decision, update_chat_history
 from src.utilities.storage import a_speak
 
 today_date = dt.now()
@@ -357,6 +357,7 @@ class CustomUserProxyAgent(UserProxyAgent):
 
 EMPTY_PLAN_NOTE = ("Your plan has no steps, but no agent has been tried in this run. Every agent listed to you is switched on and "
                    "connected; what earlier runs could not reach is not a reason to skip this one. Plan the steps with those agents.")
+MAX_SAME_PLAN_ANSWERS = 3  # the same answer to "Approve the plan?" this many times in a row ends the run
 SKIPPED = "The user skipped the questions. Proceed with the stated assumptions and sensible defaults; do not ask again."
 
 
@@ -708,14 +709,14 @@ class Omni:
         """Rebuild every step's prompt from the user's settings as they are now (Settings > Orchestrator, Agents and
         Memory), and register the user's own agents. Runs before every task."""
         try:
-            cards = await orchestrator.user_cards(self.user_id)
+            cards = await orchestrator.user_cards(self.user_id, self.chat_id)
             listed = orchestrator.render(cards) + orchestrator.specialists_block()
-            notes = await prefs.memory_notes(self.user_id) + await prefs.off_agents_notes(self.user_id)
+            notes = await prefs.memory_notes(self.user_id, self.chat_id) + await prefs.off_agents_notes(self.user_id)
             mine = await orchestrator.stage_prompts(self.user_id)  # each step's prompt, as the user has it
             self.judge_question.update_system_message(mine["judge"])
             self.conversation_agent.update_system_message(mine["conversation"])
             self.clarifier.update_system_message(orchestrator.with_cards(mine["clarifier"], listed) + notes)
-            self.planner.update_system_message(await orchestrator.planner_prompt(self.user_id) + getattr(self, "_apps_context", ""))
+            self.planner.update_system_message(await orchestrator.planner_prompt(self.user_id, self.chat_id) + getattr(self, "_apps_context", ""))
             self.agent_aligner.update_system_message(mine["aligner"])
             self.agent_router.update_system_message(orchestrator.with_cards(mine["router"], listed))
             self.manual_verification.update_system_message(mine["verification"])
@@ -840,6 +841,9 @@ class Omni:
         cm = self.capability_manager
         if not await prefs.agent_enabled(cm.user_id, name):
             return f"{name} is switched off in Settings > Agents, so it did not run. Finish without it, or ask the user to switch it on."
+        if name == "user_context" and await chat_agenda(cm.chat_id):  # the planner is told (AGENDA_NOTE); this is the rule
+            return ("user_context step dropped: this task serves an outside goal, so the user's saved memory is not used. "
+                    "Take the product, seller and sender from the task; say in the summary what it did not give.")
         persona = None
         if name.startswith("custom_"):
             persona = await orchestrator.custom_persona(cm.user_id, name)
@@ -1220,6 +1224,12 @@ class Omni:
         return bool(cls._APPROVAL.match(str(content or "")))
 
     @staticmethod
+    def _same_plan_answer(messages: list) -> int:
+        """How many plan-approval answers in a row, ending with the last message, are the same text."""
+        answers = [str(m.get("content") or "").strip().lower() for m in messages if m.get("name") == "get_user_acceptance"]
+        return next((i for i, a in enumerate(reversed(answers)) if a != answers[-1]), len(answers))
+
+    @staticmethod
     def _skipped_verification(messages: list) -> bool:
         """The user skipped a "Your call" form (manual_verification's) since their last request."""
         start = max((i for i, m in enumerate(messages) if m.get("name") == "chat_manager"), default=0)
@@ -1400,6 +1410,9 @@ class Omni:
             if last_speaker.name in ["get_user_acceptance"]:
                 if self._is_approval(messages[-1].get("content")):
                     return groupchat.agent_by_name("agent_aligner")
+                if self._same_plan_answer(messages) >= MAX_SAME_PLAN_ANSWERS:
+                    # the same change asked again after re-plans: end instead (a caller's free text re-planned 50 times in 130 s)
+                    return groupchat.agent_by_name("process_completion_agent")
                 return groupchat.agent_by_name("planner_agent")  # the user asked for changes: re-plan, then ask again
             # if last_speaker.name in ["user_input"]:
             #     return groupchat.agent_by_name("agent_aligner")

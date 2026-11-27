@@ -4,8 +4,7 @@ nobody polls for it, and closed as run_lost when the process that was waiting fo
 import os
 from datetime import datetime, timezone
 
-from src.agent_runtime.decisions import parse_response
-from src.database import answer_decision, get_chat_title, list_decisions, list_open_decisions, load_pref
+from src.database import answer_decision, get_chat_title, list_open_decisions, load_pref
 from src.services import brain_hands, task_status
 from src.services.chat_bridge import USER_ID
 
@@ -14,13 +13,6 @@ UNATTENDED_S = 60  # a need nobody polls for this long is pushed
 
 async def agenda_of(chat_id: str) -> str:
     return await load_pref(USER_ID, f"agenda:{chat_id}") or ""
-
-
-async def credits_approved(chat_id: str, since: str) -> float:
-    """Credits approved in the chat since `since` (an ISO time), by a card or by the budget: what a run spent."""
-    return sum(float((d["request"] or {}).get("credits") or 0) for d in await list_decisions(chat_id)
-               if d["card"] == "confirm_spend" and d["created_at"] >= since and d["response"] is not None
-               and parse_response("confirm_spend", d["response"]).approved)
 
 
 def _utc(timestamp: str) -> str:

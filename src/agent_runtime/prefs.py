@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field, TypeAdapter, model_validator
 
 from src.configs.datetime_utils import dt
-from src.database import load_pref, save_pref
+from src.database import chat_agenda, load_pref, save_pref
 
 
 class MemoryItem(BaseModel):
@@ -176,8 +176,16 @@ async def put(user_id: str, key: str, value: Any) -> Any:
     return clean
 
 
-async def memory_notes(user_id: str) -> str:
-    """Saved memory as a system prompt section ("" when off or empty)."""
+AGENDA_NOTE = ("\n\n## This task serves an outside goal (an agenda)\nThe user's saved memory is not used here: the product, the seller, "
+               "and the sender's name and signature come from the task and this chat only. Never plan or call user_context for them; "
+               "when the task does not give one, say so instead of looking it up.")
+
+
+async def memory_notes(user_id: str, chat_id: str = "") -> str:
+    """Saved memory as a system prompt section ("" when off or empty). A chat that serves an agenda gets AGENDA_NOTE
+    instead: one profile for the user must not reach a goal about another product."""
+    if chat_id and await chat_agenda(chat_id):
+        return AGENDA_NOTE
     memory = await get(user_id, "memory")
     if not (memory["enabled"] and memory["items"]):
         return ""
@@ -185,10 +193,10 @@ async def memory_notes(user_id: str) -> str:
             + "\n".join(f"- {m['text']}" for m in memory["items"]))
 
 
-async def prompt_notes(user_id: str, persona: str) -> str:
+async def prompt_notes(user_id: str, persona: str, chat_id: str = "") -> str:
     """Saved memory and the user's instructions for this agent, as system prompt sections."""
     instructions = ((await get(user_id, "agents")).get(persona) or {}).get("instructions", "").strip()
-    return await memory_notes(user_id) + (f"\n\n## The user's standing instructions for you\n{instructions}" if instructions else "")
+    return await memory_notes(user_id, chat_id) + (f"\n\n## The user's standing instructions for you\n{instructions}" if instructions else "")
 
 
 async def agent_prompt(user_id: str, persona: str) -> str:

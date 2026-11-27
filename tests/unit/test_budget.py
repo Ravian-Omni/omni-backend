@@ -134,9 +134,8 @@ def test_a_spend_approval_finds_a_tool_by_the_name_its_vendor_prefixed():
     assert find("enrichment") is None  # two tools end with it: never a guess
 
 
-def test_an_approval_counts_records_so_one_batch_call_cannot_spend_past_it_and_each_spend_is_recorded(temp_db):
+def test_an_approval_counts_records_so_one_batch_call_cannot_spend_past_it(temp_db):
     from src.agent_runtime.session import PersonaSession
-    from src.database.connection import get_db
 
     tool = "mcp__data-axle__salesgenie_business_enrichment"
     s = object.__new__(PersonaSession)
@@ -147,9 +146,20 @@ def test_an_approval_counts_records_so_one_batch_call_cannot_spend_past_it_and_e
     async def go():
         above = await s._permission_gate(tool, {"records": [{"name": n} for n in "abcd"]}, None)  # 4 records, 3 approved
         fits = await s._permission_gate(tool, {"records": [{"name": n} for n in "abc"]}, None)
-        rows = await (await (await get_db()).execute("SELECT endpoint, credits, usd FROM data_spend")).fetchall()
-        return above, fits, rows, s.tool_context.spend_allowance[tool]
+        return above, fits, s.tool_context.spend_allowance[tool]
 
-    above, fits, rows, left = asyncio.run(go())
-    assert type(above).__name__ == "PermissionResultDeny" and type(fits).__name__ == "PermissionResultAllow"
-    assert [tuple(r) for r in rows] == [("salesgenie_business_enrichment", 6.0, 0.0)] and left == 0
+    above, fits, left = asyncio.run(go())
+    assert type(above).__name__ == "PermissionResultDeny" and type(fits).__name__ == "PermissionResultAllow" and left == 0
+
+
+def test_a_spend_is_recorded_as_the_answer_charged_it_not_at_the_ceiling():
+    # chat b626ba65: 5 matched, none with an email, 5 charged; data_spend said 10 (2 a record, written before the call)
+    import json
+    from src.agent_runtime.session import _charged
+
+    def answer(*emails):
+        return json.dumps({"metadata": {"chargedRecords": len(emails)}, "records": [{"values": {"email": e}} for e in emails]})
+
+    assert _charged(answer("", "", "", "", "")) == 5.0
+    assert _charged(answer("a@x.com", "")) == 3.0
+    assert _charged(json.dumps({"sampleRecords": []})) is None and _charged("not json") is None

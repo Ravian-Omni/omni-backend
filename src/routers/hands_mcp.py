@@ -29,8 +29,8 @@ from src.agent_runtime.personas import persona_names
 from src.configs.datetime_utils import dt
 from src.agent_runtime.tools import campaign
 from src.agent_runtime.tools.artifacts import load_owned, load_record, save_payload
-from src.database import answer_decision, run_started
-from src.database import (budget_left, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
+from src.database import answer_decision, credits_spent, run_started
+from src.database import (budget_left, chat_agenda, chat_of_agenda, enqueue_run, find_artifacts, get_chat_repository, get_chat_title, list_conversations, list_handoffs,
                           count_resume, list_marked_runs, list_queued_runs, load_pref, pop_queued_run, queued_run, save_pref, set_budget,
                           unmark_run, find_task, list_task_rows, save_task)
 from src.database import list_artifacts as db_list_artifacts
@@ -60,7 +60,7 @@ INSTRUCTIONS = (
     "(request_id is in the input_request: a question already answered, in the web app or by you, is refused with reason not_open); the run "
     "waits until you do. task_status(key or chat_id) tells where any task is (also ones started in the web app): stage, "
     "each plan step's status, percent finished, the agents at work and their current step, the open question, credits "
-    "approved, saved work and the final summary; list_tasks lists recent tasks. list_artifacts(chat_id) lists the files a task saved (lead lists, buyer maps, enriched contacts, campaign plans) with their ids; without chat_id it lists the files of every task (search and kind narrow it), so earlier work can be reused. read_artifact(artifact_id, offset, limit) reads one's rows a page at a time, whichever task saved it. A campaign plan's steps are drafts until approved: approve_plan_steps(chat_id, plan_id) approves them, as the user does on the campaign page, so Outreach can draft or send them; call it only when you are allowed to approve the copy for the user. A run's completion event and task_status carry campaigns: per campaign plan, newest first, the email steps approved, drafted, sent, replied and bounced, and `next`, what it waits on: approve_steps, create_drafts, send (the drafts are in Gmail) or watch_replies; next.start_run is the task to pass to start_run with the same chat_id, as the campaign page's buttons do. Sending still asks send_approval first. answer also takes a chat_id, to answer a "
+    "approved, saved work and the final summary; list_tasks lists recent tasks. list_artifacts(chat_id) lists the files a task saved (lead lists, buyer maps, enriched contacts, campaign plans) with their ids; list_artifacts(agenda_id) lists the files of that agenda's tasks (search and kind narrow it), so earlier work of the same goal can be reused. read_artifact(artifact_id, chat_id or agenda_id, offset, limit) reads one's rows a page at a time; a goal never reads another agenda's files. A campaign plan's steps are drafts until approved: approve_plan_steps(chat_id, plan_id) approves them, as the user does on the campaign page, so Outreach can draft or send them; call it only when you are allowed to approve the copy for the user. A run's completion event and task_status carry campaigns: per campaign plan, newest first, the email steps approved, drafted, sent, replied and bounced, and `next`, what it waits on: approve_steps, create_drafts, send (the drafts are in Gmail) or watch_replies; next.start_run is the task to pass to start_run with the same chat_id, as the campaign page's buttons do. Sending still asks send_approval first. answer also takes a chat_id, to answer a "
     "web-app task's open question. handoffs lists replies that need a person, with Jev's reading and a drafted answer; "
     "send_handoff sends that answer in the contact's thread; sweep checks Gmail for new replies now."
 )
@@ -125,7 +125,7 @@ class HandsThread(Thread):
         self.ask_text = ""  # Omni's last verification text, or the message a stopped plan waits on
         self.plan: list[dict[str, Any]] = []  # the latest plan's steps
         self.agenda_id = ""  # Brain_Hands' agenda this run serves, echoed in every event
-        self.started_at = dt.now_iso()  # when the run began: its credits are the ones approved since
+        self.started_at = dt.now_iso()  # when the run began: its credits are the ones spent since
         self.lead_target, self.rounds, self.seen = 0, 0, 0  # leads wanted, sourcing rounds since the first, contacts seen when the round began
         self.request = ""  # what start_run asked, for the result's `task` and `about`
         self.last_event = time.monotonic()  # when the run last showed it is alive: a run quiet past QUIET_S may have ended
@@ -235,7 +235,7 @@ class HandsThread(Thread):
         """Put the lead counts on a completion. True when the lead target is not met and sourcing goes on instead: the next
         round is queued as a note, which the manager starts as the next task, and this completion is not shown."""
         tally = await leads.tally(self.chat_id, self.started_at)  # this run's contacts, not every list the chat ever saved
-        done["credits_spent"] = await needs.credits_approved(self.chat_id, self.started_at)  # across every sourcing round of the run
+        done["credits_spent"] = await credits_spent(self.chat_id, self.started_at)  # what Data Axle charged, every sourcing round of the run
         done["leads"] = {"target": self.lead_target or None, "passed": tally["passed"], "failed": tally["failed"]}
         if not self.lead_target:
             return False
@@ -316,6 +316,8 @@ async def start_run(task: str, ctx: Context, key: str = "", files: list[str] | N
         raise ValueError(f"no agent {agent}; known: {', '.join(persona_names())}")
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni"):
         raise ValueError(f"no task {chat_id}")
+    if chat_id and agenda_id and (other := await chat_agenda(chat_id)) and other != agenda_id:
+        raise ValueError(f"chat {chat_id} belongs to another agenda ({other}): start this agenda's run without its chat_id")
     chat_id = chat_id or (agenda_id and await chat_of_agenda(USER_ID, agenda_id)) or (await ChatService.create_omni_chat(USER_ID))["chat_id"]
     task_id = f"dt_{uuid.uuid4().hex[:12]}"
     key = key or task_id  # unique: a chat may hold many tasks, each told apart
@@ -730,13 +732,21 @@ async def list_tasks(limit: int = 10, active: bool = False, agenda_id: str = "")
 
 
 @mcp.tool(annotations=READ)
-async def list_artifacts(chat_id: str = "", search: str = "", kind: str = "") -> dict[str, Any]:
+async def list_artifacts(chat_id: str = "", search: str = "", kind: str = "", agenda_id: str = "") -> dict[str, Any]:
     """The files a task saved (lead lists, buyer maps, enriched contacts, campaign plans, …), newest first: id, kind,
-    title, rows, the agent that saved it and its task's chat_id. Without chat_id: the newest 50 files of every task,
-    narrowed by search (words in the title, source or id) and kind. Read one with read_artifact."""
+    title, rows, the agent that saved it and its task's chat_id. Give chat_id (that task's files) or agenda_id (the newest
+    50 files of that agenda's tasks, narrowed by search: words in the title, source or id, and kind); one is required, and
+    a goal never sees another agenda's files. Read one with read_artifact."""
+    if not (chat_id or agenda_id):
+        raise ValueError("give chat_id or agenda_id: files are listed for one task or one agenda, never for all")
     if chat_id and not await (await get_chat_repository()).get_chat(USER_ID, chat_id, "omni") and not await _is_chat(chat_id):
         raise ValueError(f"no task or chat {chat_id}")
-    found = await db_list_artifacts(chat_id) if chat_id else await find_artifacts(USER_ID, search, kind, 50)
+    if chat_id and agenda_id and await chat_agenda(chat_id) != agenda_id:
+        raise ValueError(f"chat {chat_id} is not a task of agenda {agenda_id}")
+    if chat_id:
+        found = await db_list_artifacts(chat_id)
+    else:  # shortcut: the agenda filter runs on the newest 500 of every task; a store far past that needs it in SQL
+        found = [a for a in await find_artifacts(USER_ID, search, kind, 500) if await chat_agenda(a.get("chat_id", "")) == agenda_id][:50]
     return {"chat_id": chat_id, "artifacts": [
         {"id": a["id"], "kind": a["kind"], "title": a["title"], "rows": a["row_count"], "agent": a["persona"],
          "created_at": a["created_at"], "chat_id": a.get("chat_id", chat_id)}
@@ -744,15 +754,19 @@ async def list_artifacts(chat_id: str = "", search: str = "", kind: str = "") ->
 
 
 @mcp.tool(annotations=READ)
-async def read_artifact(artifact_id: str, chat_id: str = "", offset: int = 0, limit: int = 100) -> dict[str, Any]:
+async def read_artifact(artifact_id: str, chat_id: str = "", offset: int = 0, limit: int = 100, agenda_id: str = "") -> dict[str, Any]:
     """A saved file's rows, a page at a time (limit at most 500), with its columns, row_count and meta. Page on with
-    offset until offset + len(rows) reaches row_count. Any task's file opens by its id; chat_id in the result is the
-    task that saved it."""
-    # chat_id is taken for callers that still pass it; the id alone finds the file
+    offset until offset + len(rows) reaches row_count. Give chat_id or agenda_id: a file opens only for its own task, or
+    for any task of the same agenda; chat_id in the result is the task that saved it."""
+    if not (chat_id or agenda_id):
+        raise ValueError("give chat_id or agenda_id: a file opens only for its own task or agenda")
     try:
         record, payload = await load_owned(USER_ID, artifact_id)
     except FileNotFoundError as e:
         raise ValueError(str(e)) from e
+    scope = agenda_id or await chat_agenda(chat_id)
+    if record["chat_id"] != chat_id and not (scope and await chat_agenda(record["chat_id"]) == scope):
+        raise ValueError(f"no file {artifact_id} in this task or agenda")
     rows, offset, limit = payload.get("rows", []), max(offset, 0), min(max(limit, 1), 500)
     return {"chat_id": record["chat_id"], "id": artifact_id, "kind": record["kind"], "title": record["title"],
             "columns": payload.get("columns", []), "row_count": len(rows), "offset": offset,

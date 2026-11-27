@@ -52,6 +52,8 @@ def card_of(request: dict) -> tuple[dict, str]:
     card = loads(data.get("content"))
     if not isinstance(card, dict) or not card:
         card = {"card": "text", "message": str(data.get("content") or request.get("prompt") or "")}
+    if card.get("agent") == "get_user_acceptance":
+        card = {"card": "plan_approval", **card}  # a copy: the event is not changed; the orchestrator's prompt has no card name; callers read it to answer
     return card, str(data.get("source") or "")
 
 

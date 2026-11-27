@@ -69,6 +69,18 @@ def _result_text(content: Any) -> str:
     return "\n".join(parts)
 
 
+def _charged(text: str) -> float | None:
+    """Credits a Data Axle enrichment answer charged (metadata.chargedRecords: 2 a record with an email, 1 without);
+    None for any other answer."""
+    try:
+        answer = json.loads(text)
+        charged = int(answer["metadata"]["chargedRecords"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    emails = sum(1 for r in answer.get("records") or [] if isinstance(r, dict) and (r.get("values") or {}).get("email"))
+    return float(charged + min(emails, charged))
+
+
 def _attach(files: list, folder: str) -> list[str]:
     """Copy the files a message attached into the chat's files folder; return their paths there.
 
@@ -107,6 +119,8 @@ def _routed(server: str, tool: str, ctx: ToolContext):
         try:
             text = await call_tool(server, tool, args)
             await leads.note_source(ctx.chat_id, server, text)  # Data Axle's own emails get the in-house check
+            if (credits := _charged(text)) is not None:
+                await record_spend(ctx.chat_id, tool, credits, ctx.call_id or "")
             return {"content": [{"type": "text", "text": text}]}
         except Exception as e:
             return {"content": [{"type": "text", "text": f"{tool} failed: {e}"}], "is_error": True}
@@ -298,7 +312,7 @@ class PersonaSession:
             if note:
                 notes += note
             notes += server_notes(name)  # when to call it, as the server itself publishes on initialize()
-        notes += await prefs.prompt_notes(self.context.user_id, self.persona.name)  # Settings > Memory and Agents
+        notes += await prefs.prompt_notes(self.context.user_id, self.persona.name, self.context.chat_id)  # Settings > Memory and Agents
         self._own_prompt = await prefs.agent_prompt(self.context.user_id, self.persona.name)
         api_key = settings.ANTHROPIC_API_KEY or os.environ.get("ANTHROPIC_API_KEY", "")
         model = self._model = getattr(settings, "AGENT_MODEL", None) or "claude-haiku-4-5-20251001"
@@ -355,9 +369,7 @@ class PersonaSession:
         n = len(records) if cls == "spend" and isinstance(records, list) and records else 1
         for k in (key, "*"):  # "*" = an approved send batch, whichever send tool the agent then uses
             if allowance.get(k, 0) >= n:
-                allowance[k] -= n
-                if cls == "spend":
-                    await record_spend(self.context.chat_id, short, n * 2, self.context.call_id or "")  # 2 a record: the most it takes
+                allowance[k] -= n  # what it charged is recorded from its answer (_routed)
                 return PermissionResultAllow(updated_input=input_data)
         if cls == "spend":
             # One card per batch, never one per call: the agent asks for the whole batch first.

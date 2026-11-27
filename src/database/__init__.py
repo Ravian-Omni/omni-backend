@@ -620,6 +620,11 @@ async def record_spend(chat_id: str, endpoint: str, credits: float, call_id: str
     await db.commit()
 
 
+async def credits_spent(chat_id: str, since: str) -> float:
+    cursor = await (await get_db()).execute("SELECT COALESCE(SUM(credits), 0) FROM data_spend WHERE chat_id = ? AND at >= ?", (chat_id, since))
+    return float((await cursor.fetchone())[0])
+
+
 async def note_source_emails(chat_id: str, server: str, emails: set[str]) -> None:
     db = await get_db()
     await db.executemany("INSERT OR IGNORE INTO source_emails (chat_id, email, server, seen_at) VALUES (?, ?, ?, ?)",
@@ -1205,6 +1210,7 @@ __all__ = [
     "list_task_rows",
     "note_source_emails",
     "record_spend",
+    "credits_spent",
     "source_emails",
     "was_pushed",
     "mark_pushed",

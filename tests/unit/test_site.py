@@ -29,6 +29,7 @@ def reader(temp_db, dns, monkeypatch):
     monkeypatch.setattr(site, "call_tool", call)
     monkeypatch.setattr(site, "listed_tool_names", lambda server: {"read_site", "page"} if server == "marketwatch" else set())
     monkeypatch.setattr(site, "_reads", {})
+    monkeypatch.setattr(site, "_failed", {})
     return call
 
 
@@ -53,7 +54,7 @@ def test_the_sites_people_come_back_gated_and_a_printed_email_gets_the_in_house_
     assert asyncio.run(source_emails("chat-1")) == {"ana@acme.com"}
     assert "Ignore" not in json.dumps(out)  # the page's own words never reach the agent
     args = reader.await_args.args
-    assert args[:2] == ("marketwatch", "read_site") and args[2]["url"] == "https://acme.com" and set(args[2]["fields"]) == {"name", "title", "email"}
+    assert args[:2] == ("marketwatch", "read_site") and args[2]["url"] == "https://acme.com" and set(args[2]["fields"]) == {"name", "title", "email", "company_email"}
 
 
 def test_a_named_person_is_matched_by_name_and_at_most_three_are_kept(reader, monkeypatch):
@@ -63,11 +64,29 @@ def test_a_named_person_is_matched_by_name_and_at_most_three_are_kept(reader, mo
     assert len(find(titles=["Marketing"])["contacts"]) == site.MAX_CONTACTS
 
 
+def test_a_person_without_an_address_of_their_own_gets_the_companys_inbox_at_its_domain(reader):
+    rows = [{"name": "Bo Park", "title": "CMO", "email": None, "company_email": "Info@acme.com", "source_url": "u"},
+            {"name": "Al Roe", "title": "CEO", "email": None, "company_email": "info@other.com", "source_url": "u"}]
+    reader.return_value = json.dumps({"found": True, "rows": rows})
+    [bo] = find(person="Bo Park")["contacts"]
+    assert bo["email"] == "info@acme.com" and bo["email_source"] == "website:u"
+    reader.return_value = json.dumps({"found": True, "rows": rows[1:]})
+    assert find(person="Al Roe")["contacts"][0]["email"] == ""  # an inbox at another domain is not the company's
+
+
 def test_a_run_has_a_cap_on_site_reads_and_a_failed_read_is_a_problem_not_an_error(reader):
-    reader.side_effect = ['not json', json.dumps({"found": False, "reason": "the site refused"}), json.dumps({"found": True, "rows": []})]
+    reader.side_effect = [json.dumps({"found": False, "reason": "the site refused"})] + [json.dumps({"found": True, "rows": []})] * 3
     first, second, third, fourth = (find(titles=["CMO"]) for _ in range(4))
-    assert first["problems"][0].startswith("the site read failed") and second["problems"] == ["the site names nobody: the site refused"]
+    assert first["problems"] == ["the site names nobody: the site refused"] and second["problems"] == []
     assert third["site_reads_left"] == 0 and fourth["problems"] == ["this run has used its 3 site reads"] and reader.await_count == 3
+    assert find(titles=["CMO"], max_reads=10)["site_reads_left"] == 6  # the Contact Enricher's fallback reads more
+
+
+def test_a_failed_read_ends_the_site_reader_for_the_run(reader):
+    reader.side_effect = ["MarketWatch: credit limit reached"]
+    first, second = find(titles=["CMO"], max_reads=10), find(titles=["CMO"], max_reads=10)
+    assert first["problems"][0].startswith("the site read failed") and first["site_reads_left"] == 0
+    assert second["problems"][0].startswith("the site reader is off for this run") and reader.await_count == 1
 
 
 def test_the_tool_is_built_only_when_offered(monkeypatch):

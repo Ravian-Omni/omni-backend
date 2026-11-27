@@ -1,4 +1,4 @@
-"""What Brain_Hands reads of a run: the credits it spent (every completion carries them, however they were approved) and the
+"""What Brain_Hands reads of a run: the credits it was charged (every completion carries them) and the
 campaign plan a send card belongs to."""
 
 import asyncio
@@ -9,36 +9,23 @@ import pytest
 
 from src.agent_runtime.decisions import DecisionCards
 from src.agent_runtime.tools import sales
-from src.database import answer_decision, log_decision
+from src.database import record_spend
 from src.routers import hands_mcp as hm
 from tests.unit.test_leads import tally, temp_db, thread  # noqa: F401 - the temp_db fixture
 
 SINCE = "2026-11-16T10:00:00+00:00"
 
 
-def spend(credits):
-    return {"card": "confirm_spend", "credits": credits, "count": credits}
-
-
-async def card(chat_id, credits, answer, kind="confirm_spend"):
-    decision_id = await log_decision(chat_id, None, "contact_enricher", kind, spend(credits))
-    if answer is not None:
-        await answer_decision(decision_id, answer)
-
-
-def test_a_completion_carries_the_credits_the_run_spent_by_card_or_budget(temp_db, monkeypatch):
+def test_a_completion_carries_the_credits_the_run_was_charged(temp_db, monkeypatch):
     monkeypatch.setattr(hm.leads, "tally", AsyncMock(return_value=tally(0, 0)))
 
     async def scenario():
-        await card("chat-1", 100, "yes")  # before this run began: not its credits
+        await record_spend("chat-1", "salesgenie_business_enrichment", 100)  # before this run began: not its credits
         t = thread()
         t.started_at = (await (_now())).isoformat()
-        await card("chat-1", 4, "yes")  # approved on a card
-        await card("chat-1", 6, {"action": "approve", "auto": "budget", "left": 90})  # approved by the budget
-        await card("chat-1", 50, "no")  # declined
-        await card("chat-1", 30, {"action": "abandoned"})  # never answered
-        await card("chat-1", 8, None)  # still waiting
-        await card("chat-2", 70, "yes")  # another chat
+        await record_spend("chat-1", "salesgenie_business_enrichment", 4)
+        await record_spend("chat-1", "salesgenie_business_enrichment", 6)
+        await record_spend("chat-2", "salesgenie_business_enrichment", 70)  # another chat
         await t.send_json({"type": "completion", "status": "complete"})
         return t.queue.get_nowait()
 
@@ -60,9 +47,9 @@ def test_credits_add_up_across_the_sourcing_rounds_of_one_run(temp_db, monkeypat
     async def scenario():
         t = thread()
         t.started_at = (await _now()).isoformat()
-        await card("chat-1", 5, "yes")
+        await record_spend("chat-1", "salesgenie_business_enrichment", 5)
         await t.send_json({"type": "completion", "status": "complete"})  # round one: swallowed, another round starts
-        await card("chat-1", 7, {"action": "approve", "auto": "budget", "left": 0})
+        await record_spend("chat-1", "salesgenie_business_enrichment", 7)
         await t.send_json({"type": "completion", "status": "complete"})
         return t.queue.get_nowait()
 
